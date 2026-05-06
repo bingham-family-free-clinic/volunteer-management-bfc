@@ -1035,9 +1035,6 @@ export default function VolunteerPage() {
                   }}>
                     Approved Call-Outs
                   </span>
-                  <span style={{ fontSize: '0.82rem', color: '#ef4444', fontWeight: 500 }}>
-                    {approvedCallouts.length} upcoming shift{approvedCallouts.length !== 1 ? 's' : ''} you won't be attending
-                  </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
                   {approvedCallouts.map((c, i) => (

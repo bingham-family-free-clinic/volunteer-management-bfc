@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.1",
+    "jszip": "^3.10.1",
     "next": "15.2.8",
     "react": "^18",
     "react-dom": "^18",
