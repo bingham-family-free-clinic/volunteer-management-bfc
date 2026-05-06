@@ -483,9 +483,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
     setCreatingProfile(true)
 
-    // 1. Create auth user
-    const { data: authData, error: authErr } = await supabase.auth.signUp({ email: selected.email, password: 'BFC2025!' })
-    if (authErr) { msg(authErr.message, 'error'); setCreatingProfile(false); return }
+    // 1. Create auth user via Edge Function (avoids signing the admin out)
+    const { data: fnData, error: fnErr } = await supabase.functions.invoke('create-volunteer', {
+      body: { email: selected.email, password: 'BFC2025!' },
+    })
+    if (fnErr) { msg(fnErr.message, 'error'); setCreatingProfile(false); return }
+    if (fnData?.error) { msg(fnData.error, 'error'); setCreatingProfile(false); return }
+    const authData = fnData
 
     const uid        = authData.user.id
     const isProvider = affil === 'provider'
