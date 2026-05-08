@@ -694,7 +694,7 @@ export default function DataDashboard({ supabase }) {
                 {YEARS.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
               </select>
               <select value={hoursAff} onChange={e => setHoursAff(e.target.value)} style={sel}>
-                {AFFILIATIONS.map(a => <option key={a} value={a}>{a === 'All' ? 'All affiliations' : a}</option>)}
+                {AFFILIATIONS.map(a => <option key={a} value={a}>{a === 'All' ? 'All affiliations' : a === 'provider' ? 'Clinical Care Volunteer' : a}</option>)}
               </select>
             </div>
           </div>
@@ -847,7 +847,7 @@ export default function DataDashboard({ supabase }) {
                 {YEARS.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
               </select>
               <select value={topAff} onChange={e => setTopAff(e.target.value)} style={sel}>
-                {AFFILIATIONS.map(a => <option key={a} value={a}>{a === 'All' ? 'All affiliations' : a}</option>)}
+                {AFFILIATIONS.map(a => <option key={a} value={a}>{a === 'All' ? 'All affiliations' : a === 'provider' ? 'Clinical Care Volunteer' : a}</option>)}
               </select>
             </div>
           </div>
@@ -924,7 +924,7 @@ export default function DataDashboard({ supabase }) {
                       <div>
                         <span style={{ fontWeight: 500, fontSize: '0.88rem' }}>{v.name}</span>
                         {v.affiliation && (
-                          <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>{v.affiliation}</span>
+                          <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>{v.affiliation === 'provider' ? 'Clinical Care Volunteer' : v.affiliation}</span>
                         )}
                       </div>
                       <span style={{ fontSize: '0.75rem', ...(v.smaNA ? { color: 'var(--muted)', fontStyle: 'italic' } : v.missingSma ? { color: '#ef4444', fontWeight: 600 } : { color: '#4ade80' }) }}>
