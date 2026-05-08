@@ -110,7 +110,7 @@ function ProviderCredentialsView({ vol }) {
   const fields = PROVIDER_CRED_FIELDS.map(f => ({ ...f, value: vol[f.key] || null, status: credentialStatus(vol[f.key]) }))
   return (
     <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', border: '1px solid rgba(125,211,252,0.35)', background: 'rgba(125,211,252,0.04)', gridColumn: '1 / -1' }}>
-      <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>Provider Credentials</p>
+      <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>Clinical Care Volunteers (CCV's)</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '0.6rem' }}>
         {fields.map(f => {
           const isNA = f.status === 'na'; const isMissing = f.status === 'missing'
