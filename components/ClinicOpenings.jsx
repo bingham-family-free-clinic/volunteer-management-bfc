@@ -26,25 +26,13 @@ export default function ClinicOpenings({ onClose }) {
   async function fetchOpenings() {
     setLoading(true); setError(null)
     try {
-      // CHANGE 1: added start_date, end_date to select
       const { data: rows, error: err } = await supabase
         .from('schedule')
-        .select('day_of_week, shift_time, role, volunteer_id, start_date, end_date')
+        .select('day_of_week, shift_time, role, volunteer_id')
       if (err) throw err
-
-      // CHANGE 2: date setup and helper, added before the counting loop
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const parseDate = (str) => str ? new Date(str + 'T00:00:00') : null
 
       const counts = {}
       for (const row of (rows || [])) {
-        // CHANGE 3: skip rows that aren't currently active
-        const start = parseDate(row.start_date)
-        const end   = parseDate(row.end_date)
-        if (start && start > today) continue
-        if (end   && end   < today) continue
-
         const key = `${row.day_of_week?.toLowerCase().trim()}|${row.shift_time?.toLowerCase().trim()}|${row.role}`
         if (!counts[key]) counts[key] = new Set()
         counts[key].add(row.volunteer_id)
