@@ -851,8 +851,8 @@ export default function VolunteerPage() {
   ])]
 
   const calloutSubmitDisabled = calloutMode === 'single'
-    ? (!calloutDate || !calloutShift || !calloutRole)
-    : (!calloutStartDate || !calloutEndDate)
+    ? (!calloutDate || !calloutShift || !calloutRole || !calloutReason.trim())
+    : (!calloutStartDate || !calloutEndDate || !calloutReason.trim())
 
   const TABS = [
     ['clock', 'Clock'],
@@ -1206,7 +1206,7 @@ export default function VolunteerPage() {
                   </div>
                   <p style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.5 }}>A call-out will be submitted for each of your scheduled shifts within this range. Weekends are skipped automatically.</p>
                 </>}
-                <div><label style={S.label}>Reason (optional)</label><textarea value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." style={{ ...S.input, resize: 'vertical' }} /></div>
+                <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." required style={{ ...S.input, resize: 'vertical' }} /></div>
                 <button type="submit" disabled={calloutSubmitDisabled} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#0a0f0a', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: calloutSubmitDisabled ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: calloutSubmitDisabled ? 0.5 : 1 }}>Submit Call-Out</button>
               </form>
             </div>
