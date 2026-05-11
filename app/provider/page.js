@@ -1,10 +1,11 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { SHIFTS } from '../../lib/constants'
+
 
 export const dynamic = 'force-dynamic'
 
-const SHIFTS      = ['10-2', '2-6']
 const DAYS        = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
 const DAY_LABEL   = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri' }
 const DAY_FULL    = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' }
