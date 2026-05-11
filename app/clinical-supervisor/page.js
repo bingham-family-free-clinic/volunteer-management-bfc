@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain } from '../../lib/timeUtils'
 import LunchScheduler from '../../components/LunchScheduler'
+import ProviderScheduleView from '../../components/ProviderScheduleView'
 
 function minutesSince(ts) {
   if (!ts) return null
@@ -415,7 +416,8 @@ export default function CSPage() {
             ['live', 'Live'],
             ['schedule', 'Schedule'],
             ['languages', 'Language Coverage'],
-            ['lunch', 'Lunch']
+            ['lunch', 'Lunch'],
+            ['providers', 'Providers']
           ].map(([key, label]) => (
             <button
               key={key}
@@ -543,6 +545,10 @@ export default function CSPage() {
               )
             })()}
           </div>
+        )}
+
+        {tab === 'providers' && (
+          <ProviderScheduleView supabase={supabase} />
         )}
 
         {/* ── MY SCHEDULE TAB ───────────────────────────────── */}
