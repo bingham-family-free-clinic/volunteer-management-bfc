@@ -193,7 +193,7 @@ export default function ProviderPage() {
         .eq('id', u.id)
         .single()
 
-      if (!p || p.affiliation !== 'provider') {
+      if (!p || p.default_role !== 'Provider') {
         window.location.href = '/volunteer'
         return
       }
