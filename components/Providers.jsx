@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import { getEffectiveProviders, getEffectiveProviderIds, recurringAppliesToDate } from '../../lib/scheduleUtils'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const SHIFTS     = ['10-2', '2-6']
@@ -20,7 +21,7 @@ const CRED_FIELDS = [
   { key: 'tb_exp',      label: 'TB'        },
 ]
 
-// ── Style tokens — mirrors the admin page exactly ─────────────────────────────
+// ── Style tokens ──────────────────────────────────────────────────────────────
 const card       = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
 const inputStyle = { width: '100%', padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.95rem', outline: 'none', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box' }
 const labelStyle = { display: 'block', fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }
@@ -53,6 +54,24 @@ function getMtnDateStr(offsetDays = 0) {
   return d.toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
 }
 
+function getWeekDates(weekOffset = 0) {
+  const today = new Date(getMtnDateStr() + 'T12:00:00')
+  const dow = today.getDay()
+  const diffToMonday = dow === 0 ? -6 : 1 - dow
+  const monday = new Date(today)
+  monday.setDate(today.getDate() + diffToMonday + weekOffset * 7)
+  return DAYS.map((day, i) => {
+    const d = new Date(monday)
+    d.setDate(monday.getDate() + i)
+    return {
+      day,
+      date:    d.toLocaleDateString('en-CA'),
+      display: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      dayNum:  d.getDate(),
+    }
+  })
+}
+
 function generateWeekdays(numWeeks = 10) {
   const days = []; const today = getMtnDateStr()
   const d = new Date(today + 'T12:00:00')
@@ -82,7 +101,6 @@ function groupIntoWeeks(weekdays) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-// Credential dot badge used in the slot grid
 function CredDot({ status }) {
   const color = status === 'ok' ? '#22c55e' : status === 'expiring' ? '#f97316' : status === 'na' ? '#9ca3af' : '#ef4444'
   return (
@@ -90,7 +108,6 @@ function CredDot({ status }) {
   )
 }
 
-// Slot pip (filled / empty dots) — same as provider page
 function SlotPip({ count, max = 3 }) {
   return (
     <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -101,7 +118,6 @@ function SlotPip({ count, max = 3 }) {
   )
 }
 
-// Single credential chip for the detail card
 function CredChip({ field, value }) {
   const st = credStatus(value)
   const colors = {
@@ -131,145 +147,298 @@ function CredChip({ field, value }) {
   )
 }
 
-// ── Provider Schedule View (weekly slot grid for providers) ───────────────────
+// ── Provider Schedule View — uses scheduleUtils for combined one-time + recurring ──
 function ProviderScheduleView({ supabase }) {
-  const [slotCounts, setSlotCounts]     = useState({})   // "date|shift" → count
-  const [slotNames, setSlotNames]       = useState({})   // "date|shift" → [name, ...]
-  const [weekOffset, setWeekOffset]     = useState(0)
-  const [loading, setLoading]           = useState(true)
-  const [hovered, setHovered]           = useState(null) // "date|shift"
+  const [weekOffset,    setWeekOffset]    = useState(0)
+  const [monthOffset,   setMonthOffset]   = useState(0)
+  const [viewMode,      setViewMode]      = useState('week') // 'week' | 'month'
+  const [slotData,      setSlotData]      = useState({})     // "date|shift" → Array<{id,full_name,source}>
+  const [monthData,     setMonthData]     = useState({})
+  const [loading,       setLoading]       = useState(false)
+  const [hovered,       setHovered]       = useState(null)
+  const [recurringRows, setRecurringRows] = useState(null)   // null = not yet loaded
 
-  const weeks       = groupIntoWeeks(generateWeekdays(10))
-  const visibleWeek = weeks[weekOffset] || []
+  const today     = getMtnDateStr()
+  const weekDates = getWeekDates(weekOffset)
 
+  // Load all recurring rows once
   useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const today    = getMtnDateStr()
-      const horizon  = getMtnDateStr(70)
+    async function loadRecurring() {
       const { data } = await supabase
-        .from('provider_shifts')
-        .select('shift_date, shift_time, provider_id, profiles(full_name)')
-        .gte('shift_date', today)
-        .lte('shift_date', horizon)
-      const counts = {}; const names = {}
-      ;(data || []).forEach(row => {
-        const key = `${row.shift_date}|${row.shift_time}`
-        counts[key] = (counts[key] || 0) + 1
-        if (!names[key]) names[key] = []
-        if (row.profiles?.full_name) names[key].push(row.profiles.full_name)
-      })
-      setSlotCounts(counts); setSlotNames(names); setLoading(false)
+        .from('provider_recurring_schedule')
+        .select('provider_id, day_of_week, shift_time, week_pattern, start_date, end_date, profiles!provider_recurring_schedule_provider_id_fkey(id, full_name)')
+      setRecurringRows(data || [])
     }
-    load()
+    loadRecurring()
   }, [supabase])
 
-  return (
-    <div>
-      {/* Week nav */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <button
-          onClick={() => setWeekOffset(o => Math.max(0, o - 1))}
-          disabled={weekOffset === 0}
-          style={{ ...pillBtn(false), opacity: weekOffset === 0 ? 0.4 : 1 }}
-        >← Prev</button>
-        <div style={{ textAlign: 'center' }}>
-          {visibleWeek.length > 0 && (
-            <>
-              <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-                Week of {new Date(visibleWeek[0].date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-              </p>
-              <p style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-                {weekOffset === 0 ? 'This week' : `+${weekOffset} week${weekOffset > 1 ? 's' : ''}`}
-              </p>
-            </>
-          )}
+  // Fetch week data whenever offset or recurring cache changes
+  useEffect(() => {
+    if (viewMode === 'week' && recurringRows !== null) fetchWeekData()
+  }, [weekOffset, viewMode, recurringRows]) // eslint-disable-line
+
+  // Fetch month data similarly
+  useEffect(() => {
+    if (viewMode === 'month' && recurringRows !== null) fetchMonthData()
+  }, [monthOffset, viewMode, recurringRows]) // eslint-disable-line
+
+  async function fetchWeekData() {
+    setLoading(true)
+    const from = weekDates[0].date
+    const to   = weekDates[weekDates.length - 1].date
+
+    const { data: oneTime } = await supabase
+      .from('provider_shifts')
+      .select('shift_date, shift_time, provider_id, profiles(id, full_name)')
+      .gte('shift_date', from)
+      .lte('shift_date', to)
+
+    const map = {}
+    for (const { date } of weekDates) {
+      for (const shift of SHIFTS) {
+        const providers = getEffectiveProviders(date, shift, oneTime || [], recurringRows || [])
+        if (providers.length > 0) map[`${date}|${shift}`] = providers
+      }
+    }
+    setSlotData(map)
+    setLoading(false)
+  }
+
+  async function fetchMonthData() {
+    setLoading(true)
+    const now    = new Date()
+    const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
+    const from   = target.toLocaleDateString('en-CA')
+    const to     = new Date(target.getFullYear(), target.getMonth() + 1, 0).toLocaleDateString('en-CA')
+
+    const { data: oneTime } = await supabase
+      .from('provider_shifts')
+      .select('shift_date, shift_time, provider_id, profiles(id, full_name)')
+      .gte('shift_date', from)
+      .lte('shift_date', to)
+
+    const map = {}
+    const d   = new Date(from + 'T12:00:00')
+    const end = new Date(to   + 'T12:00:00')
+    while (d <= end) {
+      const dow = d.getDay()
+      if (dow >= 1 && dow <= 5) {
+        const dateStr = d.toLocaleDateString('en-CA')
+        for (const shift of SHIFTS) {
+          const providers = getEffectiveProviders(dateStr, shift, oneTime || [], recurringRows || [])
+          if (providers.length > 0) map[`${dateStr}|${shift}`] = providers
+        }
+      }
+      d.setDate(d.getDate() + 1)
+    }
+    setMonthData(map)
+    setLoading(false)
+  }
+
+  function getMonthCalendarDays() {
+    const now    = new Date()
+    const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
+    const year   = target.getFullYear()
+    const month  = target.getMonth()
+    const firstDow    = new Date(year, month, 1).getDay()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const startPad    = firstDow === 0 ? 6 : firstDow - 1
+    const cells = []
+    for (let i = 0; i < startPad; i++) cells.push(null)
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day)
+      const dow  = date.getDay()
+      cells.push({
+        date: date.toLocaleDateString('en-CA'),
+        day:  ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][dow],
+        num:  day,
+        isWeekend: dow === 0 || dow === 6,
+      })
+    }
+    return { cells, label: target.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }
+  }
+
+  // Coverage cell shared between week and month views
+  function CoverageCell({ cellKey, slim = false }) {
+    const data      = (viewMode === 'week' ? slotData : monthData)[cellKey] || []
+    const count     = data.length
+    const isHovered = hovered === cellKey
+    const isEmpty   = count === 0
+    const isFull    = count >= 3
+
+    return (
+      <div
+        onMouseEnter={() => setHovered(cellKey)}
+        onMouseLeave={() => setHovered(null)}
+        style={{
+          position: 'relative',
+          padding: slim ? '0.3rem 0.25rem' : '0.5rem 0.35rem',
+          borderRadius: '8px',
+          border: `1px solid ${isFull ? 'rgba(2,65,107,0.4)' : isEmpty ? 'var(--border)' : 'rgba(2,65,107,0.25)'}`,
+          background: isFull ? 'rgba(2,65,107,0.1)' : isEmpty ? 'transparent' : 'rgba(2,65,107,0.05)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.2rem',
+          minHeight: slim ? '36px' : '52px',
+          transition: 'background 0.15s, border-color 0.15s',
+        }}
+      >
+        <div style={{ display: 'flex', gap: '3px' }}>
+          {[0,1,2].map(i => (
+            <div key={i} style={{ width: slim ? '5px' : '6px', height: slim ? '5px' : '6px', borderRadius: '50%', background: i < count ? 'var(--accent)' : 'var(--border)' }} />
+          ))}
         </div>
-        <button
-          onClick={() => setWeekOffset(o => Math.min(weeks.length - 1, o + 1))}
-          disabled={weekOffset >= weeks.length - 1}
-          style={{ ...pillBtn(false), opacity: weekOffset >= weeks.length - 1 ? 0.4 : 1 }}
-        >Next →</button>
-      </div>
+        {!slim && (
+          <span style={{ fontSize: '0.62rem', fontFamily: 'DM Mono, monospace', color: isEmpty ? 'var(--border)' : 'var(--accent)', fontWeight: isEmpty ? 400 : 600 }}>
+            {count}/3
+          </span>
+        )}
 
-      {loading ? (
-        <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Loading schedule…</p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '72px repeat(5, 1fr)', gap: '0.4rem', minWidth: 420 }}>
-            {/* Header row */}
-            <div />
-            {DAYS.map(day => {
-              const cell = visibleWeek.find(d => d.day === day)
-              return (
-                <div key={day} style={{ textAlign: 'center' }}>
-                  <p style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{DAY_LABEL[day]}</p>
-                  {cell && (
-                    <p style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.85rem', fontWeight: 600 }}>
-                      {new Date(cell.date + 'T12:00:00').getDate()}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
-
-            {/* Shift rows */}
-            {SHIFTS.map(shift => (
-              <>
-                <div key={shift + '-label'} style={{ display: 'flex', alignItems: 'center' }}>
-                  <p style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600 }}>{shift}</p>
-                </div>
-                {DAYS.map(day => {
-                  const cell  = visibleWeek.find(d => d.day === day)
-                  if (!cell)  return <div key={day} />
-                  const key   = `${cell.date}|${shift}`
-                  const count = slotCounts[key] || 0
-                  const names = slotNames[key]  || []
-                  const isHov = hovered === key
-                  return (
-                    <div
-                      key={day}
-                      onMouseEnter={() => setHovered(key)}
-                      onMouseLeave={() => setHovered(null)}
-                      style={{ position: 'relative', padding: '0.5rem 0.3rem', borderRadius: '8px', border: count > 0 ? '1px solid rgba(2,65,107,0.35)' : '1px dashed var(--border)', background: count > 0 ? 'rgba(2,65,107,0.07)' : 'transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', cursor: count > 0 ? 'default' : 'default', transition: 'background 0.15s' }}
-                    >
-                      <SlotPip count={count} />
-                      <span style={{ fontSize: '0.65rem', color: count > 0 ? 'var(--accent)' : 'var(--muted)', fontFamily: 'DM Mono, monospace', fontWeight: count > 0 ? 600 : 400 }}>
-                        {count === 0 ? 'open' : `${count}/3`}
-                      </span>
-                      {/* Tooltip */}
-                      {isHov && names.length > 0 && (
-                        <div style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.5rem 0.75rem', zIndex: 20, whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', pointerEvents: 'none' }}>
-                          {names.map(n => (
-                            <p key={n} style={{ fontSize: '0.78rem', color: 'var(--text)', fontWeight: 500 }}>{n}</p>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </>
+        {/* Tooltip — shows name + recurring badge */}
+        {isHovered && count > 0 && (
+          <div style={{
+            position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)',
+            background: 'var(--surface)', border: '1px solid var(--accent)', borderRadius: '8px',
+            padding: '0.5rem 0.75rem', zIndex: 50, minWidth: '160px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.2)', pointerEvents: 'none',
+          }}>
+            {data.map(p => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{p.full_name}</p>
+                {p.source === 'recurring' && (
+                  <span style={{ fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '4px', background: 'rgba(96,165,250,0.12)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)', whiteSpace: 'nowrap' }}>↻</span>
+                )}
+              </div>
             ))}
           </div>
+        )}
+      </div>
+    )
+  }
 
-          {/* Legend */}
-          <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <SlotPip count={2} />
-              <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>Provider count (hover to see names)</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <div style={{ width: 14, height: 14, borderRadius: '4px', border: '1px dashed var(--border)' }} />
-              <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>No coverage</span>
-            </div>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+      {/* View mode + navigation controls */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={() => setViewMode('week')}  style={pillBtn(viewMode === 'week')}>Week</button>
+          <button onClick={() => setViewMode('month')} style={pillBtn(viewMode === 'month')}>Month</button>
+        </div>
+
+        {viewMode === 'week' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button onClick={() => setWeekOffset(o => o - 1)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.3rem 0.75rem', cursor: 'pointer', fontSize: '0.85rem' }}>←</button>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', minWidth: '160px', textAlign: 'center' }}>
+              {weekDates[0]?.display} – {weekDates[4]?.display}
+              {weekOffset === 0 && <span style={{ marginLeft: '0.4rem', fontSize: '0.72rem', color: 'var(--accent)', fontWeight: 500 }}>This week</span>}
+            </span>
+            <button onClick={() => setWeekOffset(o => o + 1)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.3rem 0.75rem', cursor: 'pointer', fontSize: '0.85rem' }}>→</button>
           </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button onClick={() => setMonthOffset(o => o - 1)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.3rem 0.75rem', cursor: 'pointer', fontSize: '0.85rem' }}>←</button>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', minWidth: '140px', textAlign: 'center' }}>{getMonthCalendarDays().label}</span>
+            <button onClick={() => setMonthOffset(o => o + 1)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.3rem 0.75rem', cursor: 'pointer', fontSize: '0.85rem' }}>→</button>
+          </div>
+        )}
+      </div>
+
+      {/* Week grid */}
+      {viewMode === 'week' && (
+        <div>
+          {loading ? (
+            <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Loading schedule…</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {/* Header */}
+              <div style={{ display: 'grid', gridTemplateColumns: '70px repeat(5, 1fr)', gap: '0.4rem', marginBottom: '0.25rem' }}>
+                <div />
+                {weekDates.map(d => (
+                  <div key={d.date} style={{ textAlign: 'center' }}>
+                    <p style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{DAY_LABEL[d.day]}</p>
+                    <p style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.9rem', fontWeight: 700, color: d.date === today ? 'var(--accent)' : 'var(--text)' }}>{d.dayNum}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Shift rows */}
+              {SHIFTS.map(shift => (
+                <div key={shift} style={{ display: 'grid', gridTemplateColumns: '70px repeat(5, 1fr)', gap: '0.4rem', alignItems: 'center' }}>
+                  <p style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600 }}>{shift}</p>
+                  {weekDates.map(d => <CoverageCell key={d.date} cellKey={`${d.date}|${shift}`} />)}
+                </div>
+              ))}
+
+              {/* Legend */}
+              <div style={{ display: 'flex', gap: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                {[{ label: 'No coverage', dots: 0 }, { label: 'Partial', dots: 1 }, { label: 'Full (3/3)', dots: 3 }].map(item => (
+                  <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <div style={{ display: 'flex', gap: '2px' }}>
+                      {[0,1,2].map(i => <div key={i} style={{ width: '6px', height: '6px', borderRadius: '50%', background: i < item.dots ? 'var(--accent)' : 'var(--border)' }} />)}
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{item.label}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span style={{ fontSize: '0.72rem', padding: '0.05rem 0.3rem', borderRadius: '4px', background: 'rgba(96,165,250,0.12)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)' }}>↻</span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>Recurring provider (hover to see names)</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Month grid */}
+      {viewMode === 'month' && (() => {
+        const { cells } = getMonthCalendarDays()
+        return (
+          <div>
+            {loading ? (
+              <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Loading schedule…</p>
+            ) : (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.35rem', marginBottom: '0.5rem' }}>
+                  {['Mon','Tue','Wed','Thu','Fri'].map(d => (
+                    <p key={d} style={{ textAlign: 'center', fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{d}</p>
+                  ))}
+                </div>
+                {(() => {
+                  const weekdayCells = cells.filter(c => !c?.isWeekend)
+                  const byWeek = {}
+                  weekdayCells.forEach(c => {
+                    if (!c) return
+                    const d   = new Date(c.date + 'T12:00:00')
+                    const mon = new Date(d); mon.setDate(d.getDate() - (d.getDay() - 1))
+                    const key = mon.toLocaleDateString('en-CA')
+                    if (!byWeek[key]) byWeek[key] = []
+                    byWeek[key].push(c)
+                  })
+                  return Object.entries(byWeek).map(([weekKey, dayCells]) => (
+                    <div key={weekKey} style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.35rem', marginBottom: '0.35rem' }}>
+                      {DAYS.map(day => {
+                        const cell = dayCells.find(c => c.day === day)
+                        if (!cell) return <div key={day} />
+                        const isToday = cell.date === today
+                        return (
+                          <div key={day} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                            <p style={{ fontSize: '0.72rem', fontFamily: 'DM Mono, monospace', fontWeight: isToday ? 700 : 400, color: isToday ? 'var(--accent)' : 'var(--muted)', textAlign: 'center' }}>{cell.num}</p>
+                            {SHIFTS.map(shift => <CoverageCell key={shift} cellKey={`${cell.date}|${shift}`} slim />)}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ))
+                })()}
+              </div>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
 
-// ── Credential Banner (extracted from admin page) ─────────────────────────────
+// ── Credential Banner ─────────────────────────────────────────────────────────
 function CredentialBanner({ providers, onSelect }) {
   const [open, setOpen] = useState(true)
 
@@ -342,9 +511,9 @@ function CredentialBanner({ providers, onSelect }) {
 
 // ── Recurring slot management ─────────────────────────────────────────────────
 function RecurringSlotManager({ supabase, providers, onToast }) {
-  const [recurringRows, setRecurringRows] = useState([])  // all recurring rows
+  const [recurringRows, setRecurringRows] = useState([])
   const [loading, setLoading]             = useState(true)
-  const [addingFor, setAddingFor]         = useState(null) // provider id being assigned
+  const [addingFor, setAddingFor]         = useState(null)
   const [form, setForm]                   = useState({ day_of_week: 'monday', shift_time: '10-2', week_pattern: 'every', start_date: '', end_date: '' })
   const [saving, setSaving]               = useState(false)
   const [removing, setRemoving]           = useState(null)
@@ -400,7 +569,6 @@ function RecurringSlotManager({ supabase, providers, onToast }) {
     return true
   })
 
-  // Group by day → shift for display
   const grouped = {}
   filtered.forEach(r => {
     const k = `${r.day_of_week}|${r.shift_time}`
@@ -528,14 +696,12 @@ function RecurringSlotManager({ supabase, providers, onToast }) {
                 const [day, shift] = key.split('|')
                 return (
                   <div key={key} style={{ borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg)', overflow: 'hidden' }}>
-                    {/* Slot header */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.55rem 0.9rem', background: 'rgba(2,65,107,0.05)', borderBottom: '1px solid var(--border)' }}>
                       <span style={{ fontWeight: 600, fontSize: '0.85rem', textTransform: 'capitalize' }}>{day}</span>
                       <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.78rem', background: 'rgba(2,65,107,0.12)', color: 'var(--accent)', padding: '0.1rem 0.45rem', borderRadius: '6px', border: '1px solid rgba(2,65,107,0.3)' }}>{shift}</span>
                       <SlotPip count={rows.length} max={3} />
                       <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{rows.length}/3</span>
                     </div>
-                    {/* Provider rows */}
                     {rows.map(r => (
                       <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.9rem', borderBottom: '1px solid var(--border)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
@@ -572,16 +738,14 @@ function RecurringSlotManager({ supabase, providers, onToast }) {
   )
 }
 
-// ── Provider detail card (read-only, inline) ──────────────────────────────────
+// ── Provider detail card ──────────────────────────────────────────────────────
 function ProviderCard({ provider, onClose }) {
   return (
     <div style={{ borderRadius: '12px', border: '1px solid rgba(125,211,252,0.4)', background: 'rgba(125,211,252,0.03)', padding: '1.25rem', position: 'relative' }}>
       <button
         onClick={onClose}
         style={{ position: 'absolute', top: '0.85rem', right: '0.85rem', background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}
-      >
-        ✕
-      </button>
+      >✕</button>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
         <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'rgba(2,65,107,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.1rem', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.3)', flexShrink: 0 }}>
@@ -594,13 +758,11 @@ function ProviderCard({ provider, onClose }) {
         </div>
       </div>
 
-      {/* Credentials grid */}
       <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.6rem' }}>Credentials</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '0.5rem' }}>
         {CRED_FIELDS.map(f => <CredChip key={f.key} field={f} value={provider[f.key]} />)}
       </div>
 
-      {/* Extra info */}
       {(provider.credentials || provider.languages || provider.default_role) && (
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.85rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border)' }}>
           {provider.credentials && (
@@ -618,7 +780,7 @@ function ProviderCard({ provider, onClose }) {
   )
 }
 
-// ── Section wrapper with collapse toggle ──────────────────────────────────────
+// ── Section wrapper ───────────────────────────────────────────────────────────
 function Section({ title, subtitle, defaultOpen = true, badge, children }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -651,7 +813,7 @@ function Section({ title, subtitle, defaultOpen = true, badge, children }) {
 export default function Providers({ supabase }) {
   const [providers, setProviders]     = useState([])
   const [loading, setLoading]         = useState(true)
-  const [selectedId, setSelectedId]   = useState(null)  // expanded provider detail
+  const [selectedId, setSelectedId]   = useState(null)
   const [toast, setToast]             = useState(null)
   const [scheduleTab, setScheduleTab] = useState('grid') // 'grid' | 'recurring'
 
@@ -675,11 +837,6 @@ export default function Providers({ supabase }) {
 
   const selectedProvider = providers.find(p => p.id === selectedId) || null
 
-  // Overall cred health for the summary bar
-  const withIssues = providers.filter(p =>
-    CRED_FIELDS.some(f => { const s = credStatus(p[f.key]); return s === 'expired' || s === 'missing' || s === 'expiring' })
-  )
-
   if (loading) return <p style={{ color: 'var(--muted)', padding: '1rem' }}>Loading providers…</p>
 
   if (providers.length === 0) return (
@@ -697,7 +854,6 @@ export default function Providers({ supabase }) {
         onSelect={p => setSelectedId(id => id === p.id ? null : p.id)}
       />
 
-      {/* Expanded detail card (shown inline when a provider name is clicked) */}
       {selectedProvider && (
         <ProviderCard
           provider={selectedProvider}
@@ -706,7 +862,7 @@ export default function Providers({ supabase }) {
       )}
 
       {/* ── 2. Schedule ──────────────────────────────────────────────────── */}
-      <Section title="Provider Schedule" subtitle="Who's covering which shifts, and recurring slot assignments">
+      <Section title="Provider Schedule" subtitle="Who's covering which shifts, including recurring assignments">
         {/* Sub-tabs */}
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
           <button onClick={() => setScheduleTab('grid')}      style={pillBtn(scheduleTab === 'grid')}>Weekly Grid</button>
@@ -748,7 +904,6 @@ export default function Providers({ supabase }) {
                   onMouseEnter={e => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--accent)' }}
                   onMouseLeave={e => { if (!isSelected) e.currentTarget.style.borderColor = rowBorder }}
                 >
-                  {/* Avatar + name */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
                     <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(2,65,107,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.9rem', color: 'var(--accent)', flexShrink: 0 }}>
                       {p.full_name?.charAt(0)}
@@ -758,8 +913,6 @@ export default function Providers({ supabase }) {
                       <p style={{ fontSize: '0.75rem', color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.email}</p>
                     </div>
                   </div>
-
-                  {/* Cred dots + chevron */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
                     <div style={{ display: 'flex', gap: '4px' }}>
                       {CRED_FIELDS.map(f => <CredDot key={f.key} status={credStatus(p[f.key])} />)}
@@ -773,7 +926,6 @@ export default function Providers({ supabase }) {
                   </div>
                 </div>
 
-                {/* Inline expanded detail */}
                 {isSelected && (
                   <div style={{ marginTop: '0.4rem' }}>
                     <ProviderCard provider={p} onClose={() => setSelectedId(null)} />
