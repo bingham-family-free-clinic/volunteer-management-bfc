@@ -271,7 +271,7 @@ function ProviderScheduleView({ supabase }) {
 
 // ── Credential Banner (extracted from admin page) ─────────────────────────────
 function CredentialBanner({ providers, onSelect }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
 
   const flagged  = providers.flatMap(v => CRED_FIELDS.map(f => ({ ...f, vol: v, status: credStatus(v[f.key]) })).filter(f => f.status === 'expired' || f.status === 'missing'))
   const expiring = providers.flatMap(v => CRED_FIELDS.map(f => ({ ...f, vol: v, status: credStatus(v[f.key]) })).filter(f => f.status === 'expiring'))
