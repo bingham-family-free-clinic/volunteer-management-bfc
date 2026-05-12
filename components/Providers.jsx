@@ -868,7 +868,22 @@ export default function Providers({ supabase }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-
+      {/* Testing Banner */}
+      <div
+        style={{
+          background: '#fef3c7',
+          border: '1px solid #f59e0b',
+          color: '#92400e',
+          padding: '0.75rem 1rem',
+          borderRadius: '10px',
+          fontWeight: 700,
+          textAlign: 'center',
+          fontSize: '0.9rem',
+        }}
+      >
+      Please Ignore — In Testing
+    </div>
+      
       {/* ── 1. Credential Status Banner ──────────────────────────────────── */}
       <CredentialBanner
         providers={providers}
