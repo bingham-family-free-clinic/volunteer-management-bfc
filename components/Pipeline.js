@@ -562,7 +562,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSelected(a)
     setOnboardStep(1)
     setChecklist(EMPTY_CHECKLIST)
-    setInterviewDate(''); setInterviewTime('')
+    setInterviewDate(new Date().toISOString().slice(0, 10)); setInterviewTime('')
 
     const affiliData = a.onboard_affil_data || {}
     setOnboardForm({
