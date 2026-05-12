@@ -1269,7 +1269,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                               <span style={{ fontSize: '0.72rem', color: C.warn, fontWeight: 600 }}>{interviewLabel}</span>
                             )}
                             {a.resume_url && (
-                              <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontWeight: 600 }}>résumé</span>
+                              <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontWeight: 600 }}>resume</span>
                             )}
                             {a.stage === 'onboarding' && (
                               <span style={{ display: 'flex', gap: '0.2rem' }}>
