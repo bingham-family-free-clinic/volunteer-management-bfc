@@ -237,16 +237,22 @@ export default function ProviderPage() {
     const today   = getMountainDateStr()
     const horizon = getMountainDateStr(70) // 10 weeks
 
-    const [{ data: oneTimeShifts }, { data: allRecurring }] = await Promise.all([
+    const [{ data: oneTimeShifts }, { data: allRecurring }, { data: allCallouts }] = await Promise.all([
       supabase.from('provider_shifts')
         .select('shift_date, shift_time, provider_id')
         .gte('shift_date', today).lte('shift_date', horizon),
       supabase.from('provider_recurring_schedule')
         .select('provider_id, day_of_week, shift_time, week_pattern, start_date, end_date'),
+      // Fetch all callouts in range so called-out recurring providers are excluded
+      // from coverage counts and from the current provider's "my slots" set.
+      supabase.from('provider_callouts')
+        .select('provider_id, shift_date, shift_time')
+        .gte('shift_date', today).lte('shift_date', horizon),
     ])
 
     const ot = oneTimeShifts || []
     const rc = allRecurring  || []
+    const co = allCallouts   || []
 
     const counts      = {}
     const mine        = new Set()
@@ -254,7 +260,8 @@ export default function ProviderPage() {
 
     for (const { date } of generateUpcomingWeekdays(10)) {
       for (const shift of SHIFTS) {
-        const ids = getEffectiveProviderIds(date, shift, ot, rc)
+        // Pass callouts so called-out providers are excluded from effective coverage
+        const ids = getEffectiveProviderIds(date, shift, ot, rc, co)
         const key = `${date}|${shift}`
         if (ids.size > 0) counts[key] = ids.size
         if (ids.has(uid)) {
