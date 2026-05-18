@@ -168,6 +168,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [savingInterview, setSavingInterview] = useState(false)
   const [creatingProfile, setCreatingProfile] = useState(false)
 
+  // Parking pass modal state
+  // context: { applicantId, applicantName, isRecent } — isRecent=true when opened from Recently Added
+  const [parkingPassModal,  setParkingPassModal]  = useState(null)
+  const [parkingPassSaving, setParkingPassSaving] = useState(false)
+  const parkingPassIframeRef = useRef(null)
+
   // Recently Added state
   const [recentChecklist,    setRecentChecklist]    = useState({})
   const [recentUploadingKey, setRecentUploadingKey] = useState(null)
@@ -204,6 +210,76 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [toast, setToast] = useState(null)
 
   useEffect(() => { loadAll() }, [])
+
+  // ─── Parking pass PDF listener ────────────────────────────────────────────
+  useEffect(() => {
+    async function onMessage(e) {
+      if (!e.data || e.data.type !== 'parking_pass_pdf') return
+      if (!parkingPassModal) return
+
+      const { base64, volunteer_name, pass_number, date_issued } = e.data
+      const { applicantId, isRecent } = parkingPassModal
+
+      setParkingPassSaving(true)
+      try {
+        // Convert base64 → Blob
+        const byteChars  = atob(base64)
+        const byteNums   = new Array(byteChars.length)
+        for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i)
+        const blob       = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' })
+        const filename   = `${applicantId}/parking_pass-${Date.now()}.pdf`
+
+        const { error: upErr } = await supabase.storage
+          .from('onboarding-parking-passes').upload(filename, blob, { contentType: 'application/pdf', upsert: true })
+
+        if (upErr) {
+          msg(upErr.message, 'error')
+          parkingPassIframeRef.current?.contentWindow?.postMessage(
+            { type: 'parking_pass_error', message: upErr.message }, '*'
+          )
+          setParkingPassSaving(false)
+          return
+        }
+
+        // Update checklist row
+        const updater = isRecent
+          ? (prev) => {
+              const existing = prev[applicantId] || { ...EMPTY_CHECKLIST }
+              return { ...prev, [applicantId]: { ...existing, parking_pass: true, parking_pass_url: filename } }
+            }
+          : null
+
+        if (isRecent && updater) {
+          const existing = recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }
+          const next     = { ...existing, parking_pass: true, parking_pass_url: filename }
+          setRecentChecklist(prev => ({ ...prev, [applicantId]: next }))
+          await supabase.from('onboarding_checklists')
+            .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
+        } else {
+          const next = { ...checklist, parking_pass: true, parking_pass_url: filename }
+          setChecklist(next)
+          await supabase.from('onboarding_checklists')
+            .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
+        }
+
+        await audit('parking_pass_generated', 'applicant', applicantId, volunteer_name,
+          `Pass #${pass_number || '—'}, issued ${date_issued}`)
+
+        parkingPassIframeRef.current?.contentWindow?.postMessage({ type: 'parking_pass_saved' }, '*')
+        msg('Parking pass PDF saved')
+        setParkingPassModal(null)
+      } catch (err) {
+        msg(err.message || 'Upload failed', 'error')
+        parkingPassIframeRef.current?.contentWindow?.postMessage(
+          { type: 'parking_pass_error', message: err.message }, '*'
+        )
+      }
+      setParkingPassSaving(false)
+    }
+
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [parkingPassModal, checklist, recentChecklist])
 
   // ─── Loaders ──────────────────────────────────────────────────────────────
 
@@ -799,6 +875,88 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     }
   }
 
+  // ─── Parking pass modal helpers ───────────────────────────────────────────
+
+  function openParkingPassModal(applicantId, applicantName, isRecent = false) {
+    setParkingPassModal({ applicantId, applicantName, isRecent })
+    setParkingPassSaving(false)
+  }
+
+  function ParkingPassModal() {
+    if (!parkingPassModal) return null
+    const { applicantName } = parkingPassModal
+
+    // Build the iframe src — parking_pass.html lives in /public alongside the app
+    const today  = new Date().toISOString().slice(0, 10)
+    const params = new URLSearchParams({
+      name: applicantName || '',
+      date: today,
+    })
+    const src = `/parking_pass.html?${params.toString()}`
+
+    return (
+      <div
+        style={{
+          position: 'fixed', inset: 0, zIndex: 200,
+          background: 'rgba(2,30,55,0.55)', backdropFilter: 'blur(3px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '1.5rem',
+        }}
+        onClick={e => { if (e.target === e.currentTarget) setParkingPassModal(null) }}
+      >
+        <div style={{
+          background: 'var(--surface)', borderRadius: '14px',
+          border: '1px solid var(--border)', boxShadow: '0 8px 48px rgba(2,65,107,0.22)',
+          width: '100%', maxWidth: 600, maxHeight: '92vh',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+          {/* Modal header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0.85rem 1.25rem',
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--bg)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: C.primary, fontFamily: 'DM Sans, sans-serif', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Parking Pass
+              </span>
+              {applicantName && (
+                <span style={{ fontSize: '0.82rem', color: 'var(--muted)', fontFamily: 'DM Sans, sans-serif' }}>
+                  — {applicantName}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              {parkingPassSaving && (
+                <span style={{ fontSize: '0.78rem', color: C.blue, fontStyle: 'italic', fontFamily: 'DM Sans, sans-serif' }}>
+                  Saving PDF…
+                </span>
+              )}
+              <button
+                onClick={() => setParkingPassModal(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1, padding: '0.1rem 0.3rem' }}
+                title="Close"
+              >×</button>
+            </div>
+          </div>
+
+          {/* Iframe */}
+          <iframe
+            ref={parkingPassIframeRef}
+            src={src}
+            title="Volunteer Parking Pass"
+            style={{
+              flex: 1, border: 'none', minHeight: 580,
+              background: '#f9fafb',
+            }}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+        </div>
+      </div>
+    )
+  }
+
   // ─────────────────────────── RECENTLY ADDED ───────────────────────────────
 
   function RecentlyAdded() {
@@ -889,6 +1047,36 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                     </div>
 
                     {FILE_CHECKLIST_ITEMS.map(item => {
+                      // Parking pass: open the HTML form modal instead of a file upload
+                      if (item.key === 'parking_pass') {
+                        const hasPdf = !!(cl[item.urlKey])
+                        return (
+                          <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 0.9rem', borderRadius: '8px', background: hasPdf ? C.blue + '0a' : 'var(--bg)', border: `1px solid ${hasPdf ? C.blue + '44' : 'var(--border)'}`, gap: '0.75rem', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
+                              <div style={{ width: 18, height: 18, borderRadius: '4px', flexShrink: 0, background: hasPdf ? C.blue : 'transparent', border: `2px solid ${hasPdf ? C.blue : 'var(--border)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {hasPdf && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                              </div>
+                              <span style={{ fontSize: '0.85rem', fontWeight: hasPdf ? 600 : 400, color: hasPdf ? 'var(--text)' : 'var(--muted)' }}>
+                                Parking Pass
+                              </span>
+                              {hasPdf && <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600, flexShrink: 0 }}>PDF saved</span>}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
+                              {hasPdf && (
+                                <button
+                                  onClick={() => openFile('onboarding-parking-passes', cl[item.urlKey])}
+                                  style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}
+                                >View ↗</button>
+                              )}
+                              <button
+                                onClick={() => openParkingPassModal(a.id, a.full_name, true)}
+                                style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+                              >{hasPdf ? 'Re-issue' : '+ Fill Out Pass'}</button>
+                            </div>
+                          </div>
+                        )
+                      }
+
                       const hasFile   = !!(cl[item.urlKey])
                       const uploadKey = `${a.id}-${item.key}`
                       const isUploading = recentUploadingKey === uploadKey
@@ -1188,6 +1376,37 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       </div>
                     )
                   })}
+
+                  {/* ── Parking Pass row — opens the form modal ── */}
+                  {(() => {
+                    const hasPdf = !!(checklist.parking_pass_url)
+                    return (
+                      <div style={{ padding: '0.85rem 1rem', borderRadius: '10px', border: `1px solid ${hasPdf ? C.blue + '55' : 'var(--border)'}`, background: hasPdf ? C.blue + '08' : 'var(--bg)', transition: 'all 0.15s' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                          <div style={{ width: 20, height: 20, borderRadius: '5px', flexShrink: 0, border: `2px solid ${hasPdf ? C.blue : 'var(--border)'}`, background: hasPdf ? C.blue : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {hasPdf && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7L10 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                          </div>
+                          <span style={{ fontSize: '0.9rem', fontWeight: hasPdf ? 600 : 400, color: hasPdf ? 'var(--text)' : 'var(--muted)', flex: 1 }}>
+                            Parking Pass
+                          </span>
+                          {hasPdf && <span style={{ fontSize: '0.72rem', color: C.blue, fontWeight: 600 }}>Complete</span>}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem' }}>
+                          {hasPdf && (
+                            <button
+                              onClick={() => openFile('onboarding-parking-passes', checklist.parking_pass_url)}
+                              style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}
+                            >View PDF</button>
+                          )}
+                          <button
+                            onClick={() => openParkingPassModal(applicant.id, applicant.full_name, false)}
+                            style={{ padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+                          >{hasPdf ? 'Re-issue Pass' : '+ Fill Out Pass'}</button>
+                          <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.6, fontFamily: 'DM Mono, monospace' }}>Generates &amp; saves PDF</span>
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   <button onClick={() => setOnboardStep(4)} style={ghostBtn()}>Back</button>
@@ -1228,6 +1447,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       <div style={{ position: 'relative' }}>
         <ApplicantDetail applicant={selected} />
         {toast && <Toast toast={toast} />}
+        <ParkingPassModal />
       </div>
     )
   }
@@ -1330,6 +1550,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       {activeTab === 'recent' && <RecentlyAdded />}
 
       {toast && <Toast toast={toast} />}
+
+      <ParkingPassModal />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>

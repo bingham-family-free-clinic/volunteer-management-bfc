@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Volunteer Parking Pass — Bingham Family Free Clinic</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:  #02416b;
+      --mid:   #0369a1;
+      --ink:   #1a2433;
+      --body:  #2d3a48;
+      --muted: #5a6a7a;
+      --rule:  #c8d8e8;
+      --bg:    #f9fafb;
+      --white: #ffffff;
+    }
+
+    html { background: var(--bg); }
+
+    body {
+      font-family: 'EB Garamond', 'Georgia', serif;
+      font-size: 11.5pt;
+      line-height: 1.75;
+      color: var(--body);
+      background: var(--bg);
+      padding: 2rem 1rem 4rem;
+    }
+
+    .page {
+      max-width: 520px;
+      margin: 0 auto;
+      background: var(--white);
+      border: 1px solid var(--rule);
+      border-top: 4px solid var(--navy);
+      box-shadow: 0 2px 24px rgba(2,65,107,0.07);
+      padding: 2.75rem 3rem;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      padding-bottom: 1.5rem;
+      margin-bottom: 1.75rem;
+      border-bottom: 1.5px solid var(--rule);
+    }
+    .clinic-name {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 10pt;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--navy);
+      margin-bottom: 0.5rem;
+    }
+    .doc-title {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 17pt;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.25;
+      margin-bottom: 0.25rem;
+    }
+    .doc-subtitle {
+      font-size: 10pt;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      font-style: italic;
+    }
+
+    /* Pass number badge */
+    .pass-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      margin: 1.5rem 0 1.75rem;
+    }
+    .pass-badge-label {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 8.5pt;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .pass-badge-number {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 22pt;
+      font-weight: 700;
+      color: var(--navy);
+      background: #eef5fb;
+      border: 1.5px solid var(--rule);
+      border-radius: 4px;
+      padding: 0.2rem 1.1rem;
+      letter-spacing: 0.08em;
+      min-width: 120px;
+      text-align: center;
+    }
+    .pass-badge-number input {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 22pt;
+      font-weight: 700;
+      color: var(--navy);
+      background: transparent;
+      border: none;
+      outline: none;
+      width: 120px;
+      text-align: center;
+      letter-spacing: 0.08em;
+    }
+    .pass-badge-number input::placeholder { color: var(--rule); font-weight: 400; }
+
+    /* Section title */
+    .section-title {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--navy);
+      border-bottom: 1px solid var(--rule);
+      padding-bottom: 0.3rem;
+      margin-bottom: 1rem;
+    }
+
+    /* Fields */
+    .fields { display: flex; flex-direction: column; gap: 1.1rem; margin-bottom: 1.75rem; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field.full { grid-column: 1 / -1; }
+    .field-label {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 8.5pt;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .field-input {
+      font-family: 'EB Garamond', serif;
+      font-size: 12pt;
+      color: var(--ink);
+      background: transparent;
+      border: none;
+      border-bottom: 1.5px solid var(--ink);
+      padding: 0.2rem 0.1rem;
+      outline: none;
+      width: 100%;
+    }
+    .field-input:focus { border-bottom-color: var(--mid); }
+    .field-input[readonly] { color: var(--muted); border-bottom-style: dashed; cursor: default; }
+
+    /* Agreement box */
+    .agreement {
+      background: #f0f6fb;
+      border: 1px solid var(--rule);
+      border-left: 3px solid var(--navy);
+      padding: 0.9rem 1.1rem;
+      margin-bottom: 1.75rem;
+      border-radius: 2px;
+    }
+    .agreement p { font-size: 10pt; color: var(--body); line-height: 1.6; }
+
+    /* Submit row — hidden when capturing for PDF */
+    .no-print { }
+    body.capturing .no-print { display: none !important; }
+    body.capturing .field-input { border-bottom-color: var(--ink) !important; }
+
+    .submit-row {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 0.25rem;
+      margin-bottom: 1.75rem;
+    }
+    .submit-status {
+      font-size: 9.5pt;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .submit-status.error   { color: #b91c1c; font-style: normal; font-weight: 600; }
+    .submit-status.success { color: #15803d; font-style: normal; font-weight: 600; }
+
+    .submit-btn {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 10pt;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--white);
+      background: var(--navy);
+      border: none;
+      border-radius: 4px;
+      padding: 0.65rem 1.75rem;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .submit-btn:hover    { background: var(--mid); }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; background: var(--navy); }
+
+    /* Footer */
+    .footer {
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--rule);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .footer-address { font-size: 9pt; color: var(--muted); line-height: 1.6; }
+    .footer-address strong {
+      display: block;
+      color: var(--navy);
+      font-family: 'Libre Baskerville', serif;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      font-size: 8.5pt;
+      text-transform: uppercase;
+    }
+    .footer-address a { color: var(--mid); text-decoration: none; }
+
+    @media print {
+      body { background: white; padding: 0; }
+      .page { box-shadow: none; border: none; border-top: none; padding: 1.5rem 2rem; max-width: 100%; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="page" id="pass-page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="clinic-name">Bingham Family Free Clinic</div>
+    <div class="doc-title">Volunteer Parking Pass</div>
+    <div class="doc-subtitle">Authorized clinic parking permit</div>
+  </div>
+
+  <!-- Pass number -->
+  <div class="pass-badge">
+    <span class="pass-badge-label">Pass No.</span>
+    <div class="pass-badge-number">
+      <input type="text" id="pass-number" name="pass_number" placeholder="—" maxlength="8" />
+    </div>
+  </div>
+
+  <!-- Receipt acknowledgment -->
+  <div class="agreement">
+    <p>By printing my name below, I acknowledge I received a parking pass, and agree to return it upon the conclusion of my service with the clinic.</p>
+  </div>
+
+  <!-- Volunteer info -->
+  <div class="section-title">Permit Holder</div>
+  <div class="fields">
+    <div class="field-row">
+      <div class="field full">
+        <label class="field-label" for="volunteer-name">Volunteer Name</label>
+        <input class="field-input" type="text" id="volunteer-name" name="volunteer_name"
+               placeholder="Full legal name" autocomplete="name" />
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label class="field-label" for="date-issued">Date Issued</label>
+        <input class="field-input" type="date" id="date-issued" name="date_issued" />
+      </div>
+      <div class="field">
+        <label class="field-label">Issued By</label>
+        <input class="field-input" type="text" value="Bingham Family Free Clinic" readonly />
+      </div>
+    </div>
+  </div>
+
+  <!-- Pass terms -->
+  <div class="agreement">
+    <p>This pass authorizes the named volunteer to park in designated clinic parking areas. This pass is non-transferable and must be displayed visibly in the driver's side dashboard.</p>
+  </div>
+
+  <!-- Submit -->
+  <div class="submit-row no-print">
+    <span class="submit-status" id="submit-status"></span>
+    <button class="submit-btn" id="submit-btn" onclick="handleSubmit()">
+      Save &amp; Generate PDF
+    </button>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-address">
+      <strong>Bingham Family Free Clinic</strong>
+      987 S Geneva Road, Suite 142<br>
+      801.854.5168<br>
+      <a href="mailto:credential@binghamfamilyclinic.org">credential@binghamfamilyclinic.org</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ── Pre-fill via URL params sent by the pipeline ──────────────────────────
+  (function prefill() {
+    const p    = new URLSearchParams(window.location.search)
+    const name = p.get('name')
+    const num  = p.get('pass_number')
+    const date = p.get('date') || new Date().toISOString().slice(0, 10)
+    if (name) document.getElementById('volunteer-name').value = name
+    if (num)  document.getElementById('pass-number').value    = num
+    if (date) document.getElementById('date-issued').value    = date
+  })()
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function setStatus(msg, type) {
+    const el = document.getElementById('submit-status')
+    el.textContent = msg
+    el.className   = 'submit-status' + (type ? ' ' + type : '')
+  }
+
+  function validate() {
+    return document.getElementById('volunteer-name').value.trim() !== ''
+        && document.getElementById('date-issued').value !== ''
+  }
+
+  // ── Generate PDF → base64 ─────────────────────────────────────────────────
+  async function generatePdfBase64() {
+    const { jsPDF } = window.jspdf
+    const pageEl    = document.getElementById('pass-page')
+
+    document.body.classList.add('capturing')
+    try {
+      const canvas = await html2canvas(pageEl, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+      })
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.93)
+      const pdf     = new jsPDF({ orientation: 'portrait', unit: 'px', format: 'letter' })
+      const pdfW    = pdf.internal.pageSize.getWidth()
+      const pdfH    = pdf.internal.pageSize.getHeight()
+      const ratio   = Math.min(pdfW / canvas.width, (pdfH - 48) / canvas.height)
+      const imgW    = canvas.width  * ratio
+      const imgH    = canvas.height * ratio
+      const offsetX = (pdfW - imgW) / 2
+      const offsetY = 24
+
+      pdf.addImage(imgData, 'JPEG', offsetX, offsetY, imgW, imgH)
+      // Return pure base64 (strip the data URI prefix)
+      return pdf.output('datauristring').split(',')[1]
+    } finally {
+      document.body.classList.remove('capturing')
+    }
+  }
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+  async function handleSubmit() {
+    if (!validate()) {
+      setStatus('Volunteer name and date issued are required.', 'error')
+      return
+    }
+
+    const btn = document.getElementById('submit-btn')
+    btn.disabled = true
+    setStatus('Generating PDF…')
+
+    try {
+      const base64 = await generatePdfBase64()
+
+      // Send to parent pipeline window
+      window.parent.postMessage({
+        type:           'parking_pass_pdf',
+        base64:         base64,
+        volunteer_name: document.getElementById('volunteer-name').value.trim(),
+        pass_number:    document.getElementById('pass-number').value.trim(),
+        date_issued:    document.getElementById('date-issued').value,
+      }, '*')
+
+      setStatus('✓ Submitted — saving to profile…', 'success')
+    } catch (err) {
+      console.error('Parking pass PDF error:', err)
+      setStatus('PDF generation failed. Please try again.', 'error')
+      btn.disabled = false
+    }
+  }
+
+  // ── Listen for reset command from parent (e.g. after successful upload) ───
+  window.addEventListener('message', function(e) {
+    if (!e.data) return
+    if (e.data.type === 'parking_pass_reset') {
+      document.getElementById('volunteer-name').value = e.data.name || ''
+      document.getElementById('pass-number').value    = e.data.pass_number || ''
+      document.getElementById('date-issued').value    = new Date().toISOString().slice(0, 10)
+      setStatus('')
+      document.getElementById('submit-btn').disabled = false
+    }
+    if (e.data.type === 'parking_pass_saved') {
+      setStatus('✓ PDF saved to volunteer profile.', 'success')
+    }
+    if (e.data.type === 'parking_pass_error') {
+      setStatus('Upload failed: ' + (e.data.message || 'unknown error'), 'error')
+      document.getElementById('submit-btn').disabled = false
+    }
+  })
+</script>
+</body>
+</html>
