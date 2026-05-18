@@ -124,28 +124,11 @@ export default function LoginPage() {
 
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div style={{
-            width: '60%',
-            maxWidth: '100%',
-            height: '110px',
-            background: '#02416b',
-            borderRadius: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: '1rem',
-            boxShadow: '0 6px 20px rgba(2,65,107,0.25)',
-          }}>
-            <img
-              src="/logo3.png"
-              alt="Logo"
-              style={{
-                height: '110px',
-                width: 'auto',
-                objectFit: 'contain',
-              }}
-            />
-          </div>
+          <img
+            src="/logo3.png"
+            alt="Logo"
+            style={{ width: '120px', height: 'auto', display: 'block', margin: '0 auto 1rem', borderRadius: '12px' }}
+          />
           <h1 style={{ fontSize: '1.5rem', fontWeight: 1500, color: 'var(--text)', letterSpacing: '-0.02em' }}>
             {forgotMode ? 'Reset Password' : 'BFC Portal'}
           </h1>
