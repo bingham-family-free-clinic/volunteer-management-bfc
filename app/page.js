@@ -125,7 +125,7 @@ export default function LoginPage() {
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div style={{
-            width: '100%',
+            width: '60%',
             maxWidth: '100%',
             height: '110px',
             background: '#02416b',
@@ -146,7 +146,7 @@ export default function LoginPage() {
               }}
             />
           </div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text)', letterSpacing: '-0.02em' }}>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 1500, color: 'var(--text)', letterSpacing: '-0.02em' }}>
             {forgotMode ? 'Reset Password' : 'BFC Portal'}
           </h1>
           <p style={{ color: 'var(--muted)', fontSize: '0.875rem', marginTop: '0.25rem' }}>
