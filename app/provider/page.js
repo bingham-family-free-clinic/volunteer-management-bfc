@@ -264,9 +264,15 @@ export default function ProviderPage() {
         const ids = getEffectiveProviderIds(date, shift, ot, rc, co)
         const key = `${date}|${shift}`
         if (ids.size > 0) counts[key] = ids.size
+        // page.js — inside fetchSlotData, replace lines 268–273
         if (ids.has(uid)) {
           mine.add(key)
-          const coveredByRecurring = rc.some(r =>
+          // ✅ Only flag as recurring if the recurring row is actually the active source
+          // (i.e. not called out). Re-use co (allCallouts) already in scope.
+          const calledOutThisSlot = co.some(c =>
+            c.provider_id === uid && c.shift_date === date && c.shift_time === shift
+          )
+          const coveredByRecurring = !calledOutThisSlot && rc.some(r =>
             r.provider_id === uid && r.shift_time === shift && recurringAppliesToDate(r, date)
           )
           if (coveredByRecurring) myRecurring.add(key)
@@ -301,11 +307,31 @@ export default function ProviderPage() {
     setTimeout(() => setToast(null), 3500)
   }
 
+  // page.js — handleSignUpShift
   async function handleSignUpShift(date, shift, day) {
     const key = `${date}|${shift}`
     if (mySlots.has(key)) return
-    if ((slotCounts[key] || 0) >= 3) { showToast('This shift is full (3/3 providers)', 'error'); return }
     setSigningUp(key)
+
+    // ✅ Live server-side check — never trust stale slotCounts for capacity
+    const [{ data: liveOneTime }, { data: liveRecurring }, { data: liveCallouts }] = await Promise.all([
+      supabase.from('provider_shifts')
+        .select('provider_id')
+        .eq('shift_date', date).eq('shift_time', shift),
+      supabase.from('provider_recurring_schedule')
+        .select('provider_id, day_of_week, shift_time, week_pattern, start_date, end_date'),
+      supabase.from('provider_callouts')
+        .select('provider_id, shift_date, shift_time')
+        .eq('shift_date', date).eq('shift_time', shift),
+    ])
+    const liveCount = getEffectiveProviderIds(date, shift, liveOneTime || [], liveRecurring || [], liveCallouts || []).size
+    if (liveCount >= 3) {
+      showToast('This shift just filled up (3/3 providers)', 'error')
+      await fetchSlotData(user.id) // refresh display
+      setSigningUp(null)
+      return
+    }
+
     const { error } = await supabase.from('provider_shifts').insert({
       provider_id: user.id, shift_date: date, shift_time: shift, day_of_week: day,
     })
@@ -602,13 +628,10 @@ export default function ProviderPage() {
                       const isFull      = count >= 3 && !isMine
                       const isLoadingThis = signingUp === key || removingSlot === key
 
-                      // Recurring slots: show as mine but non-interactive (admin manages them)
-                      // One-time mine: click to remove
-                      // Available: click to add
                       const handleClick = () => {
-                        if (isRecurring) return // managed by admin
+                        if (isLoadingThis || isRecurring) return
                         if (isMine) handleRemoveShift(cell.date, shift)
-                        else handleSignUpShift(cell.date, shift, day)
+                        else if (!isFull) handleSignUpShift(cell.date, shift, day)
                       }
 
                       return (
