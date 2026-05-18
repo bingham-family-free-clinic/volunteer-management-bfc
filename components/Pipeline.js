@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
-import { ROLES, SHIFTS, ROLE_SUGGESTIONS } from '../lib/constants'
+import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS } from '../lib/constants'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -603,7 +603,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // ─── Shared styles ────────────────────────────────────────────────────────
 
   const card       = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
-  const inputStyle = { width: '100%', padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.95rem', outline: 'none', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box', colorScheme: 'dark' }
+  const inputStyle = { width: '100%', padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.95rem', outline: 'none', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box', colorScheme: 'light' }
   const labelStyle = { display: 'block', fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }
   const secLabel   = { fontSize: '0.72rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.85rem' }
 
@@ -681,8 +681,37 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
         <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Academic Information</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
-          <div><label style={labelStyle}>School <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.school} onChange={e => setOnboardForm(f => ({ ...f, school: e.target.value }))} placeholder="University or college" style={inputStyle} /></div>
-          <div><label style={labelStyle}>Major <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.major} onChange={e => setOnboardForm(f => ({ ...f, major: e.target.value }))} placeholder="Field of study" style={inputStyle} /></div>
+          <div>
+            <label style={labelStyle}>
+              School <span style={{ color: C.danger }}>*</span>
+            </label>
+            <select
+              value={onboardForm.school}
+              onChange={e => setOnboardForm(f => ({ ...f, school: e.target.value }))}
+              style={inputStyle}
+            >
+              <option value="">— Select school —</option>
+              {SCHOOLS.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>
+              Major <span style={{ color: C.danger }}>*</span>
+            </label>
+            <select
+              value={onboardForm.major}
+              onChange={e => setOnboardForm(f => ({ ...f, major: e.target.value }))}
+              style={inputStyle}
+            >
+              <option value="">— Select major —</option>
+              {MAJORS.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
     )
@@ -736,7 +765,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   function step1Valid() {
     const a = onboardForm.affiliation
     if (!a) return false
-    if (a === 'student') return !!(onboardForm.school && onboardForm.major)
+    if (a === 'student') return !!(onboardForm.school)
     if (a === 'intern')  return !!(onboardForm.intern_school && onboardForm.intern_department && onboardForm.advisor_name && onboardForm.advisor_contact)
     return true
   }
@@ -1139,7 +1168,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                  {CHECKLIST_ITEMS.map(item => {
+                  {CHECKLIST_ITEMS
+                    .filter(item => item.key !== 'parking_pass')
+                    .map(item => {
                     const checked = checklist[item.key]
                     return (
                       <div key={item.key} style={{ padding: '0.85rem 1rem', borderRadius: '10px', border: `1px solid ${checked ? C.blue + '55' : item.mandatory ? C.danger + '33' : 'var(--border)'}`, background: checked ? C.blue + '08' : item.mandatory ? C.danger + '04' : 'var(--bg)', transition: 'all 0.15s' }}>
