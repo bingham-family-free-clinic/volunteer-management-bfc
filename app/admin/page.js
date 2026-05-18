@@ -933,8 +933,41 @@ export default function AdminPage() {
     .sort((a, b) => { const ln = n => (n?.full_name?.split(' ').slice(-1)[0] || '').toLowerCase(); return ln(a).localeCompare(ln(b)) })
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-      <p style={{ color: 'var(--muted)' }}>Loading...</p>
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'var(--bg)',
+      gap: '1rem',
+    }}>
+      <div style={{ display: 'flex', gap: '6px' }}>
+        {[0, 1, 2].map(i => (
+          <span
+            key={i}
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              background: 'var(--muted)',
+              animation: `bounce 1s infinite ${i * 0.15}s`,
+            }}
+          />
+        ))}
+      </div>
+
+      <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
+        Loading your page
+      </p>
+
+      {/* inject animation keyframes */}
+      <style>{`
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); opacity: 0.4; }
+          50% { transform: translateY(-6px); opacity: 1; }
+        }
+      `}</style>
     </div>
   )
 
