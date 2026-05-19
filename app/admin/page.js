@@ -9,7 +9,7 @@ import Pipeline from '../../components/Pipeline'
 import Waitlist from '../../components/Waitlist'
 import LunchScheduler from '../../components/LunchScheduler'
 import Providers from '../../components/Providers'
-import Live, { computeExpectedNotClockedIn } from './Live'
+import Live, { computeExpectedNotClockedIn } from '../../Live'
 
 
 export const dynamic = 'force-dynamic'
