@@ -1,6 +1,6 @@
 'use client'
 
-import { getMountainNow, formatMountain } from '../../lib/timeUtils'
+import { getMountainNow, formatMountain } from '../lib/timeUtils'
 
 /**
  * Returns which occurrence (1–5) of a given weekday this date is within its month.
