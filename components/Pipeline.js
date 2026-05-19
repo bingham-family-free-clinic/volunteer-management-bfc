@@ -65,6 +65,7 @@ const CHECKLIST_ITEMS = [
   { key: 'id_check',                  label: 'ID',                        mandatory: true,  bucket: 'onboarding-ids',               urlKey: 'id_check_url'          },
   { key: 'immunization',              label: 'Immunization',              mandatory: true,  bucket: 'onboarding-immunizations',     urlKey: 'immunization_url'      },
   { key: 'tb_test',                   label: 'TB Test',                   mandatory: true,  bucket: 'onboarding-tb-tests',          urlKey: 'tb_test_url'           },
+  { key: 'licenses_certifications',   label: 'Licenses & Certifications', mandatory: false, bucket: 'onboarding-licenses',           urlKey: 'licenses_url'          },
   { key: 'confidentiality_agreement', label: 'Confidentiality Agreement', mandatory: false, bucket: 'onboarding-confidentiality',   urlKey: 'confidentiality_url'   },
   { key: 'welcome_packet',            label: 'Welcome Packet',            mandatory: true,  bucket: null,                           urlKey: null                    },
   { key: 'parking_pass',              label: 'Parking Pass',              mandatory: false, bucket: 'onboarding-parking-passes',    urlKey: 'parking_pass_url'      },
@@ -201,12 +202,22 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [onboardStep,  setOnboardStep]  = useState(1)
   const [savingStep,   setSavingStep]   = useState(false)
 
-  // Checklist (onboarding view)
   const EMPTY_CHECKLIST = {
-    confidentiality_agreement: false, tb_test: false, background_check: false,
-    welcome_packet: false, parking_pass: false, id_check: false, immunization: false,
-    background_check_url: null, id_check_url: null, confidentiality_url: null,
-    immunization_url: null, tb_test_url: null, parking_pass_url: null,
+    confidentiality_agreement: false,
+    tb_test: false,
+    background_check: false,
+    welcome_packet: false,
+    parking_pass: false,
+    id_check: false,
+    immunization: false,
+    licenses_certifications: false,
+    licenses_url: null,
+    background_check_url: null,
+    id_check_url: null,
+    confidentiality_url: null,
+    immunization_url: null,
+    tb_test_url: null,
+    parking_pass_url: null,
   }
   const [checklist,       setChecklist]       = useState(EMPTY_CHECKLIST)
   const [savingChecklist, setSavingChecklist] = useState(false)
@@ -390,6 +401,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           parking_pass:     row.parking_pass     ?? false,
           id_check:         row.id_check         ?? false,
           immunization:     row.immunization     ?? false,
+          licenses_certifications: row.licenses_certifications ?? false,
+          licenses_url:            row.licenses_url ?? null,
           background_check_url: row.background_check_url ?? null,
           id_check_url:     row.id_check_url     ?? null,
           confidentiality_url: row.confidentiality_url ?? null,
@@ -412,6 +425,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       parking_pass:     data.parking_pass     ?? false,
       id_check:         data.id_check         ?? false,
       immunization:     data.immunization     ?? false,
+      licenses_certifications: data.licenses_certifications ?? false,
+      licenses_url:            data.licenses_url ?? null,
       background_check_url: data.background_check_url ?? null,
       id_check_url:     data.id_check_url     ?? null,
       confidentiality_url: data.confidentiality_url ?? null,
