@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Volunteer & Student Confidentiality Agreement — Bingham Family Free Clinic</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:  #02416b;
+      --mid:   #0369a1;
+      --ink:   #1a2433;
+      --body:  #2d3a48;
+      --muted: #5a6a7a;
+      --rule:  #c8d8e8;
+      --bg:    #f9fafb;
+      --white: #ffffff;
+    }
+
+    html { background: var(--bg); }
+
+    body {
+      font-family: 'EB Garamond', 'Georgia', serif;
+      font-size: 11.5pt;
+      line-height: 1.75;
+      color: var(--body);
+      background: var(--bg);
+      padding: 2rem 1rem 4rem;
+    }
+
+    .page {
+      max-width: 720px;
+      margin: 0 auto;
+      background: var(--white);
+      border: 1px solid var(--rule);
+      border-top: 4px solid var(--navy);
+      box-shadow: 0 2px 24px rgba(2,65,107,0.07);
+      padding: 3rem 3.5rem;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      padding-bottom: 1.75rem;
+      margin-bottom: 1.75rem;
+      border-bottom: 1.5px solid var(--rule);
+    }
+    .clinic-name {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 10pt;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--navy);
+      margin-bottom: 0.5rem;
+    }
+    .doc-title {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 17pt;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.25;
+      margin-bottom: 0.25rem;
+    }
+    .doc-subtitle {
+      font-size: 10pt;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      font-style: italic;
+    }
+
+    /* Sections */
+    section { margin-bottom: 1.6rem; }
+    .section-title {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--navy);
+      border-bottom: 1px solid var(--rule);
+      padding-bottom: 0.3rem;
+      margin-bottom: 0.75rem;
+    }
+    p { margin-bottom: 0.6rem; }
+    p:last-child { margin-bottom: 0; }
+
+    /* Lists */
+    ul, ol { padding-left: 1.5rem; margin: 0.4rem 0 0.4rem 0.5rem; }
+    ul { list-style: none; }
+    ul li { position: relative; padding-left: 1.1rem; margin-bottom: 0.3rem; }
+    ul li::before { content: '—'; position: absolute; left: 0; color: var(--mid); font-weight: 600; }
+    ol { list-style: none; counter-reset: item; }
+    ol li { counter-increment: item; position: relative; padding-left: 1.75rem; margin-bottom: 0.35rem; }
+    ol li::before {
+      content: counter(item) '.';
+      position: absolute; left: 0;
+      color: var(--navy); font-weight: 700;
+      font-family: 'Libre Baskerville', serif; font-size: 10pt;
+    }
+
+    /* Signature block */
+    .signature-section {
+      margin-top: 2rem;
+      padding: 1.5rem 1.75rem;
+      background: #f0f6fb;
+      border: 1px solid var(--rule);
+      border-left: 3px solid var(--navy);
+      border-radius: 2px;
+    }
+    .sig-title {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 9pt;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--navy);
+      font-weight: 700;
+      margin-bottom: 1rem;
+    }
+    .sig-body {
+      font-size: 10.5pt;
+      color: var(--body);
+      margin-bottom: 1.25rem;
+      font-style: italic;
+    }
+    .sig-field { margin-bottom: 1.1rem; }
+    .sig-label {
+      display: block;
+      font-size: 8.5pt;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.3rem;
+      font-family: 'Libre Baskerville', serif;
+    }
+    .sig-line {
+      display: block;
+      width: 100%;
+      border: none;
+      border-bottom: 1.5px solid var(--ink);
+      background: transparent;
+      font-family: 'EB Garamond', serif;
+      font-size: 12pt;
+      color: var(--ink);
+      padding: 0.25rem 0.1rem;
+      outline: none;
+    }
+    .sig-line:focus { border-bottom-color: var(--mid); }
+    .sig-line[readonly] { color: var(--muted); border-bottom-style: dashed; cursor: default; }
+    .sig-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+
+    /* Submit row — hidden when capturing for PDF */
+    .no-print { }
+    body.capturing .no-print { display: none !important; }
+    body.capturing .sig-line  { border-bottom-color: var(--ink) !important; }
+
+    .submit-row {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    .submit-status {
+      font-size: 9.5pt;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .submit-status.error   { color: #b91c1c; font-style: normal; font-weight: 600; }
+    .submit-status.success { color: #15803d; font-style: normal; font-weight: 600; }
+
+    .submit-btn {
+      font-family: 'Libre Baskerville', serif;
+      font-size: 10pt;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--white);
+      background: var(--navy);
+      border: none;
+      border-radius: 4px;
+      padding: 0.65rem 1.75rem;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .submit-btn:hover    { background: var(--mid); }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; background: var(--navy); }
+
+    /* Footer */
+    .footer {
+      margin-top: 2rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--rule);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .footer-address { font-size: 9pt; color: var(--muted); line-height: 1.6; }
+    .footer-address strong {
+      display: block; color: var(--navy);
+      font-family: 'Libre Baskerville', serif;
+      font-weight: 700; letter-spacing: 0.06em;
+      font-size: 8.5pt; text-transform: uppercase;
+    }
+    .footer-address a { color: var(--mid); text-decoration: none; }
+    .footer-note {
+      font-size: 8.5pt; color: var(--muted); font-style: italic;
+      max-width: 280px; text-align: right; line-height: 1.5;
+    }
+    .disclaimer {
+      margin-top: 1.5rem; padding: 0.75rem 1rem;
+      background: #f8fafc; border: 1px solid var(--rule);
+      border-radius: 2px; font-size: 9pt; color: var(--muted);
+      font-style: italic; line-height: 1.55;
+    }
+
+    @media print {
+      body { background: white; padding: 0; }
+      .page { box-shadow: none; border: none; border-top: none; padding: 1.5rem 2rem; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="page" id="agreement-page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="clinic-name">Bingham Family Free Clinic</div>
+    <div class="doc-title">Volunteer &amp; Student<br>Confidentiality Agreement</div>
+    <div class="doc-subtitle">Required for all volunteers, students, interns, and trainees</div>
+  </div>
+
+  <!-- Purpose -->
+  <section>
+    <div class="section-title">Purpose</div>
+    <p>The mission of Bingham Family Free Clinic ("the Clinic") is to provide compassionate, charitable healthcare while maintaining the highest standards of privacy, professionalism, and legal compliance. As a condition of participation, all volunteers, students, interns, and trainees must agree to protect the confidentiality of patient information and Clinic information in accordance with applicable laws and policies.</p>
+  </section>
+
+  <!-- Confidential Information -->
+  <section>
+    <div class="section-title">Confidential Information</div>
+    <p>Confidential Information includes, but is not limited to:</p>
+    <ul>
+      <li>Protected Health Information (PHI) as defined by HIPAA</li>
+      <li>Patient names, addresses, contact information, and identifiers</li>
+      <li>Medical, mental health, and treatment records</li>
+      <li>Financial, eligibility, or insurance-related information</li>
+      <li>Clinic operational, business, donor, and internal information</li>
+      <li>Information accessed verbally, visually, electronically, or in writing</li>
+    </ul>
+    <p style="margin-top:0.6rem;">This obligation applies regardless of format (paper, electronic, verbal).</p>
+  </section>
+
+  <!-- Legal -->
+  <section>
+    <div class="section-title">Legal and Regulatory Compliance</div>
+    <p>I acknowledge that Bingham Family Free Clinic is:</p>
+    <ul>
+      <li>A nonprofit charitable healthcare provider</li>
+      <li>Deemed under the Federal Tort Claims Act (FTCA)</li>
+      <li>Subject to HIPAA, the Federally Supported Health Centers Assistance Act (FSHCAA), and applicable Utah state laws</li>
+    </ul>
+    <p style="margin-top:0.6rem;">Covered volunteers and students may be considered federal employees for purposes of medical malpractice claims under FTCA when acting within the scope of approved duties.</p>
+  </section>
+
+  <!-- Obligations -->
+  <section>
+    <div class="section-title">Confidentiality Obligations</div>
+    <p>I agree to:</p>
+    <ol>
+      <li>Access patient or Clinic information only as necessary to perform my assigned duties.</li>
+      <li>Not use or disclose confidential information for personal, educational, or unauthorized purposes.</li>
+      <li>Discuss patient information only with authorized Clinic personnel and only in appropriate settings.</li>
+      <li>Protect login credentials and not share passwords or system access.</li>
+      <li>Secure physical and electronic records at all times.</li>
+      <li>Immediately report any suspected or actual privacy breach to the Clinic's Policy and Procedure Officer.</li>
+      <li>Comply with all Clinic policies, training requirements, and supervision protocols.</li>
+    </ol>
+  </section>
+
+  <!-- Prohibited Conduct -->
+  <section>
+    <div class="section-title">Prohibited Conduct</div>
+    <p>I understand that the following actions are strictly prohibited:</p>
+    <ul>
+      <li>Accessing records of patients without a legitimate role in their care</li>
+      <li>Discussing patient information in public areas or on social media</li>
+      <li>Removing Clinic records or devices without authorization</li>
+      <li>Photographing, recording, or copying patient information without permission</li>
+      <li>Using patient stories or data for coursework, presentations, or research without written authorization and Clinic approval</li>
+    </ul>
+  </section>
+
+  <!-- Social Media -->
+  <section>
+    <div class="section-title">Social Media and Public Disclosure</div>
+    <p>I agree not to post, share, or discuss any patient-related or confidential Clinic information on social media, websites, or public forums, even if patient names are omitted.</p>
+  </section>
+
+  <!-- Term -->
+  <section>
+    <div class="section-title">Term of Confidentiality</div>
+    <p>I understand that my obligation to protect confidential information continues indefinitely, including after my volunteer or student role ends.</p>
+  </section>
+
+  <!-- Consequences -->
+  <section>
+    <div class="section-title">Consequences of Violation</div>
+    <p>I acknowledge that violations of this Agreement may result in:</p>
+    <ul>
+      <li>Immediate termination of volunteer or student privileges</li>
+      <li>Loss of FTCA coverage</li>
+      <li>Disciplinary action by educational institutions or licensing bodies</li>
+      <li>Civil or criminal penalties under federal or state law</li>
+    </ul>
+  </section>
+
+  <!-- Acknowledgment -->
+  <section>
+    <div class="section-title">Acknowledgment and Agreement</div>
+    <p>By printing my name below, I acknowledge that I have read, understand, and agree to comply with this Confidentiality Agreement and all applicable privacy and security policies of Bingham Family Free Clinic.</p>
+  </section>
+
+  <!-- Signature Block -->
+  <div class="signature-section">
+    <div class="sig-title">Signature</div>
+    <div class="sig-body">Please type your full legal name to sign this agreement electronically.</div>
+
+    <div class="sig-row">
+      <div class="sig-field">
+        <label class="sig-label" for="printed-name">Printed Name</label>
+        <input class="sig-line" type="text" id="printed-name" name="printed_name"
+               placeholder="Full legal name" autocomplete="name" />
+      </div>
+      <div class="sig-field">
+        <label class="sig-label" for="date-signed">Date</label>
+        <input class="sig-line" type="date" id="date-signed" name="date_signed" />
+      </div>
+    </div>
+
+    <div class="sig-row" style="margin-top:0.75rem;">
+      <div class="sig-field">
+        <label class="sig-label">Policy &amp; Procedure Officer</label>
+        <input class="sig-line" type="text" value="Randy Dearth" readonly />
+      </div>
+      <div class="sig-field">
+        <label class="sig-label">Organization</label>
+        <input class="sig-line" type="text" value="Bingham Family Free Clinic" readonly />
+      </div>
+    </div>
+
+    <!-- Submit -->
+    <div class="submit-row no-print">
+      <span class="submit-status" id="submit-status"></span>
+      <button class="submit-btn" id="submit-btn" onclick="handleSubmit()">Submit</button>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-address">
+      <strong>Bingham Family Free Clinic</strong>
+      987 S Geneva Road, Suite 142<br>
+      801.854.5168<br>
+      <a href="mailto:credential@binghamfamilyclinic.org">credential@binghamfamilyclinic.org</a>
+    </div>
+    <div class="footer-note">
+      This Agreement supplements, but does not replace, the Clinic's Notice of Privacy Practices, HIPAA policies, or FTCA requirements.
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ── Pre-fill from URL params passed by the pipeline ───────────────────────
+  (function prefill() {
+    const p    = new URLSearchParams(window.location.search)
+    // const name = p.get('name')
+    const date = p.get('date') || new Date().toISOString().slice(0, 10)
+    if (name) document.getElementById('printed-name').value = name
+    if (date) document.getElementById('date-signed').value  = date
+  })()
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function setStatus(msg, type) {
+    const el = document.getElementById('submit-status')
+    el.textContent = msg
+    el.className   = 'submit-status' + (type ? ' ' + type : '')
+  }
+
+  function validate() {
+    return document.getElementById('printed-name').value.trim() !== ''
+        && document.getElementById('date-signed').value !== ''
+  }
+
+  // ── Generate PDF → base64 ─────────────────────────────────────────────────
+  async function generatePdfBase64() {
+    const { jsPDF } = window.jspdf
+    const pageEl    = document.getElementById('agreement-page')
+
+    document.body.classList.add('capturing')
+    try {
+      const canvas = await html2canvas(pageEl, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        windowWidth: pageEl.scrollWidth,
+        windowHeight: pageEl.scrollHeight,
+      })
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.93)
+      const pdf     = new jsPDF({ orientation: 'portrait', unit: 'px', format: 'letter' })
+      const pdfW    = pdf.internal.pageSize.getWidth()
+      const pdfH    = pdf.internal.pageSize.getHeight()
+
+      // Multi-page: slice canvas into letter-height segments
+      const scale      = pdfW / canvas.width
+      const pageHeight = pdfH / scale          // canvas px per page
+      let   yOffset    = 0
+
+      while (yOffset < canvas.height) {
+        if (yOffset > 0) pdf.addPage()
+
+        // Draw a slice of the canvas onto this PDF page
+        const sliceHeight = Math.min(pageHeight, canvas.height - yOffset)
+        const sliceCanvas = document.createElement('canvas')
+        sliceCanvas.width  = canvas.width
+        sliceCanvas.height = sliceHeight
+        sliceCanvas.getContext('2d').drawImage(
+          canvas, 0, yOffset, canvas.width, sliceHeight,
+                  0,       0, canvas.width, sliceHeight
+        )
+        const sliceData = sliceCanvas.toDataURL('image/jpeg', 0.93)
+        pdf.addImage(sliceData, 'JPEG', 0, 0, pdfW, sliceHeight * scale)
+        yOffset += pageHeight
+      }
+
+      return pdf.output('datauristring').split(',')[1]
+    } finally {
+      document.body.classList.remove('capturing')
+    }
+  }
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+  async function handleSubmit() {
+    if (!validate()) {
+      setStatus('Printed name and date are required.', 'error')
+      return
+    }
+
+    const btn = document.getElementById('submit-btn')
+    btn.disabled = true
+    setStatus('Generating PDF…')
+
+    try {
+      const base64 = await generatePdfBase64()
+
+      window.parent.postMessage({
+        type:         'confidentiality_agreement_pdf',
+        base64:       base64,
+        printed_name: document.getElementById('printed-name').value.trim(),
+        date_signed:  document.getElementById('date-signed').value,
+      }, '*')
+
+      setStatus('✓ Submitted — saving to profile…', 'success')
+    } catch (err) {
+      console.error('Confidentiality agreement PDF error:', err)
+      setStatus('PDF generation failed. Please try again.', 'error')
+      btn.disabled = false
+    }
+  }
+
+  // ── Listen for messages back from the parent pipeline ─────────────────────
+  window.addEventListener('message', function(e) {
+    if (!e.data) return
+    if (e.data.type === 'confidentiality_agreement_reset') {
+      document.getElementById('printed-name').value = e.data.name || ''
+      document.getElementById('date-signed').value  = new Date().toISOString().slice(0, 10)
+      setStatus('')
+      document.getElementById('submit-btn').disabled = false
+    }
+    if (e.data.type === 'confidentiality_agreement_saved') {
+      setStatus('✓ Agreement saved to volunteer profile.', 'success')
+    }
+    if (e.data.type === 'confidentiality_agreement_error') {
+      setStatus('Upload failed: ' + (e.data.message || 'unknown error'), 'error')
+      document.getElementById('submit-btn').disabled = false
+    }
+  })
+</script>
+</body>
+</html>
