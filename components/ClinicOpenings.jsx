@@ -21,6 +21,8 @@ export default function ClinicOpenings({ onClose }) {
   const [error,   setError]   = useState(null)
   const [filter,  setFilter]  = useState('all') // 'all' | day name | shift string
 
+  useEffect(() => { fetchOpenings() }, [])
+  
   async function fetchOpenings() {
     setLoading(true); setError(null)
     try {
