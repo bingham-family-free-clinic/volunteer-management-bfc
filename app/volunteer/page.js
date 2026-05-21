@@ -252,6 +252,7 @@ export default function VolunteerPage() {
   const [msgView, setMsgView]               = useState('inbox')
   const [readMessageIds, setReadMessageIds] = useState(new Set())
   const [broadcastReadCounts, setBroadcastReadCounts] = useState({})
+  const [initUnreadCount, setInitUnreadCount] = useState(0)
   const [msgImageFile, setMsgImageFile]     = useState(null)
   const [msgImagePreview, setMsgImagePreview] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
@@ -339,6 +340,16 @@ export default function VolunteerPage() {
     setLunchAssignment(lunch || null)
 
     await fetchScheduleTab(user.id)
+
+    const [{ data: unreadMsgs }, { data: myReads }] = await Promise.all([
+      supabase.from('messages').select('id').neq('sender_id', user.id),
+      supabase.from('message_reads').select('message_id').eq('user_id', user.id),
+    ])
+    const readSet = new Set((myReads || []).map(r => r.message_id))
+    setReadMessageIds(readSet)
+    const earlyCount = (unreadMsgs || []).filter(m => !readSet.has(m.id)).length
+    setInitUnreadCount(earlyCount)
+
     setLoading(false)
   }
 
@@ -503,10 +514,10 @@ export default function VolunteerPage() {
     setTab(newTab)
     if (newTab === 'schedule')    await fetchScheduleTab()
     if (newTab === 'callout')     await fetchCalloutTab()
-    if (newTab === 'messages')    {
+    if (newTab === 'messages') {
       await fetchMessagesTab()
-      // Mark inbox read after messages are loaded
-      setTimeout(() => markInboxAsRead(), 100)
+      await markInboxAsRead()
+      setInitUnreadCount(0)
     }
     if (newTab === 'account')     await fetchAccountTab()
     if (newTab === 'internreport') {
@@ -553,6 +564,7 @@ export default function VolunteerPage() {
       unread.forEach(m => next.add(m.id))
       return next
     })
+    setInitUnreadCount(0)
   }
 
   function handleImageSelect(e) {
@@ -951,7 +963,7 @@ export default function VolunteerPage() {
               label={label}
               active={tab === key}
               onClick={handleTabChange}
-              badge={key === 'messages' ? unreadCount : 0}
+              badge={key === 'messages' ? (messages.length > 0 ? unreadCount : initUnreadCount) : 0}
             />
           ))}
         </div>
