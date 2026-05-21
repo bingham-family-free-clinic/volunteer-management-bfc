@@ -81,7 +81,7 @@ export default function ClinicOpenings({ onClose }) {
   const totalOpenings = filtered.reduce((s, r) => s + r.openings, 0)
 
   const card    = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
-  const pill    = (active) => ({ padding: '0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', border: active ? 'none' : '1px solid var(--border)', background: active ? 'var(--accent)' : 'var(--surface)', color: active ? '#0a0f0a' : 'var(--muted)', transition: 'all 0.15s' })
+  const pill    = (active) => ({ padding: '0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', border: active ? 'none' : '1px solid var(--border)', background: active ? 'var(--accent)' : 'var(--surface)', color: active ? '#fff' : 'var(--muted)', transition: 'all 0.15s' })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

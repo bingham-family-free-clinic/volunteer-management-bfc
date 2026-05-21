@@ -65,7 +65,7 @@ export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, 
     isActiveThisWeek(todayMtnStr, s.week_pattern)   // ← was missing entirely
   )
 
-  const clockedInIds = new Set(activeShifts.map(s => s.profiles?.id).filter(Boolean))
+  const clockedInIds = new Set(activeShifts.map(s => s.volunteer_id ?? s.profiles?.id).filter(Boolean))
 
   const expectedIds = new Set([
     ...scheduled.filter(s => !calledOutIds.has(s.volunteer_id)).map(s => s.volunteer_id),
@@ -151,7 +151,7 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
             {activeShifts.map(s => (
               <div
                 key={s.id}
-                onClick={() => { const full = volunteers.find(v => v.id === s.profiles?.id); if (full) onOpenVolunteer(full) }}
+                onClick={() => { const id = s.volunteer_id ?? s.profiles?.id; const full = volunteers.find(v => v.id === id); if (full) onOpenVolunteer(full) }}
                 style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   padding: '0.75rem 1rem',

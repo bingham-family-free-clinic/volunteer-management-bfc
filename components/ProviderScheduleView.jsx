@@ -180,7 +180,7 @@ export default function ProviderScheduleView({ supabase }) {
       padding: '0.35rem 0.85rem', borderRadius: '8px', fontSize: '0.8rem',
       fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
       background: active ? 'var(--accent)' : 'var(--surface)',
-      color: active ? '#0a0f0a' : 'var(--muted)',
+      color: active ? '#fff' : 'var(--muted)',
       border: active ? 'none' : '1px solid var(--border)',
     }),
   }

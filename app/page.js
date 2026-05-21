@@ -199,7 +199,7 @@ export default function LoginPage() {
                 style={{
                   width: '100%', padding: '0.85rem',
                   background: loading ? 'var(--accent-dim)' : 'var(--accent)',
-                  color: '#0a0f0a', fontWeight: 600,
+                  color: '#fff', fontWeight: 600,
                   border: 'none', borderRadius: '8px',
                   fontSize: '0.95rem', cursor: loading ? 'not-allowed' : 'pointer',
                   fontFamily: 'DM Sans, sans-serif',

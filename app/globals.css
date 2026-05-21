@@ -8,6 +8,7 @@
   --surface: #ffffff;   /* card/container background */
   --border: #d1d5db;    /* light gray borders */
   --accent: #02416B;    /* dark blue primary color */
+  --accent-fg: #ffffff; /* text on filled accent buttons */
   --accent-dim: #5f7f99;/* softer blue for hover/secondary */
   --text: #111111;      /* near-black text */
   --muted: #4b5563;     /* muted gray text */

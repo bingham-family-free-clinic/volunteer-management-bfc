@@ -192,7 +192,7 @@ export default function LunchScheduler({ supabase, profile }) {
           <div style={{ paddingTop: '1.2rem' }}>
             <button
               onClick={() => setSelectedDate(today)}
-              style={{ padding: '0.65rem 1.1rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isToday ? 'var(--accent)' : 'var(--surface)', color: isToday ? '#0a0f0a' : 'var(--muted)', border: isToday ? 'none' : '1px solid var(--border)' }}
+              style={{ padding: '0.65rem 1.1rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isToday ? 'var(--accent)' : 'var(--surface)', color: isToday ? '#fff' : 'var(--muted)', border: isToday ? 'none' : '1px solid var(--border)' }}
             >
               Today
             </button>
@@ -354,7 +354,7 @@ export default function LunchScheduler({ supabase, profile }) {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: toast.type === 'success' ? 'var(--accent)' : '#dc2626', color: toast.type === 'success' ? '#0a0f0a' : '#fff', padding: '0.75rem 1.5rem', borderRadius: '100px', fontWeight: 500, fontSize: '0.9rem', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', zIndex: 200 }}>
+        <div style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: toast.type === 'success' ? 'var(--accent)' : '#dc2626', color: '#fff', padding: '0.75rem 1.5rem', borderRadius: '100px', fontWeight: 500, fontSize: '0.9rem', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', zIndex: 200 }}>
           {toast.text}
         </div>
       )}

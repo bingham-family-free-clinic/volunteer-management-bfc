@@ -1222,7 +1222,7 @@ export default function VolunteerPage() {
                     {[['single','Single Shift'],['range','Date Range']].map(([val, label]) => (
                       <button key={val} type="button"
                         onClick={() => { setCalloutMode(val); setCalloutDate(''); setCalloutShift(''); setCalloutRole(''); setCalloutStartDate(''); setCalloutEndDate('') }}
-                        style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: calloutMode === val ? 'var(--accent)' : 'var(--surface)', color: calloutMode === val ? '#0a0f0a' : 'var(--muted)', border: calloutMode === val ? 'none' : '1px solid var(--border)' }}>
+                        style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: calloutMode === val ? 'var(--accent)' : 'var(--surface)', color: calloutMode === val ? '#fff' : 'var(--muted)', border: calloutMode === val ? 'none' : '1px solid var(--border)' }}>
                         {label}
                       </button>
                     ))}
@@ -1261,7 +1261,7 @@ export default function VolunteerPage() {
                   <p style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.5 }}>A call-out will be submitted for each of your scheduled shifts within this range. Weekends are skipped automatically.</p>
                 </>}
                 <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." required style={{ ...S.input, resize: 'vertical' }} /></div>
-                <button type="submit" disabled={calloutSubmitDisabled} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#0a0f0a', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: calloutSubmitDisabled ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: calloutSubmitDisabled ? 0.5 : 1 }}>Submit Call-Out</button>
+                <button type="submit" disabled={calloutSubmitDisabled} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: calloutSubmitDisabled ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: calloutSubmitDisabled ? 0.5 : 1 }}>Submit Call-Out</button>
               </form>
             </div>
 
@@ -1283,7 +1283,7 @@ export default function VolunteerPage() {
                           ? <span style={{ fontSize: '0.8rem', padding: '0.25rem 0.7rem', borderRadius: '100px', background: 'rgba(74,222,128,0.12)', color: 'var(--accent)', border: '1px solid rgba(74,222,128,0.3)', fontWeight: 600 }}>✓ You're covering</span>
                           : myReq
                             ? <span style={{ fontSize: '0.8rem', padding: '0.25rem 0.7rem', borderRadius: '100px', background: 'rgba(96,165,250,0.1)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)', fontWeight: 500 }}>Requested</span>
-                            : <button onClick={() => handleRequestCover(c.id)} disabled={requestingCoverId === c.id} style={{ padding: '0.35rem 0.9rem', background: 'var(--accent)', color: '#0a0f0a', border: 'none', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{requestingCoverId === c.id ? '...' : 'I can cover'}</button>}
+                            : <button onClick={() => handleRequestCover(c.id)} disabled={requestingCoverId === c.id} style={{ padding: '0.35rem 0.9rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{requestingCoverId === c.id ? '...' : 'I can cover'}</button>}
                       </div>
                     )
                   })}
@@ -1298,7 +1298,7 @@ export default function VolunteerPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               {[['inbox','Inbox'],['sent','Sent'],['compose','Compose']].map(([key, label]) => (
-                <button key={key} onClick={() => setMsgView(key)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: msgView === key ? 'var(--accent)' : 'var(--surface)', color: msgView === key ? '#0a0f0a' : 'var(--muted)', border: msgView === key ? 'none' : '1px solid var(--border)' }}>{label}</button>
+                <button key={key} onClick={() => setMsgView(key)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: msgView === key ? 'var(--accent)' : 'var(--surface)', color: msgView === key ? '#fff' : 'var(--muted)', border: msgView === key ? 'none' : '1px solid var(--border)' }}>{label}</button>
               ))}
             </div>
 
@@ -1367,7 +1367,7 @@ export default function VolunteerPage() {
                       ].map(opt => (
                         <button key={opt.value} type="button"
                           onClick={() => { setMsgRecipientType(opt.value); setMsgSelectedShift(null); setMsgSelectedRole(null); setMsgRecipientVolId('') }}
-                          style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: msgRecipientType === opt.value ? 'var(--accent)' : 'var(--surface)', color: msgRecipientType === opt.value ? '#0a0f0a' : 'var(--muted)', border: msgRecipientType === opt.value ? 'none' : '1px solid var(--border)' }}>
+                          style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: msgRecipientType === opt.value ? 'var(--accent)' : 'var(--surface)', color: msgRecipientType === opt.value ? '#fff' : 'var(--muted)', border: msgRecipientType === opt.value ? 'none' : '1px solid var(--border)' }}>
                           {opt.label}
                         </button>
                       ))}
@@ -1400,7 +1400,7 @@ export default function VolunteerPage() {
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                           {myRoles.map(role => {
                             const active = msgSelectedRole === role
-                            return <button key={role} type="button" onClick={() => setMsgSelectedRole(role)} style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: active ? 'var(--accent)' : 'var(--surface)', color: active ? '#0a0f0a' : 'var(--muted)', border: active ? 'none' : '1px solid var(--border)' }}>{role}</button>
+                            return <button key={role} type="button" onClick={() => setMsgSelectedRole(role)} style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: active ? 'var(--accent)' : 'var(--surface)', color: active ? '#fff' : 'var(--muted)', border: active ? 'none' : '1px solid var(--border)' }}>{role}</button>
                           })}
                         </div>
                       </div>
@@ -1426,7 +1426,7 @@ export default function VolunteerPage() {
                   </div>
                   <button type="submit"
                     disabled={sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole) || (msgRecipientType === 'user' && !msgRecipientVolId)}
-                    style={{ padding: '0.85rem', background: 'var(--accent)', color: '#0a0f0a', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: sendingMsg ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                    style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: sendingMsg ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                     {uploadingImage ? 'Uploading image...' : sendingMsg ? 'Sending...' : 'Send Message'}
                   </button>
                 </form>
@@ -1524,7 +1524,7 @@ export default function VolunteerPage() {
                         <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={credForm[f.key] || ''} onChange={val => setCredForm(prev => ({ ...prev, [f.key]: val }))} allowNA={f.key === 'dea_exp'} />
                       ))}
                     </div>
-                    <button type="submit" disabled={savingCreds} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#0a0f0a', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: savingCreds ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                    <button type="submit" disabled={savingCreds} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: savingCreds ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                       {savingCreds ? 'Saving…' : 'Save Credentials'}
                     </button>
                   </form>
@@ -1573,7 +1573,7 @@ export default function VolunteerPage() {
                   setPushLoading(false)
                 }}
                 disabled={pushLoading}
-                style={{ padding: '0.85rem', width: '100%', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: pushLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: pushEnabled ? 'var(--danger)' : 'var(--accent)', color: pushEnabled ? '#fff' : '#0a0f0a' }}
+                style={{ padding: '0.85rem', width: '100%', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: pushLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: pushEnabled ? 'var(--danger)' : 'var(--accent)', color: '#fff' }}
               >
                 {pushLoading ? 'Working...' : pushEnabled ? 'Turn off notifications' : 'Turn on notifications'}
               </button>
@@ -1595,7 +1595,7 @@ export default function VolunteerPage() {
 
         {/* Toast */}
         {toast && (
-          <div style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: toast.type === 'success' ? 'var(--accent)' : 'var(--danger)', color: toast.type === 'success' ? '#0a0f0a' : '#fff', padding: '0.75rem 1.5rem', borderRadius: '100px', fontWeight: 500, fontSize: '0.9rem', boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
+          <div style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: toast.type === 'success' ? 'var(--accent)' : 'var(--danger)', color: '#fff', padding: '0.75rem 1.5rem', borderRadius: '100px', fontWeight: 500, fontSize: '0.9rem', boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
             {toast.text}
           </div>
         )}
