@@ -305,11 +305,17 @@ function ProviderScheduleView({ supabase, providers }) {
       await supabase.from('provider_shifts').delete().eq('id', oneTimeRow.id)
     } else {
       // They're here via recurring — insert a callout to block them for this date
-      await supabase.from('provider_callouts').insert({
-        provider_id: providerId,
-        shift_date:  date,
-        shift_time:  shift,
-      })
+      const { error } = await supabase
+        .from('provider_callouts')
+        .upsert(
+          { provider_id: providerId, shift_date: date, shift_time: shift },
+          { onConflict: 'provider_id,shift_date,shift_time', ignoreDuplicates: true }
+        )
+      if (error) {
+        alert('Failed to create callout: ' + error.message)
+        setRemoving(null)
+        return
+      }
     }
 
     // Refresh
@@ -695,7 +701,7 @@ function RecurringSlotManager({ supabase, providers, onToast }) {
   const [recurringRows, setRecurringRows] = useState([])
   const [loading, setLoading]             = useState(true)
   const [addingFor, setAddingFor]         = useState(null)
-  const [form, setForm]                   = useState({ day_of_week: 'monday', shift_time: '10-2', week_pattern: 'every', start_date: '', end_date: '' })
+  const [form, setForm]                   = useState({ day_of_week: 'monday', shift_time: '10-2', week_pattern: 'every', start_date: getMtnDateStr(), end_date: '' })
   const [saving, setSaving]               = useState(false)
   const [removing, setRemoving]           = useState(null)
   const [filterDay, setFilterDay]         = useState('all')
@@ -730,7 +736,7 @@ function RecurringSlotManager({ supabase, providers, onToast }) {
     } else {
       onToast('Recurring slot assigned!', 'success')
       setAddingFor(null)
-      setForm({ day_of_week: 'monday', shift_time: '10-2', week_pattern: 'every', start_date: '', end_date: '' })
+      setForm({ day_of_week: 'monday', shift_time: '10-2', week_pattern: 'every', start_date: getMtnDateStr(), end_date: '' })
       await load()
     }
     setSaving(false)
