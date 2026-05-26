@@ -16,7 +16,22 @@ export default function LoginPage() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        window.location.href = '/volunteer'
+        const loadProfile = async () => {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('default_role')
+            .eq('id', session.user.id)
+            .single()
+
+          if (profile?.default_role === 'Provider') {
+            window.location.href = '/provider'
+            return
+          }
+
+          window.location.href = '/volunteer'
+        }
+
+        loadProfile()
       } else {
         setLoading(false)
       }
@@ -28,11 +43,35 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
 
     if (error) {
       setError(error.message)
       setLoading(false)
+      return
+    }
+
+    const user = data.user
+
+    // Fetch profile
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('default_role')
+      .eq('id', user.id)
+      .single()
+
+    if (profileError) {
+      setError('Failed to load profile')
+      setLoading(false)
+      return
+    }
+
+    // Role-based redirect
+    if (profile?.default_role === 'Provider') {
+      window.location.href = '/provider'
       return
     }
 
