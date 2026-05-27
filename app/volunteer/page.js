@@ -471,21 +471,6 @@ export default function VolunteerPage() {
     setAllUsers(usersData || [])
     await loadBroadcastReadCounts(fetched)
 
-    if (inboxUnread.length > 0) {
-      const rows = inboxUnread.map(m => ({ user_id: user.id, message_id: m.id }))
-      const { error: upsertError } = await supabase
-        .from('message_reads')
-        .upsert(rows, { onConflict: 'user_id,message_id' })
-      console.log('upsert result:', upsertError ?? 'success', 'rows:', rows.length)
-      if (!upsertError) {
-        setReadMessageIds(prev => {
-          const next = new Set(prev)
-          inboxUnread.forEach(m => next.add(m.id))
-          return next
-        })
-        setUnreadCount(0)
-      }
-    }
   }, [user])
 
   async function loadMoreMessages() {
@@ -557,6 +542,20 @@ export default function VolunteerPage() {
     if (newTab === 'callout')     await fetchCalloutTab()
     if (newTab === 'messages') {
       setUnreadCount(0)
+      // Mark all currently-known unread messages as read in DB right now,
+      // before fetchMessagesTab runs, so a refresh shows 0
+      const unreadIds = messages
+        .filter(m => m.sender_id !== user?.id && !readMessageIds.has(m.id))
+        .map(m => m.id)
+      if (unreadIds.length > 0) {
+        const rows = unreadIds.map(id => ({ user_id: user.id, message_id: id }))
+        await supabase.from('message_reads').upsert(rows, { onConflict: 'user_id,message_id' })
+        setReadMessageIds(prev => {
+          const next = new Set(prev)
+          unreadIds.forEach(id => next.add(id))
+          return next
+        })
+      }
       await fetchMessagesTab()
     }
     if (newTab === 'account')     await fetchAccountTab()
