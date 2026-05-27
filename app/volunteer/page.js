@@ -478,7 +478,6 @@ export default function VolunteerPage() {
         .upsert(rows, { onConflict: 'user_id,message_id' })
       console.log('upsert result:', upsertError ?? 'success', 'rows:', rows.length)
       if (!upsertError) {
-      if (!upsertError) {
         setReadMessageIds(prev => {
           const next = new Set(prev)
           inboxUnread.forEach(m => next.add(m.id))
