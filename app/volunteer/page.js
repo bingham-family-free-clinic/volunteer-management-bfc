@@ -252,7 +252,7 @@ export default function VolunteerPage() {
   const [msgView, setMsgView]               = useState('inbox')
   const [readMessageIds, setReadMessageIds] = useState(new Set())
   const [broadcastReadCounts, setBroadcastReadCounts] = useState({})
-  const [initUnreadCount, setInitUnreadCount] = useState(0)
+  const [unreadCount, setUnreadCount] = useState(0)
   const [msgImageFile, setMsgImageFile]     = useState(null)
   const [msgImagePreview, setMsgImagePreview] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
@@ -369,7 +369,7 @@ export default function VolunteerPage() {
     const readSet = new Set((myReads || []).map(r => r.message_id))
     setReadMessageIds(readSet)
     const earlyCount = (unreadMsgs || []).filter(m => !readSet.has(m.id)).length
-    setInitUnreadCount(earlyCount)
+    setUnreadCount(earlyCount)
 
     setLoading(false)
   }
@@ -462,9 +462,11 @@ export default function VolunteerPage() {
     if (fetched.length > 0) {
       setMsgCursor(fetched[fetched.length - 1].created_at)
     }
-    setReadMessageIds(new Set((reads || []).map(r => r.message_id)))
+    const readSet = new Set((reads || []).map(r => r.message_id))
+    setReadMessageIds(readSet)
+    const inboxUnread = (fetched).filter(m => m.sender_id !== user.id && !readSet.has(m.id))
+    setUnreadCount(inboxUnread.length)
     setAllUsers(usersData || [])
-
     await loadBroadcastReadCounts(fetched)
   }, [user])
 
@@ -585,6 +587,7 @@ export default function VolunteerPage() {
       unread.forEach(m => next.add(m.id))
       return next
     })
+    setUnreadCount(0)
     setInitUnreadCount(0)
   }
 
@@ -876,7 +879,6 @@ export default function VolunteerPage() {
   // ── Derived values (computed, not stored in state) ────────────────────────
   const inboxMessages = user && profile ? getInboxMessages(messages, user, profile) : []
   const sentMessages  = messages.filter(m => m.sender_id === user?.id)
-  const unreadCount   = inboxMessages.filter(m => !readMessageIds.has(m.id)).length
 
   const recentRecipients = sentMessages
     .filter(m => m.recipient_type === 'volunteer' && m.recipient_volunteer_id)
@@ -1015,7 +1017,7 @@ export default function VolunteerPage() {
               label={label}
               active={tab === key}
               onClick={handleTabChange}
-              badge={key === 'messages' ? (messages.length > 0 ? unreadCount : initUnreadCount) : 0}
+              badge={key === 'messages' ? unreadCount : 0}
             />
           ))}
         </div>
