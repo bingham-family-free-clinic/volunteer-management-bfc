@@ -502,15 +502,33 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     return hasTime ? `${date} at ${time}` : date
   }
 
-  // Fire-and-forget: errors are surfaced as toasts but never block the pipeline move.
   async function sendStageEmail(applicant, stage) {
     if (!EMAIL_STAGES.includes(stage)) return
+
+    // For onboarding emails, generate a short-lived signed URL for the welcome packet
+    let attachmentUrl = null
+    if (stage === 'onboarding') {
+      const { data: tmpl } = await supabase
+        .from('email_templates')
+        .select('welcome_packet_path')
+        .eq('stage', 'onboarding')
+        .maybeSingle()
+
+      if (tmpl?.welcome_packet_path) {
+        const { data: signed } = await supabase.storage
+          .from('onboarding-assets')
+          .createSignedUrl(tmpl.welcome_packet_path, 3600) // 1 hour — plenty of time for the edge function to fetch it
+        attachmentUrl = signed?.signedUrl ?? null
+      }
+    }
+
     try {
       const { error } = await supabase.functions.invoke('send-stage-email', {
         body: {
           applicantEmail: applicant.email,
           applicantName:  applicant.full_name,
           stage,
+          attachmentUrl, // null for interview/rejected, signed URL for onboarding
         },
       })
       if (error) {
@@ -1121,6 +1139,101 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       [stage]: { ...(prev[stage] || {}), [field]: value },
     }))
   }
+  
+  function WelcomePacketManager() {
+    const [packetPath, setPacketPath] = useState(null)
+    const [uploading,  setUploading]  = useState(false)
+    const ref = useRef(null)
+
+    useEffect(() => { loadPacketMeta() }, [])
+
+    async function loadPacketMeta() {
+      const { data } = await supabase
+        .from('email_templates')
+        .select('welcome_packet_path')
+        .eq('stage', 'onboarding')
+        .maybeSingle()
+      if (data?.welcome_packet_path) setPacketPath(data.welcome_packet_path)
+    }
+
+    async function handleUpload(file) {
+      setUploading(true)
+      const path = `welcome_packet.pdf`
+      const { error } = await supabase.storage
+        .from('onboarding-assets')
+        .upload(path, file, { upsert: true, contentType: 'application/pdf' })
+      if (error) { msg(error.message, 'error'); setUploading(false); return }
+
+      await supabase
+        .from('email_templates')
+        .upsert(
+          { stage: 'onboarding', welcome_packet_path: path },
+          { onConflict: 'stage' }
+        )
+
+      setPacketPath(path)
+      msg('Welcome packet updated')
+      setUploading(false)
+    }
+
+    async function viewCurrent() {
+      const { data } = await supabase.storage
+        .from('onboarding-assets')
+        .createSignedUrl(packetPath, 60)
+      if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+    }
+
+    return (
+      <div style={{
+        ...card,
+        padding: '1rem 1.25rem',
+        borderColor: C.blue + '44',
+        background: C.blue + '06',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '0.75rem',
+        marginBottom: '0.5rem',
+      }}>
+        <div>
+          <p style={{ ...secLabel, marginBottom: '0.2rem', color: C.blue }}>
+            Welcome Packet Attachment
+          </p>
+          <p style={{ fontSize: '0.8rem', color: 'var(--muted)', lineHeight: 1.5 }}>
+            {packetPath
+              ? 'A PDF is attached to every onboarding email automatically.'
+              : 'No packet uploaded yet — onboarding emails will send without an attachment.'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
+          {packetPath && (
+            <button onClick={viewCurrent} style={outlineBtn(C.blue)}>
+              View Current ↗
+            </button>
+          )}
+          <input
+            ref={ref}
+            type="file"
+            accept=".pdf"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const f = e.target.files?.[0]
+              if (f) handleUpload(f)
+              e.target.value = ''
+            }}
+          />
+          <button
+            onClick={() => ref.current?.click()}
+            disabled={uploading}
+            style={solidBtn(C.blue, uploading)}
+          >
+            {uploading ? 'Uploading...' : packetPath ? 'Replace Packet' : '+ Upload Packet'}
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   function EmailTemplatesTab() {
     if (templatesLoading) return <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading templates...</p>
@@ -1134,6 +1247,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        
+        <WelcomePacketManager />
 
         {/* Stage selector pills */}
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
