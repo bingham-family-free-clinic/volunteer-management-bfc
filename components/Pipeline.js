@@ -1166,10 +1166,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
       await supabase
         .from('email_templates')
-        .upsert(
-          { stage: 'onboarding', welcome_packet_path: path },
-          { onConflict: 'stage' }
-        )
+        .update({ welcome_packet_path: path })
+        .eq('stage', 'onboarding')
 
       setPacketPath(path)
       msg('Welcome packet updated')
