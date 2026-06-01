@@ -9,8 +9,8 @@ const DAY_LABEL  = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 
 const DAY_FULL   = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' }
 const WEEK_PATTERNS = [
   { value: 'every', label: 'Every week' },
-  { value: 'odd',   label: '1st & 3rd'  },
-  { value: 'even',  label: '2nd & 4th'  },
+  { value: 'odd',   label: 'Odd weeks'  },
+  { value: 'even',  label: 'Even weeks' },
 ]
 
 const CRED_FIELDS = [
@@ -900,7 +900,7 @@ function RecurringSlotManager({ supabase, providers, onToast }) {
                           <span style={{ fontWeight: 500, fontSize: '0.88rem' }}>{r.profiles?.full_name}</span>
                           {r.week_pattern !== 'every' && (
                             <span style={{ fontSize: '0.7rem', background: 'rgba(96,165,250,0.12)', color: '#60a5fa', borderRadius: '4px', padding: '0.1rem 0.35rem', border: '1px solid rgba(96,165,250,0.3)' }}>
-                              {r.week_pattern === 'odd' ? '1st & 3rd' : '2nd & 4th'}
+                              {r.week_pattern === 'odd' ? 'Odd weeks' : 'Even weeks'}
                             </span>
                           )}
                           {(r.start_date || r.end_date) && (
