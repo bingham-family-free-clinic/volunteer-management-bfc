@@ -1091,7 +1091,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   >
                     {isOffloading
                       ? <><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.primary}`, borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} /> Offloading...</>
-                      : '↑ Offload to OneDrive'
+                      : 'Don't click this button.'
                     }
                   </button>
                 </div>
