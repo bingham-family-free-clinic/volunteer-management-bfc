@@ -273,16 +273,6 @@ export default function VolunteerPage() {
     initCriticalPath()
   }, [])
 
-  useEffect(() => {
-    function handleMouseDown(e) {
-      if (comboRef.current && !comboRef.current.contains(e.target)) {
-        setComboOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [])
-
   async function initCriticalPath() {
     const { data: { session } } = await supabase.auth.getSession()
     const user = session?.user
