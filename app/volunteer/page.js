@@ -8,6 +8,7 @@ import { getInboxMessages } from '../../lib/messageUtils'
 import { MessageCard } from '../../components/MessageCard'
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotifications.js'
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
+import { MessageTab } from '../../components/MessageTab'
 
 
 export const dynamic = 'force-dynamic'
@@ -196,19 +197,6 @@ function ViewCountBadge({ message, broadcastReadCounts }) {
   )
 }
 
-function MessageCardWithViews({ m, readMessageIds, user, setLightboxUrl, broadcastReadCounts, senderLabel }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-      <MessageCard m={m} readMessageIds={readMessageIds} user={user} setLightboxUrl={setLightboxUrl} senderLabel={senderLabel} />
-      {BROADCAST_TYPES.includes(m?.recipient_type) && (
-        <div style={{ paddingLeft: '0.25rem' }}>
-          <ViewCountBadge message={m} broadcastReadCounts={broadcastReadCounts} />
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 export default function VolunteerPage() {
   // ── Core auth/profile state (loaded immediately) ─────────────────────────
@@ -239,29 +227,7 @@ export default function VolunteerPage() {
   const [myCoverRequests, setMyCoverRequests]   = useState([])
   const [requestingCoverId, setRequestingCoverId] = useState(null)
 
-  // ── Messages tab state (lazy, paginated) ─────────────────────────────────
-  const [messages, setMessages]             = useState([])
-  const [msgCursor, setMsgCursor]           = useState(null)   // oldest created_at fetched
-  const [hasMoreMsgs, setHasMoreMsgs]       = useState(false)
-  const [loadingMoreMsgs, setLoadingMoreMsgs] = useState(false)
-  const [msgBody, setMsgBody]               = useState('')
-  const [msgRecipientType, setMsgRecipientType] = useState('admin')
-  const [msgSelectedShift, setMsgSelectedShift] = useState(null)
-  const [msgSelectedRole, setMsgSelectedRole]   = useState(null)
-  const [msgRecipientVolId, setMsgRecipientVolId] = useState('')
-  const [allUsers, setAllUsers]             = useState([])
-  const [sendingMsg, setSendingMsg]         = useState(false)
-  const [msgView, setMsgView]               = useState('inbox')
-  const [readMessageIds, setReadMessageIds] = useState(new Set())
-  const [broadcastReadCounts, setBroadcastReadCounts] = useState({})
   const [unreadCount, setUnreadCount] = useState(0)
-  const [msgImageFile, setMsgImageFile]     = useState(null)
-  const [msgImagePreview, setMsgImagePreview] = useState(null)
-  const [uploadingImage, setUploadingImage] = useState(false)
-  const fileInputRef = useRef(null)
-  const [comboQuery, setComboQuery]   = useState('')
-  const [comboOpen, setComboOpen]     = useState(false)
-  const comboRef                      = useRef(null)
 
   // ── Account tab state (lazy) ──────────────────────────────────────────────
   const [allShifts, setAllShifts]               = useState([])
@@ -358,13 +324,6 @@ export default function VolunteerPage() {
 
     await fetchScheduleTab(user.id)
 
-    const { data: myReads } = await supabase
-      .from('message_reads')
-      .select('message_id')
-      .eq('user_id', user.id)
-    const readSet = new Set((myReads || []).map(r => r.message_id))
-    setReadMessageIds(readSet)
-
     setLoading(false)
   }
 
@@ -430,61 +389,6 @@ export default function VolunteerPage() {
     setMyCoverRequests(myCoverReqs || [])
   }, [user])
 
-  const fetchMessagesTab = useCallback(async () => {
-    if (!user) return
-
-    const [{ data: msgs }, { data: reads }, { data: usersData }] = await Promise.all([
-      supabase
-        .from('messages')
-        .select('id, created_at, body, image_url, recipient_type, recipient_shift, recipient_day, recipient_role, recipient_volunteer_id, sender_id, sender:profiles!messages_sender_id_fkey(full_name)')
-        .order('created_at', { ascending: false })
-        .limit(MSG_PAGE_SIZE),
-      supabase
-        .from('message_reads')
-        .select('message_id')
-        .eq('user_id', user.id),
-      supabase
-        .from('profiles')
-        .select('id, full_name')
-        .order('full_name'),
-    ])
-
-    const fetched = msgs || []
-    setMessages(fetched)
-    setHasMoreMsgs(fetched.length === MSG_PAGE_SIZE)
-    if (fetched.length > 0) {
-      setMsgCursor(fetched[fetched.length - 1].created_at)
-    }
-    const readSet = new Set((reads || []).map(r => r.message_id))
-    setReadMessageIds(readSet)
-    const inboxUnread = fetched.filter(m => m.sender_id !== user.id && !readSet.has(m.id))
-    setUnreadCount(inboxUnread.length)
-    setAllUsers(usersData || [])
-    await loadBroadcastReadCounts(fetched)
-
-  }, [user])
-
-  async function loadMoreMessages() {
-    if (!user || !msgCursor || loadingMoreMsgs) return
-    setLoadingMoreMsgs(true)
-
-    const { data: older } = await supabase
-      .from('messages')
-      .select('id, created_at, body, image_url, recipient_type, recipient_shift, recipient_day, recipient_role, recipient_volunteer_id, sender_id, sender:profiles!messages_sender_id_fkey(full_name)')
-      .order('created_at', { ascending: false })
-      .lt('created_at', msgCursor)
-      .limit(MSG_PAGE_SIZE)
-
-    const fetched = older || []
-    setMessages(prev => [...prev, ...fetched])
-    setHasMoreMsgs(fetched.length === MSG_PAGE_SIZE)
-    if (fetched.length > 0) {
-      setMsgCursor(fetched[fetched.length - 1].created_at)
-      await loadBroadcastReadCounts(fetched)
-    }
-    setLoadingMoreMsgs(false)
-  }
-
   const fetchAccountTab = useCallback(async () => {
     if (!user || fetchedTabs.current.has('account')) return
     fetchedTabs.current.add('account')
@@ -526,125 +430,11 @@ export default function VolunteerPage() {
     if (newTab === 'callout')     await fetchCalloutTab()
     if (newTab === 'messages') {
       setUnreadCount(0)
-      // Mark all currently-known unread messages as read in DB right now,
-      // before fetchMessagesTab runs, so a refresh shows 0
-      const unreadIds = messages
-        .filter(m => m.sender_id !== user?.id && !readMessageIds.has(m.id))
-        .map(m => m.id)
-      if (unreadIds.length > 0) {
-        const rows = unreadIds.map(id => ({ user_id: user.id, message_id: id }))
-        await supabase.from('message_reads').upsert(rows, { onConflict: 'user_id,message_id' })
-        setReadMessageIds(prev => {
-          const next = new Set(prev)
-          unreadIds.forEach(id => next.add(id))
-          return next
-        })
-      }
-      await fetchMessagesTab()
     }
     if (newTab === 'account')     await fetchAccountTab()
     if (newTab === 'internreport') {
       // Intern report only needs schedule (already fetched in critical path)
     }
-  }
-
-  // ── Messages helpers ──────────────────────────────────────────────────────
-  async function loadBroadcastReadCounts(msgs) {
-    const broadcastIds = (msgs || [])
-      .filter(m => BROADCAST_TYPES.includes(m.recipient_type))
-      .map(m => m.id)
-    if (broadcastIds.length === 0) return
-
-    const { data, error } = await supabase.rpc('get_broadcast_read_counts', { message_ids: broadcastIds })
-    if (error) {
-      const { data: fallback } = await supabase
-        .from('message_read_counts')
-        .select('message_id, read_count')
-        .in('message_id', broadcastIds)
-      const map = {}
-      ;(fallback || []).forEach(r => { map[r.message_id] = Number(r.read_count) })
-      setBroadcastReadCounts(prev => ({ ...prev, ...map }))
-      return
-    }
-    const map = {}
-    ;(data || []).forEach(r => { map[r.message_id] = Number(r.read_count) })
-    setBroadcastReadCounts(prev => ({ ...prev, ...map }))
-  }
-
-  function handleImageSelect(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (file.size > MAX_FILE_SIZE) { showToast('Image must be under 5 MB', 'error'); return }
-    setMsgImageFile(file)
-    setMsgImagePreview(URL.createObjectURL(file))
-  }
-
-  function clearImage() {
-    setMsgImageFile(null)
-    setMsgImagePreview(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-  
-  function selectRecipient(vol) {
-    setMsgRecipientVolId(vol.id)
-    setComboQuery(vol.full_name)
-    setComboOpen(false)
-  }
-
-  async function uploadImage(userId) {
-    if (!msgImageFile) return null
-    setUploadingImage(true)
-    const ext = msgImageFile.name.split('.').pop()
-    const path = `${userId}/${Date.now()}.${ext}`
-    const { error } = await supabase.storage
-      .from('message-images')
-      .upload(path, msgImageFile, { contentType: msgImageFile.type, upsert: false })
-    setUploadingImage(false)
-    if (error) { showToast('Image upload failed: ' + error.message, 'error'); return null }
-    const { data: { publicUrl } } = supabase.storage.from('message-images').getPublicUrl(path)
-    return publicUrl
-  }
-
-  async function handleSendMessage(e) {
-    e.preventDefault()
-    if (!msgBody.trim() && !msgImageFile) return
-    setSendingMsg(true)
-
-    const imageUrl = await uploadImage(user.id)
-    if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
-
-    const recipientType = msgRecipientType === 'user' ? 'volunteer' : msgRecipientType
-    const { data: { session } } = await supabase.auth.getSession()
-
-    const res = await fetch('/api/send-message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({
-        recipient_type: recipientType,
-        body: msgBody.trim(),
-        image_url: imageUrl || null,
-        recipient_shift: msgRecipientType === 'shift' ? (msgSelectedShift?.shift_time || null) : null,
-        recipient_day:   msgRecipientType === 'shift' ? (msgSelectedShift?.day || null) : null,
-        recipient_role:  msgRecipientType === 'role'  ? (msgSelectedRole || null) : null,
-        recipient_volunteer_id: recipientType === 'volunteer' ? (msgRecipientVolId || null) : null,
-      }),
-    })
-
-    const result = await res.json()
-    if (!res.ok) {
-      showToast(result.error || 'Failed to send', 'error')
-    } else {
-      showToast('Message sent!', 'success')
-      setMsgBody(''); clearImage()
-      setMsgRecipientType('admin'); setMsgSelectedShift(null); setMsgSelectedRole(null); setMsgRecipientVolId('')
-      setComboQuery('')
-      setComboOpen(false) 
-      fetchedTabs.current.delete('messages')
-      setMessages([]); setMsgCursor(null); setHasMoreMsgs(false)
-      await fetchMessagesTab()
-      setMsgView('inbox')
-    }
-    setSendingMsg(false)
   }
 
   // ── Clock helpers ─────────────────────────────────────────────────────────
@@ -832,34 +622,6 @@ export default function VolunteerPage() {
   }
 
   async function handleSignOut() { await supabase.auth.signOut(); window.location.href = '/' }
-
-  // ── Derived values (computed, not stored in state) ────────────────────────
-  const inboxMessages = user && profile ? getInboxMessages(messages, user, profile) : []
-  const sentMessages  = messages.filter(m => m.sender_id === user?.id)
-
-  const recentRecipients = sentMessages
-    .filter(m => m.recipient_type === 'volunteer' && m.recipient_volunteer_id)
-    .map(m => m.recipient_volunteer_id)
-    .filter((id, i, arr) => arr.indexOf(id) === i)
-    .slice(0, 4)
-    .map(id => allUsers.find(u => u.id === id))
-    .filter(Boolean)
-
-  const comboResults = (() => {
-    const q = comboQuery.trim().toLowerCase()
-    const baseList = allUsers.filter(u => u.id !== user?.id)
-    if (q.length === 0) {
-      const recentIds = new Set(recentRecipients.map(u => u.id))
-      const rest = baseList.filter(u => !recentIds.has(u.id))
-      return [...recentRecipients, ...rest].slice(0, 20)
-    }
-    const startsWith = baseList.filter(u => u.full_name.toLowerCase().startsWith(q))
-    const midString  = baseList.filter(u =>
-      !u.full_name.toLowerCase().startsWith(q) &&
-      u.full_name.toLowerCase().includes(q)
-    )
-    return [...startsWith, ...midString].slice(0, 20)
-  })()
 
   const myShiftCombos = schedule.reduce((acc, s) => {
     const key = `${s.day_of_week}|${s.shift_time}`
@@ -1318,355 +1080,18 @@ export default function VolunteerPage() {
 
         {/* ── MESSAGES TAB ────────────────────────────────────────────────── */}
         {tab === 'messages' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              {[['inbox','Inbox'],['sent','Sent'],['compose','Compose']].map(([key, label]) => (
-                <button key={key} onClick={() => setMsgView(key)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: msgView === key ? 'var(--accent)' : 'var(--surface)', color: msgView === key ? '#fff' : 'var(--muted)', border: msgView === key ? 'none' : '1px solid var(--border)' }}>{label}</button>
-              ))}
-            </div>
-
-            {msgView === 'inbox' && (
-              <div style={S.card}>
-                <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Inbox</h2>
-                {inboxMessages.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No messages yet.</p> : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {inboxMessages.map(m => (
-                      <MessageCardWithViews key={m.id} m={m} readMessageIds={readMessageIds} user={user} setLightboxUrl={setLightboxUrl} broadcastReadCounts={broadcastReadCounts} />
-                    ))}
-                  </div>
-                )}
-                {hasMoreMsgs && (
-                  <button
-                    onClick={loadMoreMessages}
-                    disabled={loadingMoreMsgs}
-                    style={{ marginTop: '1rem', width: '100%', padding: '0.65rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', cursor: loadingMoreMsgs ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontFamily: 'DM Sans, sans-serif' }}
-                  >
-                    {loadingMoreMsgs ? 'Loading…' : 'Load older messages'}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {msgView === 'sent' && (
-              <div style={S.card}>
-                <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Sent Messages</h2>
-                {sentMessages.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No sent messages yet.</p> : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {sentMessages.map(m => {
-                      const toLabel =
-                        m.recipient_type === 'everyone' ? 'To: Everyone' :
-                        m.recipient_type === 'admin' ? 'To: Admin' :
-                        m.recipient_type === 'shift' ? `To: ${m.recipient_day ? m.recipient_day.charAt(0).toUpperCase() + m.recipient_day.slice(1,3) : ''} ${m.recipient_shift || ''}`.trim() :
-                        m.recipient_type === 'role' ? `To: ${m.recipient_role}` :
-                        m.recipient_type === 'volunteer' ? `To: ${allUsers.find(u => u.id === m.recipient_volunteer_id)?.full_name || 'Individual'}` :
-                        'To: ' + m.recipient_type
-                      return (
-                        <MessageCardWithViews key={m.id} m={m} readMessageIds={readMessageIds} user={user} setLightboxUrl={setLightboxUrl} broadcastReadCounts={broadcastReadCounts} senderLabel={toLabel} />
-                      )
-                    })}
-                  </div>
-                )}
-                {hasMoreMsgs && (
-                  <button onClick={loadMoreMessages} disabled={loadingMoreMsgs} style={{ marginTop: '1rem', width: '100%', padding: '0.65rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', cursor: loadingMoreMsgs ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontFamily: 'DM Sans, sans-serif' }}>
-                    {loadingMoreMsgs ? 'Loading…' : 'Load older messages'}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {msgView === 'compose' && (
-              <div style={S.card}>
-                <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>New Message</h2>
-                <form onSubmit={handleSendMessage} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div>
-                    <label style={S.label}>Send to</label>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {[
-                        { value: 'admin', label: 'Admin' },
-                        { value: 'everyone', label: 'Everyone' },
-                        ...(myShiftCombos.length > 0 ? [{ value: 'shift', label: 'My Shift' }] : []),
-                        ...(myRoles.length > 0 ? [{ value: 'role', label: 'My Role' }] : []),
-                        { value: 'user', label: 'Individual' },
-                      ].map(opt => (
-                        <button key={opt.value} type="button"
-                          onClick={() => {
-                            setMsgRecipientType(opt.value)
-                            setMsgSelectedShift(null)
-                            setMsgSelectedRole(null)
-                            setMsgRecipientVolId('')
-                            setComboQuery('')
-                            setComboOpen(false)
-                          }}                          
-                          style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: msgRecipientType === opt.value ? 'var(--accent)' : 'var(--surface)', color: msgRecipientType === opt.value ? '#fff' : 'var(--muted)', border: msgRecipientType === opt.value ? 'none' : '1px solid var(--border)' }}>
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                    {msgRecipientType === 'user' && (
-                      <div style={{ marginTop: '0.75rem' }}>
-                        <label style={S.label}>Select user</label>
-
-                        {isMobile ? (
-                          <>
-                            {/* ── Mobile: trigger button + bottom sheet ── */}
-                            <button
-                              type="button"
-                              onClick={() => { setComboOpen(true); setComboQuery('') }}
-                              style={{
-                                ...S.input,
-                                textAlign: 'left',
-                                cursor: 'pointer',
-                                color: msgRecipientVolId ? 'var(--text)' : 'var(--muted)',
-                              }}
-                            >
-                              {msgRecipientVolId
-                                ? allUsers.find(u => u.id === msgRecipientVolId)?.full_name
-                                : 'Tap to select recipient…'}
-                            </button>
-
-                            {comboOpen && (
-                              <div style={{
-                                position: 'fixed', inset: 0,
-                                background: 'rgba(0,0,0,0.5)',
-                                zIndex: 200,
-                                display: 'flex',
-                                flexDirection: 'column',
-                                justifyContent: 'flex-end',
-                              }}>
-                                <div style={{
-                                  background: 'var(--surface)',
-                                  borderRadius: '16px 16px 0 0',
-                                  maxHeight: '60vh',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                }}>
-                                  {/* Sheet header */}
-                                  <div style={{
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    padding: '1rem 1.25rem 0.75rem',
-                                    borderBottom: '1px solid var(--border)',
-                                  }}>
-                                    <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Select Recipient</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setComboOpen(false)}
-                                      style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '1.1rem' }}
-                                    >
-                                      ✕
-                                    </button>
-                                  </div>
-
-                                  {/* Search input */}
-                                  <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--border)' }}>
-                                    <input
-                                      autoFocus
-                                      type="text"
-                                      placeholder="Search by name…"
-                                      value={comboQuery}
-                                      onChange={e => setComboQuery(e.target.value)}
-                                      style={{ ...S.input }}
-                                    />
-                                  </div>
-
-                                  {/* Results */}
-                                  <div style={{ overflowY: 'auto', flex: 1 }}>
-                                    {comboResults.length === 0 ? (
-                                      <p style={{ padding: '1rem 1.25rem', color: 'var(--muted)', fontSize: '0.9rem' }}>No results</p>
-                                    ) : (
-                                      comboResults.map((u, i) => {
-                                        const isRecent     = recentRecipients.some(r => r.id === u.id)
-                                        const prevWasRecent = i > 0 && recentRecipients.some(r => r.id === comboResults[i - 1].id)
-                                        const showDivider  = i > 0 && prevWasRecent && !isRecent && comboQuery.trim().length === 0
-                                        return (
-                                          <div key={u.id}>
-                                            {i === 0 && isRecent && comboQuery.trim().length === 0 && (
-                                              <div style={{ padding: '0.35rem 1.25rem', fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', background: 'var(--bg)' }}>
-                                                Recent
-                                              </div>
-                                            )}
-                                            {showDivider && (
-                                              <div style={{ padding: '0.35rem 1.25rem', fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', background: 'var(--bg)' }}>
-                                                All volunteers
-                                              </div>
-                                            )}
-                                            <button
-                                              type="button"
-                                              onClick={() => selectRecipient(u)}
-                                              style={{
-                                                width: '100%',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '0.75rem',
-                                                padding: '0.75rem 1.25rem',
-                                                background: msgRecipientVolId === u.id ? 'rgba(2,65,107,0.08)' : 'none',
-                                                border: 'none',
-                                                borderBottom: '1px solid var(--border)',
-                                                cursor: 'pointer',
-                                                fontFamily: 'DM Sans, sans-serif',
-                                                textAlign: 'left',
-                                                minHeight: '52px',
-                                              }}
-                                            >
-                                              <div style={{
-                                                width: '32px', height: '32px', borderRadius: '50%',
-                                                background: 'var(--surface)', flexShrink: 0,
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                fontWeight: 600, fontSize: '0.85rem', color: 'var(--accent)',
-                                              }}>
-                                                {u.full_name?.charAt(0)}
-                                              </div>
-                                              <div>
-                                                <p style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--text)' }}>{u.full_name}</p>
-                                                {isRecent && comboQuery.trim().length === 0 && (
-                                                  <p style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>Recent</p>
-                                                )}
-                                              </div>
-                                            </button>
-                                          </div>
-                                        )
-                                      })
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          /* ── Desktop: inline combobox ── */
-                          <div ref={comboRef} style={{ position: 'relative' }}>
-                            <input
-                              type="text"
-                              placeholder="Search by name…"
-                              value={comboQuery}
-                              onChange={e => { setComboQuery(e.target.value); setComboOpen(true); setMsgRecipientVolId('') }}
-                              onFocus={() => setComboOpen(true)}
-                              style={{ ...S.input }}
-                            />
-
-                            {comboOpen && (
-                              <div style={{
-                                position: 'absolute',
-                                top: 'calc(100% + 4px)',
-                                left: 0, right: 0,
-                                background: 'var(--surface)',
-                                border: '1px solid var(--border)',
-                                borderRadius: '8px',
-                                boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                                zIndex: 100,
-                                maxHeight: '260px',
-                                overflowY: 'auto',
-                              }}>
-                                {comboResults.length === 0 ? (
-                                  <p style={{ padding: '0.75rem 1rem', color: 'var(--muted)', fontSize: '0.85rem' }}>
-                                    {comboQuery.trim().length === 0 ? 'Start typing to search…' : 'No results'}
-                                  </p>
-                                ) : (
-                                  comboResults.map((u, i) => {
-                                    const isRecent      = recentRecipients.some(r => r.id === u.id)
-                                    const prevWasRecent = i > 0 && recentRecipients.some(r => r.id === comboResults[i - 1].id)
-                                    const showDivider   = i > 0 && prevWasRecent && !isRecent && comboQuery.trim().length === 0
-                                    return (
-                                      <div key={u.id}>
-                                        {i === 0 && isRecent && comboQuery.trim().length === 0 && (
-                                          <div style={{ padding: '0.35rem 1rem', fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                                            Recent
-                                          </div>
-                                        )}
-                                        {showDivider && (
-                                          <div style={{ padding: '0.35rem 1rem', fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderTop: '1px solid var(--border)', marginTop: '0.25rem' }}>
-                                            All volunteers
-                                          </div>
-                                        )}
-                                        <button
-                                          type="button"
-                                          onMouseDown={e => { e.preventDefault(); selectRecipient(u) }}
-                                          style={{
-                                            width: '100%',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.6rem',
-                                            padding: '0.55rem 1rem',
-                                            background: msgRecipientVolId === u.id ? 'rgba(2,65,107,0.08)' : 'none',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            fontFamily: 'DM Sans, sans-serif',
-                                            textAlign: 'left',
-                                            fontSize: '0.875rem',
-                                            color: 'var(--text)',
-                                          }}
-                                        >
-                                          <div style={{
-                                            width: '26px', height: '26px', borderRadius: '50%',
-                                            background: 'var(--bg)', flexShrink: 0,
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            fontWeight: 600, fontSize: '0.75rem', color: 'var(--accent)',
-                                          }}>
-                                            {u.full_name?.charAt(0)}
-                                          </div>
-                                          <span>{u.full_name}</span>
-                                        </button>
-                                      </div>
-                                    )
-                                  })
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {msgRecipientType === 'shift' && myShiftCombos.length > 0 && (
-                      <div style={{ marginTop: '0.75rem' }}>
-                        <label style={S.label}>Which shift</label>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                          {myShiftCombos.map(combo => {
-                            const active = msgSelectedShift?.key === combo.key
-                            return <button key={combo.key} type="button" onClick={() => setMsgSelectedShift(combo)} style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Mono, monospace', background: active ? '#1e40af' : 'var(--surface)', color: active ? '#bfdbfe' : 'var(--muted)', border: active ? 'none' : '1px solid var(--border)' }}>{combo.label}</button>
-                          })}
-                        </div>
-                      </div>
-                    )}
-                    {msgRecipientType === 'role' && myRoles.length > 0 && (
-                      <div style={{ marginTop: '0.75rem' }}>
-                        <label style={S.label}>Which role</label>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                          {myRoles.map(role => {
-                            const active = msgSelectedRole === role
-                            return <button key={role} type="button" onClick={() => setMsgSelectedRole(role)} style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: active ? 'var(--accent)' : 'var(--surface)', color: active ? '#fff' : 'var(--muted)', border: active ? 'none' : '1px solid var(--border)' }}>{role}</button>
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label style={S.label}>Message</label>
-                    <textarea value={msgBody} onChange={e => setMsgBody(e.target.value)} rows={4} placeholder="Write your message..." style={{ ...S.input, resize: 'vertical' }} />
-                  </div>
-                  <div>
-                    <label style={S.label}>Attach image <span style={{ textTransform: 'none', fontSize: '0.72rem', color: 'var(--muted)' }}>(optional · max 5 MB)</span></label>
-                    {msgImagePreview ? (
-                      <div style={{ position: 'relative', display: 'inline-block' }}>
-                        <img src={msgImagePreview} alt="Preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px', objectFit: 'cover', border: '1px solid var(--border)', display: 'block' }} />
-                        <button type="button" onClick={clearImage} style={{ position: 'absolute', top: '6px', right: '6px', background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
-                      </div>
-                    ) : (
-                      <button type="button" onClick={() => fileInputRef.current?.click()} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1rem', background: 'var(--bg)', border: '1px dashed var(--border)', borderRadius: '8px', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.85rem', fontFamily: 'DM Sans, sans-serif', width: '100%', justifyContent: 'center' }}>
-                        📎 Choose image
-                      </button>
-                    )}
-                    <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleImageSelect} style={{ display: 'none' }} />
-                  </div>
-                  <button type="submit"
-                    disabled={sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole) || (msgRecipientType === 'user' && !msgRecipientVolId)}
-                    style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: sendingMsg ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
-                    {uploadingImage ? 'Uploading image...' : sendingMsg ? 'Sending...' : 'Send Message'}
-                  </button>
-                </form>
-              </div>
-            )}
-          </div>
+          <MessageTab
+            user={user}
+            profile={profile}
+            supabase={supabase}
+            showToast={showToast}
+            isMobile={isMobile}
+            allUsers={allUsers}
+            getInboxMessages={getInboxMessages}
+            MAX_FILE_SIZE={MAX_FILE_SIZE}
+            SHIFTS={SHIFTS}
+            schedule={schedule}
+          />
         )}
 
         {/* ── INTERN REPORT TAB ───────────────────────────────────────────── */}

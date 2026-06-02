@@ -38,6 +38,7 @@ export async function POST(req) {
     recipient_volunteer_id,
     body,
     image_url,
+    parent_message_id,
   } = await req.json()
 
   // ── 3. Insert the message ─────────────────────────────────────────────────
@@ -52,6 +53,7 @@ export async function POST(req) {
       recipient_volunteer_id: recipient_volunteer_id ?? null,
       body:                   body?.trim() ?? '',
       image_url:              image_url ?? null,
+      parent_message_id:      parent_message_id      ?? null, 
     })
     .select()
     .single()
