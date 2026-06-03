@@ -119,19 +119,14 @@ function ReplyThread({
   if (!expanded) {
     return (
       <div
-        onClick={() => {
-          setExpanded(true)
-          onMarkRead(message.id, replies.map(r => r.id))
-        }}
         style={{
           display: 'flex',
-          alignItems: 'flex-start',
-          gap: '0.6rem',
-          padding: '0.5rem 0.75rem',
+          alignItems: 'center',
+          gap: '0.5rem',
+          padding: '0.45rem 0.75rem',
           borderRadius: '8px',
           border: `1px solid ${isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'}`,
           background: isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
-          cursor: 'pointer',
           userSelect: 'none',
         }}
         onMouseEnter={e => e.currentTarget.style.background = 'var(--surface)'}
@@ -139,32 +134,82 @@ function ReplyThread({
       >
         {/* Unread dot */}
         {isUnread && (
-          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0, marginTop: '0.3rem' }} />
+          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
         )}
 
-        {/* Content: two lines */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Line 1: sender + timestamp */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontWeight: isUnread ? 700 : 500, fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
-              {senderLabel || message.sender?.full_name || 'Unknown'}
-            </span>
-            <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
-              {formatDateTime(message.created_at)}
-            </span>
-          </div>
-          {/* Line 2: reply count + body snippet */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.15rem' }}>
-            {replyCount > 0 && (
+        {/* Clickable row content */}
+        <div
+          onClick={() => {
+            setExpanded(true)
+            onMarkRead(message.id, replies.map(r => r.id))
+          }}
+          style={{ flex: 1, minWidth: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', overflow: 'hidden' }}
+        >
+          {/* Sender name */}
+          <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
+            {senderLabel || message.sender?.full_name || 'Unknown'}
+          </span>
+
+          {/* Separator */}
+          <span style={{ color: 'var(--border)', fontSize: '0.75rem', flexShrink: 0 }}>·</span>
+
+          {/* Reply count badge inline */}
+          {replyCount > 0 && (
+            <>
               <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
+                {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
               </span>
-            )}
-            <span style={{ fontSize: '0.75rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {bodySnippet}
-            </span>
-          </div>
+              <span style={{ color: 'var(--border)', fontSize: '0.75rem', flexShrink: 0 }}>·</span>
+            </>
+          )}
+
+          {/* Body snippet — takes all remaining space, truncates */}
+          <span style={{ fontSize: '0.78rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            {bodySnippet}
+          </span>
         </div>
+
+        {/* Timestamp */}
+        <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          {formatDateTime(message.created_at)}
+        </span>
+
+        {/* Inline reply button — only for replyable threads */}
+        {canReply && (
+          <button
+            onClick={e => {
+              e.stopPropagation()
+              setExpanded(true)
+              onMarkRead(message.id, replies.map(r => r.id))
+              setReplyOpen(true)
+            }}
+            title="Reply"
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              padding: '0.2rem 0.55rem',
+              background: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: '100px',
+              color: 'var(--muted)',
+              fontSize: '0.7rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              transition: 'border-color 0.15s, color 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+          >
+            <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 14 4 9 9 4" />
+              <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+            </svg>
+            Reply
+          </button>
+        )}
       </div>
     )
   }
