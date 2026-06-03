@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { MessageCard } from './MessageCard'
+import { formatDateTime } from '../lib/timeUtils'
 
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
@@ -76,9 +77,14 @@ function ReplyThread({
   onReplySent,
   senderLabel,
 }) {
+  const [expanded, setExpanded]     = useState(false)
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
+
+  const isUnread = readMessageIds && !readMessageIds.has(message.id) && message.sender_id !== user?.id
+  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ').slice(0, 80) + (message.body.length > 80 ? '…' : '') : '📎 Image'
+  const replyCount = replies.length
 
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
@@ -131,8 +137,75 @@ function ReplyThread({
 
   const hasReplies = replies.length > 0
 
+  if (!expanded) {
+    return (
+      <div
+        onClick={() => setExpanded(true)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          padding: '0.6rem 0.85rem',
+          borderRadius: '8px',
+          border: `1px solid ${isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'}`,
+          background: isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface)'}
+        onMouseLeave={e => e.currentTarget.style.background = isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)'}
+      >
+        {/* Unread dot */}
+        {isUnread && (
+          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
+        )}
+
+        {/* Sender */}
+        <span style={{ fontWeight: isUnread ? 700 : 500, fontSize: '0.88rem', whiteSpace: 'nowrap', flexShrink: 0, minWidth: '7rem' }}>
+          {senderLabel || message.sender?.full_name || 'Unknown'}
+        </span>
+
+        {/* Snippet */}
+        <span style={{ fontSize: '0.85rem', color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {replyCount > 0 && (
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent)', marginRight: '0.4rem' }}>
+              {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
+            </span>
+          )}
+          {bodySnippet}
+        </span>
+
+        {/* Timestamp */}
+        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          {formatDateTime(message.created_at)}
+        </span>
+      </div>
+    )
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0', margin: '0.5rem 0' }}>
+      {/* Collapse button */}
+      <button
+        onClick={() => { setExpanded(false); setReplyOpen(false); setReplyBody('') }}
+        style={{
+          alignSelf: 'flex-start',
+          marginBottom: '0.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.3rem',
+          padding: '0.2rem 0.6rem',
+          background: 'none',
+          border: '1px solid var(--border)',
+          borderRadius: '100px',
+          color: 'var(--muted)',
+          fontSize: '0.75rem',
+          cursor: 'pointer',
+          fontFamily: 'DM Sans, sans-serif',
+        }}
+      >
+        ↑ Collapse
+      </button>
       {/* ── Original message ── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
         <MessageCard
@@ -654,7 +727,7 @@ export function MessageTab({
           {inboxThreads.length === 0 ? (
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No messages yet.</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
               {inboxThreads.map(m => (
                 <ReplyThread
                   key={m.id}
@@ -698,7 +771,7 @@ export function MessageTab({
           {sentMessages.length === 0 ? (
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No sent messages yet.</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
               {sentMessages.map(m => {
                 const toLabel =
                   m.recipient_type === 'everyone' ? 'To: Everyone' :
