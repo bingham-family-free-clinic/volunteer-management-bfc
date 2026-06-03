@@ -227,40 +227,11 @@ function ReplyThread({
           user={user}
           setLightboxUrl={setLightboxUrl}
           senderLabel={senderLabel}
+          canReply={canReply}
+          replyOpen={replyOpen}
+          onReply={() => setReplyOpen(true)}
         />
       </div>
-
-      {/* ── Reply button (inside the thread, below original message) ── */}
-      {canReply && !replyOpen && (
-        <div style={{ paddingLeft: '0.5rem', marginTop: '0.4rem' }}>
-          <button
-            onClick={e => { e.stopPropagation(); setReplyOpen(true) }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.3rem',
-              padding: '0.25rem 0.65rem',
-              background: 'none',
-              border: '1px solid var(--border)',
-              borderRadius: '100px',
-              color: 'var(--muted)',
-              fontSize: '0.72rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: 'DM Sans, sans-serif',
-              transition: 'border-color 0.15s, color 0.15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-          >
-            <svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 14 4 9 9 4" />
-              <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-            </svg>
-            {hasReplies ? 'Reply again' : 'Reply'}
-          </button>
-        </div>
-      )}
 
       {/* ── Threaded replies ── */}
       {hasReplies && (
