@@ -113,7 +113,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span
             style={{
-              fontSize: '0.68rem',
+              fontSize: '0.8rem',
               padding: '0.15rem 0.5rem',
               borderRadius: '100px',
               background: 'var(--surface)',
@@ -127,7 +127,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           <span
             style={{
               color: 'var(--muted)',
-              fontSize: '0.7rem',
+              fontSize: '0.8rem',
               fontFamily: 'DM Mono, monospace',
             }}
           >
@@ -146,7 +146,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                 border: '1px solid var(--border)',
                 borderRadius: '100px',
                 color: 'var(--muted)',
-                fontSize: '0.68rem',
+                fontSize: '0.8rem',
                 fontWeight: 500,
                 cursor: 'pointer',
                 fontFamily: 'DM Sans, sans-serif',
