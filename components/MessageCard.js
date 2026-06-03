@@ -133,6 +133,35 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           >
             {formatDateTime(m.created_at)}
           </span>
+
+          {canReply && !replyOpen && (
+            <button
+              onClick={e => { e.stopPropagation(); onReply?.() }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                padding: '0.15rem 0.55rem',
+                background: 'none',
+                border: '1px solid var(--border)',
+                borderRadius: '100px',
+                color: 'var(--muted)',
+                fontSize: '0.68rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: 'DM Sans, sans-serif',
+                transition: 'border-color 0.15s, color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+            >
+              <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 14 4 9 9 4" />
+                <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+              </svg>
+              Reply
+            </button>
+          )}
         </div>
       </div>
 
@@ -167,37 +196,6 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
             marginTop: m.body ? '0.5rem' : 0,
           }}
         />
-      )}
-
-      {canReply && !replyOpen && (
-        <div style={{ marginTop: '0.6rem', display: 'flex', justifyContent: 'flex-end' }}>
-          <button
-            onClick={e => { e.stopPropagation(); onReply?.() }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.3rem',
-              padding: '0.25rem 0.65rem',
-              background: 'none',
-              border: '1px solid var(--border)',
-              borderRadius: '100px',
-              color: 'var(--muted)',
-              fontSize: '0.72rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: 'DM Sans, sans-serif',
-              transition: 'border-color 0.15s, color 0.15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-          >
-            <svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 14 4 9 9 4" />
-              <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-            </svg>
-            Reply
-          </button>
-        </div>
       )}
     </div>
   )

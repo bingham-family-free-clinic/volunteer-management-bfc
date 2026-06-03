@@ -137,42 +137,37 @@ function ReplyThread({
           <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
         )}
 
-        {/* Clickable row content */}
+        {/* Clickable two-line content */}
         <div
           onClick={() => {
             setExpanded(true)
             onMarkRead(message.id, replies.map(r => r.id))
           }}
-          style={{ flex: 1, minWidth: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', overflow: 'hidden' }}
+          style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
         >
-          {/* Sender name */}
-          <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
-            {senderLabel || message.sender?.full_name || 'Unknown'}
-          </span>
-
-          {/* Separator */}
-          <span style={{ color: 'var(--border)', fontSize: '0.75rem', flexShrink: 0 }}>·</span>
-
-          {/* Reply count badge inline */}
-          {replyCount > 0 && (
-            <>
-              <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
+          {/* Line 1: sender + timestamp */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {senderLabel || message.sender?.full_name || 'Unknown'}
+            </span>
+            <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {formatDateTime(message.created_at)}
+            </span>
+          </div>
+          {/* Line 2: reply count + snippet (only rendered if there is content) */}
+          {(replyCount > 0 || bodySnippet) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
+              {replyCount > 0 && (
+                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                  {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
+                </span>
+              )}
+              <span style={{ fontSize: '0.75rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {bodySnippet}
               </span>
-              <span style={{ color: 'var(--border)', fontSize: '0.75rem', flexShrink: 0 }}>·</span>
-            </>
+            </div>
           )}
-
-          {/* Body snippet — takes all remaining space, truncates */}
-          <span style={{ fontSize: '0.78rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-            {bodySnippet}
-          </span>
         </div>
-
-        {/* Timestamp */}
-        <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
-          {formatDateTime(message.created_at)}
-        </span>
 
         {/* Inline reply button — only for replyable threads */}
         {canReply && (
