@@ -103,7 +103,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           <span
             style={{
               fontWeight: isUnread ? 700 : 600,
-              fontSize: '0.9rem',
+              fontSize: '0.8rem',
             }}
           >
             {senderLabel || m.sender?.full_name || 'Unknown'}
@@ -113,7 +113,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span
             style={{
-              fontSize: '0.75rem',
+              fontSize: '0.68rem',
               padding: '0.15rem 0.5rem',
               borderRadius: '100px',
               background: 'var(--surface)',
@@ -127,7 +127,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           <span
             style={{
               color: 'var(--muted)',
-              fontSize: '0.78rem',
+              fontSize: '0.7rem',
               fontFamily: 'DM Mono, monospace',
             }}
           >
@@ -139,7 +139,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
       {m.body && (
         <p
           style={{
-            fontSize: '0.9rem',
+            fontSize: '0.82rem',
             lineHeight: 1.5,
             margin: 0,
             marginBottom: m.image_url ? '0.75rem' : 0,

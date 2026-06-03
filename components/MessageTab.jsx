@@ -37,31 +37,6 @@ const S = {
   },
 }
 
-// ── ViewCountBadge (broadcast read count) ─────────────────────────────────────
-function ViewCountBadge({ message, broadcastReadCounts }) {
-  if (!BROADCAST_TYPES.includes(message?.recipient_type)) return null
-  const count = broadcastReadCounts[message.id] ?? null
-  return (
-    <span
-      title={count === null ? 'Loading views…' : `${count} ${count === 1 ? 'person has' : 'people have'} read this`}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-        fontSize: '0.72rem', fontWeight: 500, color: 'var(--muted)',
-        background: 'var(--bg)', border: '1px solid var(--border)',
-        borderRadius: '100px', padding: '0.15rem 0.55rem', marginTop: '0.35rem',
-        fontFamily: 'DM Mono, monospace', letterSpacing: '0.01em',
-        userSelect: 'none', whiteSpace: 'nowrap', flexShrink: 0,
-      }}
-    >
-      <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
-        <path d="M1 10s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" />
-        <circle cx="10" cy="10" r="2.5" />
-      </svg>
-      {count === null ? '…' : count}
-    </span>
-  )
-}
-
 // ── ReplyThread: renders a single top-level message + its replies ─────────────
 function ReplyThread({
   message,
@@ -71,19 +46,23 @@ function ReplyThread({
   supabase,
   showToast,
   readMessageIds,
-  broadcastReadCounts,
   setLightboxUrl,
   allUsers,
   onReplySent,
   onMarkRead,
   senderLabel,
 }) {
-  const isUnread = readMessageIds && !readMessageIds.has(message.id) && message.sender_id !== user?.id
+  const isUnread = readMessageIds && (
+    // Received message not yet read
+    (!readMessageIds.has(message.id) && message.sender_id !== user?.id) ||
+    // Sent message that has unread replies
+    (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id)))
+  )
   const [expanded, setExpanded]     = useState(!!isUnread)
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
-  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ').slice(0, 80) + (message.body.length > 80 ? '…' : '') : '📎 Image'
+  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
   const replyCount = replies.length
 
   const isAdmin        = profile?.role === 'admin'
@@ -146,9 +125,9 @@ function ReplyThread({
         }}
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          padding: '0.6rem 0.85rem',
+          alignItems: 'flex-start',
+          gap: '0.6rem',
+          padding: '0.5rem 0.75rem',
           borderRadius: '8px',
           border: `1px solid ${isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'}`,
           background: isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
@@ -160,57 +139,43 @@ function ReplyThread({
       >
         {/* Unread dot */}
         {isUnread && (
-          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
+          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0, marginTop: '0.3rem' }} />
         )}
 
-        {/* Sender */}
-        <span style={{ fontWeight: isUnread ? 700 : 500, fontSize: '0.88rem', whiteSpace: 'nowrap', flexShrink: 0, minWidth: '7rem' }}>
-          {senderLabel || message.sender?.full_name || 'Unknown'}
-        </span>
-
-        {/* Snippet */}
-        <span style={{ fontSize: '0.85rem', color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {replyCount > 0 && (
-            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent)', marginRight: '0.4rem' }}>
-              {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
+        {/* Content: two lines */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Line 1: sender + timestamp */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontWeight: isUnread ? 700 : 500, fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {senderLabel || message.sender?.full_name || 'Unknown'}
             </span>
-          )}
-          {bodySnippet}
-        </span>
-
-        {/* Timestamp */}
-        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
-          {formatDateTime(message.created_at)}
-        </span>
+            <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {formatDateTime(message.created_at)}
+            </span>
+          </div>
+          {/* Line 2: reply count + body snippet */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.15rem' }}>
+            {replyCount > 0 && (
+              <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
+              </span>
+            )}
+            <span style={{ fontSize: '0.75rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {bodySnippet}
+            </span>
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0', margin: '0.5rem 0' }}>
-      {/* Collapse button */}
-      <button
+      {/* ── Original message (click to collapse) ── */}
+      <div
+        style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
         onClick={() => { setExpanded(false); setReplyOpen(false); setReplyBody('') }}
-        style={{
-          alignSelf: 'flex-start',
-          marginBottom: '0.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.3rem',
-          padding: '0.2rem 0.6rem',
-          background: 'none',
-          border: '1px solid var(--border)',
-          borderRadius: '100px',
-          color: 'var(--muted)',
-          fontSize: '0.75rem',
-          cursor: 'pointer',
-          fontFamily: 'DM Sans, sans-serif',
-        }}
       >
-        ↑ Collapse
-      </button>
-      {/* ── Original message ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
         <MessageCard
           m={message}
           readMessageIds={readMessageIds}
@@ -218,12 +183,39 @@ function ReplyThread({
           setLightboxUrl={setLightboxUrl}
           senderLabel={senderLabel}
         />
-        {BROADCAST_TYPES.includes(message?.recipient_type) && (
-          <div style={{ paddingLeft: '0.25rem' }}>
-            <ViewCountBadge message={message} broadcastReadCounts={broadcastReadCounts} />
-          </div>
-        )}
       </div>
+
+      {/* ── Reply button (inside the thread, below original message) ── */}
+      {canReply && !replyOpen && (
+        <div style={{ paddingLeft: '0.5rem', marginTop: '0.4rem' }}>
+          <button
+            onClick={e => { e.stopPropagation(); setReplyOpen(true) }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+              padding: '0.25rem 0.65rem',
+              background: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: '100px',
+              color: 'var(--muted)',
+              fontSize: '0.72rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              transition: 'border-color 0.15s, color 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+          >
+            <svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 14 4 9 9 4" />
+              <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+            </svg>
+            {hasReplies ? 'Reply again' : 'Reply'}
+          </button>
+        </div>
+      )}
 
       {/* ── Threaded replies ── */}
       {hasReplies && (
@@ -274,104 +266,75 @@ function ReplyThread({
       )}
 
       {/* ── Reply composer ── */}
-      {canReply && (
+      {canReply && replyOpen && (
         <div style={{
           marginTop: '0.5rem',
           marginLeft: hasReplies ? '1rem' : '0',
           paddingLeft: hasReplies ? '0.875rem' : '0',
           borderLeft: hasReplies ? '2px solid var(--border)' : 'none',
         }}>
-          {!replyOpen ? (
-            <button
-              onClick={() => setReplyOpen(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                padding: '0.3rem 0.75rem',
-                background: 'none',
-                border: '1px solid var(--border)',
-                borderRadius: '100px',
-                color: 'var(--muted)',
-                fontSize: '0.78rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: 'DM Sans, sans-serif',
-                transition: 'border-color 0.15s, color 0.15s',
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+            padding: '0.75rem',
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+            borderRadius: '10px',
+          }}>
+            <textarea
+              autoFocus
+              value={replyBody}
+              onChange={e => setReplyBody(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
+                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody('') }
               }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-            >
-              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 14 4 9 9 4" />
-                <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-              </svg>
-              {hasReplies ? 'Reply again' : 'Reply'}
-            </button>
-          ) : (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.5rem',
-              padding: '0.75rem',
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: '10px',
-            }}>
-              <textarea
-                autoFocus
-                value={replyBody}
-                onChange={e => setReplyBody(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
-                  if (e.key === 'Escape') { setReplyOpen(false); setReplyBody('') }
-                }}
-                placeholder="Write a reply… (⌘↵ to send)"
-                rows={2}
+              placeholder="Write a reply… (⌘↵ to send)"
+              rows={2}
+              style={{
+                ...S.input,
+                resize: 'vertical',
+                fontSize: '0.82rem',
+                padding: '0.6rem 0.75rem',
+              }}
+            />
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setReplyOpen(false); setReplyBody('') }}
                 style={{
-                  ...S.input,
-                  resize: 'vertical',
-                  fontSize: '0.88rem',
-                  padding: '0.6rem 0.75rem',
+                  padding: '0.35rem 0.75rem',
+                  background: 'none',
+                  border: '1px solid var(--border)',
+                  borderRadius: '7px',
+                  color: 'var(--muted)',
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
                 }}
-              />
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button
-                  onClick={() => { setReplyOpen(false); setReplyBody('') }}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    background: 'none',
-                    border: '1px solid var(--border)',
-                    borderRadius: '7px',
-                    color: 'var(--muted)',
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSendReply}
-                  disabled={sending || !replyBody.trim()}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    background: 'var(--accent)',
-                    border: 'none',
-                    borderRadius: '7px',
-                    color: '#fff',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    cursor: (sending || !replyBody.trim()) ? 'not-allowed' : 'pointer',
-                    opacity: !replyBody.trim() ? 0.5 : 1,
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {sending ? 'Sending…' : 'Send'}
-                </button>
-              </div>
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendReply}
+                disabled={sending || !replyBody.trim()}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  background: 'var(--accent)',
+                  border: 'none',
+                  borderRadius: '7px',
+                  color: '#fff',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: (sending || !replyBody.trim()) ? 'not-allowed' : 'pointer',
+                  opacity: !replyBody.trim() ? 0.5 : 1,
+                  fontFamily: 'DM Sans, sans-serif',
+                }}
+              >
+                {sending ? 'Sending…' : 'Send'}
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>
