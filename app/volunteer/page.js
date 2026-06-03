@@ -295,6 +295,33 @@ export default function VolunteerPage() {
       })
     }
 
+    // Seed the unread message count badge immediately on load
+    const { data: allMsgs } = await supabase
+      .from('messages')
+      .select('id, sender_id, recipient_type, recipient_volunteer_id, parent_message_id')
+      .order('created_at', { ascending: false })
+      .limit(MSG_PAGE_SIZE * 2)
+    const { data: reads } = await supabase
+      .from('message_reads')
+      .select('message_id')
+      .eq('user_id', user.id)
+    const readSet = new Set((reads || []).map(r => r.message_id))
+    const msgs = allMsgs || []
+    // Count top-level threads where there's at least one unread message from someone else
+    const topLevel = msgs.filter(m => !m.parent_message_id)
+    const repliesMap = {}
+    msgs.filter(m => m.parent_message_id).forEach(r => {
+      if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
+      repliesMap[r.parent_message_id].push(r)
+    })
+    const count = topLevel.filter(m => {
+      if (m.sender_id === user.id) {
+        return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
+      }
+      return !readSet.has(m.id)
+    }).length
+    setUnreadCount(count)
+
     const { data: open } = await supabase
       .from('shifts')
       .select('id, clock_in, role')
@@ -418,9 +445,6 @@ export default function VolunteerPage() {
     setTab(newTab)
     if (newTab === 'schedule')    await fetchScheduleTab()
     if (newTab === 'callout')     await fetchCalloutTab()
-    if (newTab === 'messages') {
-      setUnreadCount(0)
-    }
     if (newTab === 'account')     await fetchAccountTab()
     if (newTab === 'internreport') {
       // Intern report only needs schedule (already fetched in critical path)
@@ -1080,6 +1104,7 @@ export default function VolunteerPage() {
             MAX_FILE_SIZE={MAX_FILE_SIZE}
             SHIFTS={SHIFTS}
             schedule={schedule}
+            onUnreadCountChange={setUnreadCount}
           />
         )}
 

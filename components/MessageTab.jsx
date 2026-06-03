@@ -55,13 +55,22 @@ function ReplyThread({
   const isUnread = readMessageIds && (
     // Received message not yet read
     (!readMessageIds.has(message.id) && message.sender_id !== user?.id) ||
-    // Sent message that has unread replies
-    (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id)))
+    // Sent message that has unread replies — exclude replies the user sent themselves (fix #3)
+    (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
   )
   const [expanded, setExpanded]     = useState(!!isUnread)
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
+
+  // Fix #2: if the thread auto-expanded on mount because it was unread,
+  // write the message_reads rows immediately — don't wait for a click.
+  useEffect(() => {
+    if (isUnread && expanded) {
+      onMarkRead(message.id, replies.map(r => r.id))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // intentionally runs once on mount only
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
   const replyCount = replies.length
 
@@ -363,6 +372,7 @@ export function MessageTab({
   getInboxMessages,
   MAX_FILE_SIZE,
   schedule = [],
+  onUnreadCountChange,
 }) {
   // ── Local state ────────────────────────────────────────────────────────────
   const [messages, setMessages]               = useState([])
@@ -541,15 +551,28 @@ export function MessageTab({
   // Inbox threads: messages sent to this user (or admin) that are top-level
   const inboxThreads = inboxTopLevel.filter(m => {
     if (m.sender_id === user?.id) {
-      // Only show own sent messages in inbox if they have replies
-      return (inboxRepliesMap[m.id] || []).length > 0
+      // Fix #4: only show own sent messages in inbox if they have replies from someone ELSE
+      return (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
     }
     return true
   }).filter(m => {
-    // Apply the same inbox filter as getInboxMessages would
     if (!getInboxMessages) return true
-    return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).length > 0
+    return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
   })
+
+  // Unread count across all inbox threads (for tab badge and parent notification)
+  const unreadThreadCount = readMessageIds ? inboxThreads.filter(m => {
+    const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
+    const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
+      r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
+    )
+    return isUnreadMsg || hasUnreadReplies
+  }).length : 0
+
+  // Notify parent whenever unread count changes so the Messages tab badge stays in sync
+  useEffect(() => {
+    onUnreadCountChange?.(unreadThreadCount)
+  }, [unreadThreadCount, onUnreadCountChange])
 
   const recentRecipients = sentMessages
     .filter(m => m.recipient_type === 'volunteer' && m.recipient_volunteer_id)
@@ -681,6 +704,7 @@ export function MessageTab({
             key={key}
             onClick={() => setMsgView(key)}
             style={{
+              position: 'relative',
               padding: '0.45rem 0.9rem',
               borderRadius: '8px',
               fontSize: '0.85rem',
@@ -693,6 +717,17 @@ export function MessageTab({
             }}
           >
             {label}
+            {key === 'inbox' && unreadThreadCount > 0 && (
+              <span style={{
+                position: 'absolute', top: '-5px', right: '-5px',
+                background: '#ef4444', color: '#fff', borderRadius: '50%',
+                width: '17px', height: '17px', fontSize: '0.65rem', fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: '2px solid var(--bg)', lineHeight: 1,
+              }}>
+                {unreadThreadCount > 9 ? '9+' : unreadThreadCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
