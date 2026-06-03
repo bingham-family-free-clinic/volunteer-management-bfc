@@ -168,7 +168,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
       {m.body && (
         <p
           style={{
-            fontSize: '0.92rem',
+            fontSize: '1.12rem',
             lineHeight: 1.5,
             margin: 0,
             marginBottom: m.image_url ? '0.75rem' : 0,
