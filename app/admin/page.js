@@ -1714,6 +1714,17 @@ export default function AdminPage() {
         )}
 
       </div>
+
+      {/* ── Footer ───────────────────────────────────────────────────────── */}
+      <footer style={{ marginTop: '3rem', padding: '1.5rem', textAlign: 'center', borderTop: '1px solid var(--border)' }}>
+        <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: 0 }}>
+          © {new Date().getFullYear()} Bingham Family Free Clinic &nbsp;·&nbsp;
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--muted)', textDecoration: 'underline' }}>Privacy Policy</a>
+          &nbsp;·&nbsp;
+          <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--muted)', textDecoration: 'underline' }}>Terms of Service</a>
+        </p>
+      </footer>
+
     </div>
   )
 }
