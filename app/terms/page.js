@@ -47,10 +47,10 @@ export default function TermsOfService() {
       <h2 style={h2}>10. Contact Us</h2>
       <p>If you have questions about these Terms, please contact:</p>
       <p style={{ paddingLeft: '1rem', borderLeft: '3px solid var(--border, #334155)' }}>
-        <strong>Bingham Family Free Clinic</strong><br />
-        [987 South Geneva Road Suite 141,Orem, UT 84058]<br />
-        [Orem, UT 84058]<br />
-        [info@binghamfamilyclinic.org]
+      <strong>Bingham Family Free Clinic</strong><br />
+      987 South Geneva Road Suite 141<br />
+      Orem, UT 84058<br />
+      info@binghamfamilyclinic.org
       </p>
 
       <p style={{ marginTop: '3rem' }}>

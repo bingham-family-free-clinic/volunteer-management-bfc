@@ -9,25 +9,25 @@ export default function PrivacyPolicy() {
       <h2 style={h2}>1. Information We Collect</h2>
       <p>When you use the App, we may collect the following categories of personal information:</p>
       <ul style={ul}>
-        <li><strong>Identity &amp; Contact:</strong> full name, email address, phone number, and date of birth.</li>
-        <li><strong>Professional Credentials:</strong> role, affiliation, credentials or skills (e.g., EMT, Phlebotomy), languages spoken, license expiration dates, BLS, DEA, FTCA, and TB certification dates.</li>
-        <li><strong>Academic &amp; Internship Information:</strong> school, major, advisor name and contact, department, or supervising organization (where applicable).</li>
-        <li><strong>Scheduling &amp; Attendance:</strong> shift assignments, clock-in and clock-out records, and availability.</li>
-        <li><strong>Communications:</strong> messages sent or received through the App.</li>
-        <li><strong>Activity Logs:</strong> records of actions taken within the App (e.g., account changes, status updates).</li>
-        <li><strong>Account Credentials:</strong> encrypted passwords managed through our authentication provider.</li>
+        <li>- Identity &amp; Contact: full name, email address, phone number, and date of birth.</li>
+        <li>- Professional Credentials: role, affiliation, credentials or skills (e.g., EMT, Phlebotomy), languages spoken, license expiration dates, BLS, DEA, FTCA, and TB certification dates.</li>
+        <li>- Academic &amp; Internship Information: school, major, advisor name and contact, department, or supervising organization (where applicable).</li>
+        <li>- Scheduling &amp; Attendance: shift assignments, clock-in and clock-out records, and availability.</li>
+        <li>- Communications: messages sent or received through the App.</li>
+        <li>- Activity Logs: records of actions taken within the App (e.g., account changes, status updates).</li>
+        <li>Account Credentials: encrypted passwords managed through our authentication provider.</li>
       </ul>
 
       <h2 style={h2}>2. How We Use Your Information</h2>
       <p>We use the information we collect to:</p>
       <ul style={ul}>
-        <li>Create and manage your volunteer account.</li>
-        <li>Schedule and coordinate clinic shifts.</li>
-        <li>Track credential expiration dates and ensure compliance.</li>
-        <li>Communicate with you about your schedule, role, or clinic operations.</li>
-        <li>Maintain an audit log for administrative and safety purposes.</li>
-        <li>Refine and maintain the App.</li>
-        <li>Improve and enhance clinical operations.</li>
+        <li>- Create and manage your volunteer account.</li>
+        <li>- Schedule and coordinate clinic shifts.</li>
+        <li>- Track credential expiration dates and ensure compliance.</li>
+        <li>- Communicate with you about your schedule, role, or clinic operations.</li>
+        <li>- Maintain an audit log for administrative and safety purposes.</li>
+        <li>- Refine and maintain the App.</li>
+        <li>- Improve and enhance clinical operations.</li>
       </ul>
       <p>We do not sell, rent, or share your personal information with third parties.</p>
 
@@ -40,10 +40,10 @@ export default function PrivacyPolicy() {
       <h2 style={h2}>5. Your Rights</h2>
       <p>Depending on your state of residence, you may have the right to:</p>
       <ul style={ul}>
-        <li>Access the personal information we hold about you.</li>
-        <li>Request correction of inaccurate information.</li>
-        <li>Request deletion of your personal information.</li>
-        <li>Withdraw consent where processing is based on consent.</li>
+        <li>- Access the personal information we hold about you.</li>
+        <li>- Request correction of inaccurate information.</li>
+        <li>- Request deletion of your personal information.</li>
+        <li>- Withdraw consent where processing is based on consent.</li>
       </ul>
       <p>To exercise any of these rights, please contact us using the information in Section 8.</p>
 
@@ -51,12 +51,15 @@ export default function PrivacyPolicy() {
       <p>We may update this Privacy Policy from time to time. When we do, we will update the "Last updated" date at the top of this page. Continued use of the App after changes are posted constitutes your acceptance of the revised policy.</p>
 
       <h2 style={h2}>8. Contact Us</h2>
-      <p>If you have questions or concerns about this Privacy Policy or your personal data, please contact:</p>
+      <p>
+      If you have questions or concerns about this Privacy Policy or your personal data, please contact:
+      </p>
+
       <p style={{ paddingLeft: '1rem', borderLeft: '3px solid var(--border, #334155)' }}>
-        <strong>Bingham Family Free Clinic</strong><br />
-        [987 South Geneva Road Suite 141,Orem, UT 84058]<br />
-        [Orem, UT 84058]<br />
-        [info@binghamfamilyclinic.org]
+      <strong>Bingham Family Free Clinic</strong><br />
+      987 South Geneva Road Suite 141<br />
+      Orem, UT 84058<br />
+      info@binghamfamilyclinic.org
       </p>
 
       <p style={{ marginTop: '3rem' }}>
