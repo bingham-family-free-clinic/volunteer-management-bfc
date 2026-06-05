@@ -57,9 +57,7 @@ function ReplyThread({
     // Received message not yet read
     (!readMessageIds.has(message.id) && message.sender_id !== user?.id) ||
     // Sent message that has unread replies — exclude replies the user sent themselves (fix #3)
-    (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)) ||
-    // Admin viewing an admin-directed thread: another admin replied and this admin hasn't read it
-    (isAdmin && message.recipient_type === 'admin' && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
+    (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
   )
   const [expanded, setExpanded]     = useState(!!isUnread)
   const [replyOpen, setReplyOpen]   = useState(false)
@@ -557,23 +555,9 @@ export function MessageTab({
       // Fix #4: only show own sent messages in inbox if they have replies from someone ELSE
       return (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
     }
-    // For admins: also surface recipient_type==='admin' threads where another admin
-    // replied — so the dot appears even if this admin wasn't the original recipient.
-    if (isAdmin && m.recipient_type === 'admin') {
-      const replies = inboxRepliesMap[m.id] || []
-      const hasUnreadAdminReply = replies.some(
-        r => r.sender_id !== user?.id && !readMessageIds.has(r.id)
-      )
-      if (hasUnreadAdminReply) return true
-    }
     return true
   }).filter(m => {
     if (!getInboxMessages) return true
-    // Always include admin-directed threads with unread replies from another admin
-    if (isAdmin && m.recipient_type === 'admin') {
-      const replies = inboxRepliesMap[m.id] || []
-      if (replies.some(r => r.sender_id !== user?.id && !readMessageIds.has(r.id))) return true
-    }
     return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
   })
 
