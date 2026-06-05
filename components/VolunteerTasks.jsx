@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
 const STATUS_META = {
-  open:    { label: 'Open',    color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'  },
-  blocked: { label: 'Blocked', color: '#93c5fd', bg: 'rgba(147,197,253,0.12)', border: 'rgba(147,197,253,0.3)'  },
-  closed:  { label: 'Done',    color: '#2563eb', bg: 'rgba(37,99,235,0.12)',   border: 'rgba(37,99,235,0.3)'  },
+  open:     { label: 'Open',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  blocked:  { label: 'Blocked',  color: '#f97316', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
+  closed:   { label: 'Done',     color: '#2563eb', bg: 'rgba(37,99,235,0.12)',   border: 'rgba(37,99,235,0.3)'    },
+  inactive: { label: 'Inactive', color: '#6b7280', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
 }
 
 const S = {
@@ -65,6 +66,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast }) {
   const assignee = teamMembers.find(m => m.id === task.assignee_id)
 
   async function cycleStatus() {
+    if (task.status === 'inactive') return          // circle button does nothing for inactive
     const next = task.status === 'closed' ? 'open' : 'closed'
     setUpdatingStatus(true)
     const { error } = await supabase.from('tasks').update({ status: next }).eq('id', task.id)
@@ -95,7 +97,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast }) {
       border: `1px solid ${isMine ? 'rgba(2,65,107,0.25)' : 'var(--border)'}`,
       borderRadius: '10px',
       overflow: 'hidden',
-      opacity: task.status === 'closed' ? 0.65 : 1,
+      opacity: (task.status === 'closed' || task.status === 'inactive') ? 0.65 : 1,
     }}>
       {/* Main row */}
       <div style={{ padding: '0.85rem 1rem', display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
@@ -115,8 +117,9 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
-          {task.status === 'closed' && <span style={{ color: '#fff', fontSize: '0.65rem', lineHeight: 1 }}>✓</span>}
-          {task.status === 'blocked' && <span style={{ color: sm.color, fontSize: '0.65rem', lineHeight: 1, fontWeight: 700 }}>!</span>}
+          {task.status === 'closed'   && <span style={{ color: '#fff', fontSize: '0.65rem', lineHeight: 1 }}>✓</span>}
+          {task.status === 'blocked'  && <span style={{ color: sm.color, fontSize: '0.65rem', lineHeight: 1, fontWeight: 700 }}>!</span>}
+          {task.status === 'inactive' && <span style={{ color: sm.color, fontSize: '0.65rem', lineHeight: 1, fontWeight: 700 }}>✕</span>}
         </button>
 
         {/* Content */}
@@ -125,8 +128,8 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast }) {
             <span style={{
               fontWeight: isMine ? 600 : 500,
               fontSize: '0.9rem',
-              color: task.status === 'closed' ? 'var(--muted)' : 'var(--text)',
-              textDecoration: task.status === 'closed' ? 'line-through' : 'none',
+              color: (task.status === 'closed' || task.status === 'inactive') ? 'var(--muted)' : 'var(--text)',
+              textDecoration: (task.status === 'closed' || task.status === 'inactive') ? 'line-through' : 'none',
             }}>
               {task.name}
             </span>
@@ -183,6 +186,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast }) {
             <option value="open">Open</option>
             <option value="blocked">Blocked</option>
             <option value="closed">Closed</option>
+            <option value="inactive">Inactive</option>
             </select>
 
             {/* Due date */}
@@ -349,8 +353,10 @@ export default function VolunteerTasks({ userId, team }) {
   const [tasks, setTasks]             = useState([])
   const [teamMembers, setTeamMembers] = useState([])
   const [loading, setLoading]         = useState(true)
-  const [showDone, setShowDone]       = useState(false)
-  const [showNewForm, setShowNewForm] = useState(false)
+  const [showDone, setShowDone]         = useState(false)
+  const [showBlocked, setShowBlocked]   = useState(false)
+  const [showInactive, setShowInactive] = useState(false)
+  const [showNewForm, setShowNewForm]   = useState(false)
   const [toast, setToast]             = useState(null)
 
   function showToast(text, type = 'success') {
@@ -391,10 +397,12 @@ export default function VolunteerTasks({ userId, team }) {
     showToast('Task created!', 'success')
   }
 
-  const open   = tasks.filter(t => t.status !== 'closed')
-  const closed = tasks.filter(t => t.status === 'closed')
+  const open     = tasks.filter(t => t.status === 'open')
+  const blocked  = tasks.filter(t => t.status === 'blocked')
+  const closed   = tasks.filter(t => t.status === 'closed')
+  const inactive = tasks.filter(t => t.status === 'inactive')
 
-  // Sort: mine first, then by due date
+  // Sort open: mine first, then by due date
   const sortedOpen = [...open].sort((a, b) => {
     const aMine = a.assignee_id === userId ? 0 : 1
     const bMine = b.assignee_id === userId ? 0 : 1
@@ -420,7 +428,10 @@ export default function VolunteerTasks({ userId, team }) {
         <div>
           <h2 style={{ fontWeight: 600, fontSize: '1rem' }}>{team} Tasks</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.1rem' }}>
-            {open.length} open · {closed.length} completed
+            {open.length} open
+            {blocked.length  > 0 ? ` · ${blocked.length} blocked`  : ''}
+            {closed.length   > 0 ? ` · ${closed.length} completed` : ''}
+            {inactive.length > 0 ? ` · ${inactive.length} inactive` : ''}
           </p>
         </div>
         <button
@@ -454,7 +465,7 @@ export default function VolunteerTasks({ userId, team }) {
         <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)', fontSize: '0.9rem' }}>Loading tasks…</div>
       ) : (
         <>
-          {sortedOpen.length === 0 && !showDone && (
+          {sortedOpen.length === 0 && !showDone && !showBlocked && !showInactive && (
             <div style={{ ...S.card, textAlign: 'center', padding: '2rem' }}>
               <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No open tasks for this team.</p>
             </div>
@@ -472,6 +483,38 @@ export default function VolunteerTasks({ userId, team }) {
               />
             ))}
           </div>
+
+          {/* Blocked tasks toggle */}
+          {blocked.length > 0 && (
+            <div>
+              <button
+                onClick={() => setShowBlocked(s => !s)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--muted)', fontSize: '0.82rem',
+                  fontFamily: 'DM Sans, sans-serif', padding: '0.25rem 0',
+                }}
+              >
+                <span style={{ transform: showBlocked ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+                {showBlocked ? 'Hide' : 'Show'} {blocked.length} blocked task{blocked.length !== 1 ? 's' : ''}
+              </button>
+              {showBlocked && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {blocked.map(task => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      currentUserId={userId}
+                      teamMembers={teamMembers}
+                      onUpdate={handleUpdate}
+                      showToast={showToast}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Completed tasks toggle */}
           {closed.length > 0 && (
@@ -491,6 +534,38 @@ export default function VolunteerTasks({ userId, team }) {
               {showDone && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
                   {closed.map(task => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      currentUserId={userId}
+                      teamMembers={teamMembers}
+                      onUpdate={handleUpdate}
+                      showToast={showToast}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Inactive tasks toggle */}
+          {inactive.length > 0 && (
+            <div>
+              <button
+                onClick={() => setShowInactive(s => !s)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--muted)', fontSize: '0.82rem',
+                  fontFamily: 'DM Sans, sans-serif', padding: '0.25rem 0',
+                }}
+              >
+                <span style={{ transform: showInactive ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+                {showInactive ? 'Hide' : 'Show'} {inactive.length} inactive task{inactive.length !== 1 ? 's' : ''}
+              </button>
+              {showInactive && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {inactive.map(task => (
                     <TaskRow
                       key={task.id}
                       task={task}

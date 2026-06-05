@@ -16,9 +16,10 @@ const TEAMS = [
 ]
 
 const STATUS_META = {
-  open:    { label: 'Open',    color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'  },
-  blocked: { label: 'Blocked', color: '#93c5fd', bg: 'rgba(147,197,253,0.12)', border: 'rgba(147,197,253,0.3)'  },
-  closed:  { label: 'Done',    color: '#2563eb', bg: 'rgba(37,99,235,0.12)',   border: 'rgba(37,99,235,0.3)'  },
+  open:     { label: 'Open',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  blocked:  { label: 'Blocked',  color: '#f97316', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
+  closed:   { label: 'Done',     color: '#2563eb', bg: 'rgba(37,99,235,0.12)',   border: 'rgba(37,99,235,0.3)'    },
+  inactive: { label: 'Inactive', color: '#6b7280', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
 }
 
 const S = {
@@ -96,10 +97,10 @@ function AdminTaskRow({ task, allMembers, onUpdate, onDelete, showToast }) {
   return (
     <div style={{
       background: 'var(--bg)',
-      border: `1px solid ${task.status === 'closed' ? 'var(--border)' : sm.border}`,
+      border: `1px solid ${(task.status === 'closed' || task.status === 'inactive') ? 'var(--border)' : sm.border}`,
       borderRadius: '10px',
       overflow: 'hidden',
-      opacity: task.status === 'closed' ? 0.7 : 1,
+      opacity: (task.status === 'closed' || task.status === 'inactive') ? 0.7 : 1,
     }}>
       <div style={{ padding: '0.9rem 1rem', display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
         {/* Status select */}
@@ -124,8 +125,8 @@ function AdminTaskRow({ task, allMembers, onUpdate, onDelete, showToast }) {
         <div style={{ flex: 1, minWidth: '200px' }}>
           <p style={{
             fontWeight: 500, fontSize: '0.9rem',
-            color: task.status === 'closed' ? 'var(--muted)' : 'var(--text)',
-            textDecoration: task.status === 'closed' ? 'line-through' : 'none',
+            color: (task.status === 'closed' || task.status === 'inactive') ? 'var(--muted)' : 'var(--text)',
+            textDecoration: (task.status === 'closed' || task.status === 'inactive') ? 'line-through' : 'none',
             marginBottom: '0.4rem',
           }}>
             {task.name}
@@ -318,8 +319,9 @@ export default function AdminTasks({ currentUserId }) {
   const [allMembers, setAllMembers] = useState([])
   const [loading, setLoading]       = useState(true)
   const [showNewForm, setShowNewForm] = useState(false)
-  const [showDone, setShowDone]     = useState(false)
-  const [filterTeam, setFilterTeam] = useState('')
+  const [showDone, setShowDone]       = useState(false)
+  const [showInactive, setShowInactive] = useState(false)
+  const [filterTeam, setFilterTeam]   = useState('')
   const [filterDue, setFilterDue]   = useState('') // 'overdue' | 'week' | 'month' | ''
   const [toast, setToast]           = useState(null)
 
@@ -376,14 +378,15 @@ export default function AdminTasks({ currentUserId }) {
     return true
   })
 
-  const openTasks   = filtered.filter(t => t.status !== 'closed')
-  const closedTasks = filtered.filter(t => t.status === 'closed')
+  const openTasks     = filtered.filter(t => t.status === 'open' || t.status === 'blocked')
+  const closedTasks   = filtered.filter(t => t.status === 'closed')
+  const inactiveTasks = filtered.filter(t => t.status === 'inactive')
 
   // Stats
-  const allOpen    = tasks.filter(t => t.status === 'open').length
-  const allBlocked = tasks.filter(t => t.status === 'blocked').length
-  const allOverdue = tasks.filter(t => {
-    if (t.status === 'closed' || !t.due_date) return false
+  const allOpen     = tasks.filter(t => t.status === 'open').length
+  const allBlocked  = tasks.filter(t => t.status === 'blocked').length
+  const allOverdue  = tasks.filter(t => {
+    if (t.status === 'closed' || t.status === 'inactive' || !t.due_date) return false
     return new Date(t.due_date + 'T12:00:00') < now
   }).length
 
@@ -499,6 +502,38 @@ export default function AdminTasks({ currentUserId }) {
               {showDone && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
                   {closedTasks.map(task => (
+                    <AdminTaskRow
+                      key={task.id}
+                      task={task}
+                      allMembers={allMembers}
+                      onUpdate={handleUpdate}
+                      onDelete={handleDelete}
+                      showToast={showToast}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Inactive tasks */}
+          {inactiveTasks.length > 0 && (
+            <div>
+              <button
+                onClick={() => setShowInactive(s => !s)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--muted)', fontSize: '0.82rem',
+                  fontFamily: 'DM Sans, sans-serif', padding: '0.25rem 0',
+                }}
+              >
+                <span style={{ transform: showInactive ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+                {showInactive ? 'Hide' : 'Show'} {inactiveTasks.length} inactive task{inactiveTasks.length !== 1 ? 's' : ''}
+              </button>
+              {showInactive && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {inactiveTasks.map(task => (
                     <AdminTaskRow
                       key={task.id}
                       task={task}
