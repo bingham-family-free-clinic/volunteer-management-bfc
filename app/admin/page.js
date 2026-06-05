@@ -24,10 +24,10 @@ const CALLOUTS_LIMIT = 60
 
 // ── Shared column lists (define once, reuse everywhere) ──────────────────────
 // Full profile — used when we need to display/edit all volunteer fields
-const PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date'
+const PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date,avatar_url'
 
 // Slim profile — list views only need identity + filter fields
-const PROFILE_LIST_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date'
+const PROFILE_LIST_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date,avatar_url'
 
 const PROVIDER_CRED_FIELDS = [
   { key: 'license_exp', label: 'License' },
@@ -330,6 +330,12 @@ export default function AdminPage() {
 
   const [lightboxUrl, setLightboxUrl] = useState(null)
 
+  // ── Profile photo state ──────────────────────────────────────────────────────
+  const [profilePhotoUrl, setProfilePhotoUrl]         = useState(null)
+  const [profilePhotoLoading, setProfilePhotoLoading] = useState(false)
+  const [uploadingPhoto, setUploadingPhoto]           = useState(false)
+  const photoInputRef = useRef(null)
+
   // ── Stable style objects ────────────────────────────────────────────────────
   const card        = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
   const inputStyle  = { width: '100%', padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.95rem', outline: 'none', fontFamily: 'DM Sans, sans-serif' }
@@ -554,6 +560,74 @@ export default function AdminPage() {
     setLoadingVolHours(false)
   }
 
+  // ── Profile photo helpers ───────────────────────────────────────────────────
+
+  // Compress image to ≤200 KB JPEG before upload to minimise storage/egress
+  async function compressImage(file, maxDim = 480, quality = 0.75) {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height)
+          width  = Math.round(width  * scale)
+          height = Math.round(height * scale)
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Canvas toBlob failed')), 'image/jpeg', quality)
+      }
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')) }
+      img.src = url
+    })
+  }
+
+  // Fetch a short-lived signed URL for a volunteer's avatar (called lazily on profile open)
+  async function loadProfilePhoto(avatarPath) {
+    if (!avatarPath) { setProfilePhotoUrl(null); return }
+    setProfilePhotoLoading(true)
+    const { data } = await supabase.storage.from('avatars').createSignedUrl(avatarPath, 3600)
+    setProfilePhotoUrl(data?.signedUrl || null)
+    setProfilePhotoLoading(false)
+  }
+
+  async function handleProfilePhotoUpload(file) {
+    if (!file || !selectedVolunteer) return
+    setUploadingPhoto(true)
+    try {
+      const compressed = await compressImage(file)
+      const ext  = 'jpg'
+      const path = `${selectedVolunteer.id}/avatar.${ext}`
+      const { error: uploadErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, compressed, { contentType: 'image/jpeg', upsert: true })
+      if (uploadErr) { showMessage(uploadErr.message, 'error'); return }
+
+      // Store the path in the profile row
+      const { error: dbErr } = await supabase.from('profiles').update({ avatar_url: path }).eq('id', selectedVolunteer.id)
+      if (dbErr) { showMessage(dbErr.message, 'error'); return }
+
+      // Refresh signed URL
+      const { data } = await supabase.storage.from('avatars').createSignedUrl(path, 3600)
+      setProfilePhotoUrl(data?.signedUrl || null)
+
+      // Patch local state
+      const fresh = { ...selectedVolunteer, avatar_url: path }
+      setSelectedVolunteer(fresh)
+      setVolunteers(prev => prev.map(v => v.id === selectedVolunteer.id ? fresh : v))
+      await audit('uploaded_avatar', 'volunteer', selectedVolunteer.id, selectedVolunteer.full_name)
+      showMessage('Photo updated!', 'success')
+    } catch (e) {
+      showMessage('Failed to upload photo: ' + e.message, 'error')
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
+
   // Date-cover shifts: only id, volunteer_id, clock_in, and the name join
   async function loadDateCoverShifts(date) {
     const { data } = await supabase
@@ -662,6 +736,9 @@ export default function AdminPage() {
     setVolunteerTotalHours(null)
     loadVolunteerTotalHours(v.id)
     setEndDateInput(v.end_date || '')
+    // Lazy-load photo only when a profile is selected
+    setProfilePhotoUrl(null)
+    loadProfilePhoto(v.avatar_url || null)
   }
 
   function handleToggleRecentShifts(volunteerId) {
@@ -1156,7 +1233,9 @@ export default function AdminPage() {
                     return (
                       <div key={v.id} onClick={() => openVolunteer(v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: isInactive ? 'rgba(156,163,175,0.06)' : 'var(--bg)', cursor: 'pointer', opacity: isInactive ? 0.7 : 1 }} onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'} onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
                         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                          <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: isInactive ? 'var(--muted)' : 'var(--accent)' }}>{v.full_name?.charAt(0)}</div>
+                          <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: isInactive ? 'var(--muted)' : 'var(--accent)' }}>
+                            {v.full_name?.charAt(0)}
+                          </div>
                           <div><p style={{ fontWeight: 500 }}>{v.full_name}</p><p style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{v.email}</p></div>
                         </div>
                         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -1180,7 +1259,28 @@ export default function AdminPage() {
             <button onClick={() => setSelectedVolunteer(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.875rem', marginBottom: '1.25rem', padding: 0, fontFamily: 'DM Sans, sans-serif' }}>← Back</button>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.3rem', color: 'var(--accent)', border: '2px solid var(--accent)' }}>{selectedVolunteer.full_name?.charAt(0)}</div>
+                {/* Profile photo: click to view full size or to upload */}
+                <div
+                  onClick={() => { if (profilePhotoUrl) { setLightboxUrl(profilePhotoUrl) } else { photoInputRef.current?.click() } }}
+                  title={profilePhotoUrl ? 'Click to view full size' : 'Click to upload photo'}
+                  style={{ position: 'relative', width: '52px', height: '52px', borderRadius: '50%', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.3rem', color: 'var(--accent)', border: '2px solid var(--accent)', overflow: 'hidden', cursor: 'pointer', flexShrink: 0 }}>
+                  {profilePhotoLoading || uploadingPhoto ? (
+                    <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>…</span>
+                  ) : profilePhotoUrl ? (
+                    <img src={profilePhotoUrl} alt={selectedVolunteer.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <span>{selectedVolunteer.full_name?.charAt(0)}</span>
+                  )}
+                  {/* Replace-photo button shown when a photo already exists */}
+                  {profilePhotoUrl && !uploadingPhoto && (
+                    <div onClick={e => { e.stopPropagation(); photoInputRef.current?.click() }} title="Replace photo"
+                      style={{ position: 'absolute', bottom: 0, right: 0, width: '18px', height: '18px', borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--bg)', cursor: 'pointer' }}>
+                      <span style={{ fontSize: '0.55rem', color: '#fff' }}>✎</span>
+                    </div>
+                  )}
+                </div>
+                <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleProfilePhotoUpload(f); e.target.value = '' }} />
                 <div>
                   <h2 style={{ fontWeight: 600, fontSize: '1.2rem' }}>{selectedVolunteer.full_name}</h2>
                   <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>{selectedVolunteer.email}</p>
