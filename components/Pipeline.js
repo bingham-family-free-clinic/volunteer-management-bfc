@@ -230,7 +230,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // ── Applicant profile photo state ──────────────────────────────────────────
   const [applicantPhotoUrl,       setApplicantPhotoUrl]       = useState(null)
-  const [applicantPhotoLoading,   setApplicantPhotoLoading]   = useState(false)
   const [uploadingApplicantPhoto, setUploadingApplicantPhoto] = useState(false)
   const [applicantAvatarPath,     setApplicantAvatarPath]     = useState(null)
   const applicantPhotoInputRef = useRef(null)
@@ -396,19 +395,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       if (data.length > 0) {
         const ids = data.map(a => a.id)
         await loadRecentChecklists(ids)
-        await loadRecentPhotos(ids)
       }
     }
-  }
-
-  async function loadRecentPhotos(ids) {
-    const entries = await Promise.all(
-      ids.map(async id => {
-        const { data } = await supabase.storage.from('avatars').createSignedUrl(`${id}/avatar.jpg`, 3600)
-        return [id, data?.signedUrl || null]
-      })
-    )
-    setRecentPhotoUrls(Object.fromEntries(entries.filter(([, url]) => url !== null)))
   }
 
   async function loadRecentChecklists(ids) {
@@ -657,15 +645,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setUploadingApplicantPhoto(false)
   }
 
-  async function loadApplicantPhoto(applicantId) {
-    setApplicantPhotoLoading(true)
-    const path = `${applicantId}/avatar.jpg`
-    const { data } = await supabase.storage.from('avatars').createSignedUrl(path, 3600)
-    setApplicantPhotoUrl(data?.signedUrl || null)
-    setApplicantAvatarPath(data?.signedUrl ? path : null)
-    setApplicantPhotoLoading(false)
-  }
-
   // ─── Offload ──────────────────────────────────────────────────────────────
 
   async function handleOffload(applicant) {
@@ -854,10 +833,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       setInterviewTime(d.toTimeString().slice(0, 5))
     }
 
-    // Reset photo state then try to load any existing photo for this applicant
+    // Reset photo state — photo will appear only once uploaded this session
     setApplicantPhotoUrl(null)
     setApplicantAvatarPath(null)
-    loadApplicantPhoto(a.id)
   }
 
   // ─── Derived ──────────────────────────────────────────────────────────────
@@ -1437,7 +1415,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               title={applicantPhotoUrl ? 'Click to replace photo' : 'Click to upload photo'}
               style={{ position: 'relative', width: 48, height: 48, borderRadius: '50%', background: C.primary + '18', border: `2px solid ${C.blue}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.2rem', color: C.blue, overflow: 'hidden', cursor: 'pointer', flexShrink: 0 }}
             >
-              {applicantPhotoLoading || uploadingApplicantPhoto
+              {uploadingApplicantPhoto
                 ? <span style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>…</span>
                 : applicantPhotoUrl
                   ? <img src={applicantPhotoUrl} alt={applicant.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
