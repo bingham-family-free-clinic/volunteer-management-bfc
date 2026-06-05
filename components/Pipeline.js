@@ -624,100 +624,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setApplicantPhotoLoading(false)
   }
 
-  // ─── Badge generation helpers ─────────────────────────────────────────────
-
-  function loadImage(src) {
-    return new Promise((resolve, reject) => {
-      const img = new Image()
-      img.crossOrigin = 'anonymous'
-      img.onload  = () => resolve(img)
-      img.onerror = reject
-      img.src = src
-    })
-  }
-
-  async function generateBadge(volunteer, photoSignedUrl) {
-    const BADGE_W = 638
-    const BADGE_H = 1010
-
-    // Photo frame inner coords — tweak after first test print
-    const FRAME_X = 137, FRAME_Y = 76, FRAME_W = 365, FRAME_H = 362
-
-    // Text positions
-    const NAME_Y  = 695
-    const LANG1_Y = 770
-    const LANG2_Y = 808
-
-    const canvas = document.createElement('canvas')
-    canvas.width  = BADGE_W
-    canvas.height = BADGE_H
-    const ctx = canvas.getContext('2d')
-
-    // 1. Draw badge template
-    try {
-      const template = await loadImage('/volunteer_badge_template.png')
-      ctx.drawImage(template, 0, 0, BADGE_W, BADGE_H)
-    } catch (e) {
-      console.warn('Badge template not found at /volunteer_badge_template.png', e)
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, BADGE_W, BADGE_H)
-    }
-
-    // 2. Draw volunteer photo cropped to frame — biased toward top third for face focus
-    if (photoSignedUrl) {
-      try {
-        const photo = await loadImage(photoSignedUrl)
-        const scale = Math.max(FRAME_W / photo.width, FRAME_H / photo.height)
-        const sw = FRAME_W / scale
-        const sh = FRAME_H / scale
-        const sx = (photo.width  - sw) / 2
-        const sy = (photo.height - sh) / 3
-        ctx.save()
-        ctx.beginPath()
-        ctx.rect(FRAME_X, FRAME_Y, FRAME_W, FRAME_H)
-        ctx.clip()
-        ctx.drawImage(photo, sx, sy, sw, sh, FRAME_X, FRAME_Y, FRAME_W, FRAME_H)
-        ctx.restore()
-      } catch (e) {
-        console.warn('Could not load volunteer photo for badge', e)
-      }
-    }
-
-    // 4. Name — white bold, centered in dark banner
-    ctx.fillStyle    = '#FFFFFF'
-    ctx.font         = 'bold 42px "DM Sans", Arial, sans-serif'
-    ctx.textAlign    = 'center'
-    ctx.textBaseline = 'middle'
-    let nameText = (volunteer.full_name || '').toUpperCase()
-    while (ctx.measureText(nameText).width > BADGE_W - 60 && parseInt(ctx.font) > 20) {
-      const size = parseInt(ctx.font) - 2
-      ctx.font = `bold ${size}px "DM Sans", Arial, sans-serif`
-    }
-    ctx.fillText(nameText, BADGE_W / 2, NAME_Y)
-
-    // 5. "Volunteer" + languages — dark blue
-    ctx.fillStyle = '#02416b'
-    ctx.font      = 'bold 28px "DM Sans", Arial, sans-serif'
-    ctx.fillText('Volunteer', BADGE_W / 2, LANG1_Y)
-    const langs = (volunteer.languages || '').trim()
-    if (langs) {
-      ctx.font = 'bold 26px "DM Sans", Arial, sans-serif'
-      ctx.fillText(langs, BADGE_W / 2, LANG2_Y)
-    }
-
-    // 6. Auto-download
-    canvas.toBlob(blob => {
-      if (!blob) return
-      const link    = document.createElement('a')
-      link.href     = URL.createObjectURL(blob)
-      link.download = `${(volunteer.full_name || 'badge').replace(/\s+/g, '_')}_badge.png`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(link.href)
-    }, 'image/png')
-  }
-
   // ─── Offload ──────────────────────────────────────────────────────────────
 
   async function handleOffload(applicant) {
@@ -1483,23 +1389,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               </div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <button
-              onClick={async () => {
-                const photoUrl = applicantPhotoUrl
-                const volunteerData = {
-                  full_name:   applicant.full_name,
-                  languages:   applicant.languages || '',
-                  affiliation: onboardForm.affiliation || applicant.affiliation || '',
-                  school:      onboardForm.school      || applicant.school      || '',
-                }
-                await generateBadge(volunteerData, photoUrl)
-              }}
-              title="Download ID badge as PNG"
-              style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}
-            >⬇ Badge</button>
-            <button onClick={() => { setSelected(null); setOnboardStep(1) }} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.875rem', fontFamily: 'DM Sans, sans-serif' }}>Back</button>
-          </div>
+          <button onClick={() => { setSelected(null); setOnboardStep(1) }} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.875rem', fontFamily: 'DM Sans, sans-serif' }}>Back</button>
         </div>
 
         {/* Application data */}
