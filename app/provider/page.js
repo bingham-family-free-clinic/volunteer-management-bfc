@@ -139,6 +139,7 @@ export default function ProviderPage() {
   const [totalHours, setTotalHours]       = useState(null)
 
   const fetchedTabs = useRef(new Set())
+  const hasVisitedMessages = useRef(false)
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -727,14 +728,18 @@ export default function ProviderPage() {
         )}
 
         {/* ══ MESSAGES TAB ══════════════════════════════════════════════════ */}
-        <div style={{ display: tab === 'messages' ? 'block' : 'none' }}>
-          <MessageTab
-            user={user}
-            profile={profile}
-            supabase={supabase}
-            showToast={showToast}
-          />
-        </div>
+        {/* Mount once on first visit, then keep alive hidden to preserve state */}
+        {(() => { if (tab === 'messages') hasVisitedMessages.current = true; return null })()}
+        {hasVisitedMessages.current && (
+          <div style={{ display: tab === 'messages' ? 'block' : 'none' }}>
+            <MessageTab
+              user={user}
+              profile={profile}
+              supabase={supabase}
+              showToast={showToast}
+            />
+          </div>
+        )}
 
         {/* ══ ACCOUNT TAB ═══════════════════════════════════════════════════ */}
         {tab === 'account' && (
