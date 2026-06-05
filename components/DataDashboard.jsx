@@ -636,13 +636,13 @@ export default function DataDashboard({ supabase }) {
   const [lateOpen,    setLateOpen]    = useState(false)
 
   // ── Weekly hours chart state ──────────────────────────────
-  const [weeklyChartOpen,   setWeeklyChartOpen]   = useState(true)
+  const [weeklyChartOpen,   setWeeklyChartOpen]   = useState(false)
   const [weeklyChartData,   setWeeklyChartData]   = useState([])   // [{week, volunteer, provider, missionary, student, intern}]
   const [weeklyChartYear,   setWeeklyChartYear]   = useState(CURRENT_YEAR)
   const [weeklyChartLoading, setWeeklyChartLoading] = useState(false)
 
   // ── Shift attendance bar chart state ─────────────────────
-  const [shiftChartOpen,    setShiftChartOpen]    = useState(true)
+  const [shiftChartOpen,    setShiftChartOpen]    = useState(false)
   const [shiftChartData,    setShiftChartData]    = useState([])   // [{shift, noShows, late}]
   const [shiftChartMonth,   setShiftChartMonth]   = useState(0)
   const [shiftChartYear,    setShiftChartYear]    = useState(CURRENT_YEAR)
@@ -938,16 +938,18 @@ export default function DataDashboard({ supabase }) {
       fromDate = `${shiftChartYear}-${mm}-01`
       toDate   = `${shiftChartYear}-${mm}-${lastDay}`
     }
+    const DAY_ORDER = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6 }
+    const DAY_ABBR  = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
     const [absentData, lateData] = await Promise.all([
       fetchAllRows(supabase, 'attendance_records', (q) =>
-        q.select('shift_time, shift_date')
+        q.select('shift_time, day_of_week, shift_date')
           .eq('status', 'absent')
           .gte('shift_date', fromDate)
           .lte('shift_date', toDate)
           .gte('shift_date', ATTENDANCE_CUTOFF)
       ),
       fetchAllRows(supabase, 'attendance_records', (q) =>
-        q.select('shift_time, shift_date')
+        q.select('shift_time, day_of_week, shift_date')
           .eq('status', 'late')
           .gte('shift_date', fromDate)
           .lte('shift_date', toDate)
@@ -955,17 +957,26 @@ export default function DataDashboard({ supabase }) {
       ),
     ])
     const map = {}
+    const makeKey = (r) => {
+      const day = r.day_of_week || 'unknown'
+      const st  = r.shift_time  || 'unknown'
+      return `${day}||${st}`
+    }
     ;(absentData || []).forEach(r => {
-      const st = r.shift_time || 'Unknown'
-      if (!map[st]) map[st] = { shift: st, noShows: 0, late: 0 }
-      map[st].noShows++
+      const key = makeKey(r)
+      if (!map[key]) map[key] = { shift: `${DAY_ABBR[r.day_of_week] || r.day_of_week} ${r.shift_time || '?'}`, day: r.day_of_week || 'unknown', time: r.shift_time || 'unknown', noShows: 0, late: 0 }
+      map[key].noShows++
     })
     ;(lateData || []).forEach(r => {
-      const st = r.shift_time || 'Unknown'
-      if (!map[st]) map[st] = { shift: st, noShows: 0, late: 0 }
-      map[st].late++
+      const key = makeKey(r)
+      if (!map[key]) map[key] = { shift: `${DAY_ABBR[r.day_of_week] || r.day_of_week} ${r.shift_time || '?'}`, day: r.day_of_week || 'unknown', time: r.shift_time || 'unknown', noShows: 0, late: 0 }
+      map[key].late++
     })
-    const sorted = Object.values(map).sort((a, b) => (b.noShows + b.late) - (a.noShows + a.late))
+    const sorted = Object.values(map).sort((a, b) => {
+      const dayDiff = (DAY_ORDER[a.day] ?? 99) - (DAY_ORDER[b.day] ?? 99)
+      if (dayDiff !== 0) return dayDiff
+      return (a.time || '').localeCompare(b.time || '')
+    })
     setShiftChartData(sorted)
     setShiftChartLoading(false)
   }, [supabase, shiftChartMonth, shiftChartYear])
