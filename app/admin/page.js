@@ -595,6 +595,104 @@ export default function AdminPage() {
     setProfilePhotoLoading(false)
   }
 
+  // ── Badge generation helpers ────────────────────────────────────────────────
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload  = () => resolve(img)
+      img.onerror = reject
+      img.src = src
+    })
+  }
+
+  async function generateBadge(volunteer, photoSignedUrl) {
+    // Badge template dimensions (match volunteer_badge_template.png exactly)
+    const BADGE_W = 638
+    const BADGE_H = 1010
+
+    // Photo frame inner coords — tweak these after first test print
+    // These match the blue-bordered landscape frame in the template
+    const FRAME_X = 137, FRAME_Y = 76, FRAME_W = 365, FRAME_H = 362
+
+    // Text positions
+    const NAME_Y  = 695   // vertical center of the dark blue name banner
+    const LANG1_Y = 770   // "Volunteer" line
+    const LANG2_Y = 808   // languages line
+
+    const canvas = document.createElement('canvas')
+    canvas.width  = BADGE_W
+    canvas.height = BADGE_H
+    const ctx = canvas.getContext('2d')
+
+    // 1. Draw badge template
+    try {
+      const template = await loadImage('/volunteer_badge_template.png')
+      ctx.drawImage(template, 0, 0, BADGE_W, BADGE_H)
+    } catch (e) {
+      console.warn('Badge template not found at /volunteer_badge_template.png', e)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, BADGE_W, BADGE_H)
+    }
+
+    // 2. Draw volunteer photo cropped to frame — biased toward top third for face focus
+    if (photoSignedUrl) {
+      try {
+        const photo = await loadImage(photoSignedUrl)
+        const scale = Math.max(FRAME_W / photo.width, FRAME_H / photo.height)
+        const sw = FRAME_W / scale
+        const sh = FRAME_H / scale
+        const sx = (photo.width  - sw) / 2
+        const sy = (photo.height - sh) / 3   // top-third bias keeps face centered
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(FRAME_X, FRAME_Y, FRAME_W, FRAME_H)
+        ctx.clip()
+        ctx.drawImage(photo, sx, sy, sw, sh, FRAME_X, FRAME_Y, FRAME_W, FRAME_H)
+        ctx.restore()
+      } catch (e) {
+        console.warn('Could not load volunteer photo for badge', e)
+      }
+    }
+
+    // 3. Name text — white bold, centered in the dark banner
+    ctx.fillStyle    = '#FFFFFF'
+    ctx.font         = 'bold 42px "DM Sans", Arial, sans-serif'
+    ctx.textAlign    = 'center'
+    ctx.textBaseline = 'middle'
+    // Shrink font if name is long
+    let nameText = (volunteer.full_name || '').toUpperCase()
+    while (ctx.measureText(nameText).width > BADGE_W - 60 && ctx.font.match(/\d+/)) {
+      const size = parseInt(ctx.font) - 2
+      ctx.font = `bold ${size}px "DM Sans", Arial, sans-serif`
+    }
+    ctx.fillText(nameText, BADGE_W / 2, NAME_Y)
+
+    // 5. "Volunteer" label + languages — dark blue
+    ctx.fillStyle = '#02416b'
+    ctx.font      = 'bold 28px "DM Sans", Arial, sans-serif'
+    ctx.fillText('Volunteer', BADGE_W / 2, LANG1_Y)
+
+    const langs = (volunteer.languages || '').trim()
+    if (langs) {
+      ctx.font = 'bold 26px "DM Sans", Arial, sans-serif'
+      ctx.fillText(langs, BADGE_W / 2, LANG2_Y)
+    }
+
+    // 6. Auto-download
+    canvas.toBlob(blob => {
+      if (!blob) return
+      const link      = document.createElement('a')
+      link.href       = URL.createObjectURL(blob)
+      link.download   = `${(volunteer.full_name || 'badge').replace(/\s+/g, '_')}_badge.png`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(link.href)
+    }, 'image/png')
+  }
+
   async function handleProfilePhotoUpload(file) {
     if (!file || !selectedVolunteer) return
     setUploadingPhoto(true)
@@ -1289,7 +1387,16 @@ export default function AdminPage() {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setEditing(!editing)} style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: editing ? 'var(--surface)' : 'var(--accent)', color: editing ? 'var(--muted)' : '#fff', border: editing ? '1px solid var(--border)' : 'none' }}>{editing ? 'Cancel' : 'Edit'}</button>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                {!editing && (
+                  <button
+                    onClick={() => generateBadge(selectedVolunteer, profilePhotoUrl)}
+                    title="Download ID badge as PNG"
+                    style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'rgba(2,65,107,0.1)', color: 'var(--accent)', border: '1px solid var(--accent)' }}
+                  >⬇ Badge</button>
+                )}
+                <button onClick={() => setEditing(!editing)} style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: editing ? 'var(--surface)' : 'var(--accent)', color: editing ? 'var(--muted)' : '#fff', border: editing ? '1px solid var(--border)' : 'none' }}>{editing ? 'Cancel' : 'Edit'}</button>
+              </div>
             </div>
 
             {!editing ? (
