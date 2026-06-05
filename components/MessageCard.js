@@ -1,5 +1,5 @@
 import { formatDateTime } from '../lib/timeUtils'
-import { recipientLabel } from '../lib/messageUtils'
+import { recipientLabel } from '../lib/timeUtils'
 
 // Matches http/https URLs
 const URL_REGEX = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&/=]*)/g
