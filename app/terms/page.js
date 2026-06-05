@@ -31,24 +31,24 @@ export default function TermsOfService() {
 
         <h2 style={h2}>6. Intellectual Property</h2>
 
-        <p style={{ lineHeight: 1.7 }}>
+        <p style={{ lineHeight: 3 }}>
         The App was originally developed by Joshua Kent for the Bingham Family Free Clinic.
         Copyright in the software remains with the original developer.
         </p>
 
-        <p style={{ lineHeight: 1.7 }}>
+        <p style={{ lineHeight: 3 }}>
         The Bingham Family Free Clinic is granted a perpetual, royalty-free license to use, operate,
         maintain, modify, and enhance the App. This license includes the right to assign or delegate
         these permissions to employees, volunteers, contractors, and future developers engaged by the
         Clinic.
         </p>
 
-        <p style={{ lineHeight: 1.7 }}>
+        <p style={{ lineHeight: 3 }}>
         All clinic data, records, content, branding, and materials remain the sole property of the
         Bingham Family Free Clinic.
         </p>
 
-        <p style={{ lineHeight: 1.7 }}>
+        <p style={{ lineHeight: 3 }}>
         Except as expressly permitted above, you may not copy, reproduce, distribute, or create
         derivative works based on the App without prior written permission from the applicable rights
         holder.
