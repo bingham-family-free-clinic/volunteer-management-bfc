@@ -809,13 +809,11 @@ export default function AdminPage() {
 
   async function handleShiftEditSave(shiftId) {
     setSavingShift(true)
-    const origClockIn  = toMountainInputValue(shiftEditForm.clock_in_utc)
-    const origClockOut = toMountainInputValue(shiftEditForm.clock_out_utc)
-    const clockIn  = shiftEditForm.clock_in  !== origClockIn  ? fromMountainInputValue(shiftEditForm.clock_in)  : shiftEditForm.clock_in_utc
-    const clockOut = shiftEditForm.clock_out ? (shiftEditForm.clock_out !== origClockOut ? fromMountainInputValue(shiftEditForm.clock_out) : shiftEditForm.clock_out_utc) : null
+    const clockIn  = fromMountainInputValue(shiftEditForm.clock_in)
+    const clockOut = shiftEditForm.clock_out ? fromMountainInputValue(shiftEditForm.clock_out) : null
     if (clockOut) {
       const hours = (new Date(clockOut) - new Date(clockIn)) / 3600000
-      if (hours < 0) { showMessage('Clock-out must be after clock-in.', 'error'); setSavingShift(false); return }
+      if (hours <= 0) { showMessage('Clock-out must be after clock-in.', 'error'); setSavingShift(false); return }
       if (hours > 15) { showMessage('Shifts cannot be longer than 15 hours.', 'error'); setSavingShift(false); return }
     }
     const shift = allShifts.find(s => s.id === shiftId)
