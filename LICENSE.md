@@ -10,10 +10,6 @@ Bingham Family Free Clinic is hereby granted a perpetual, irrevocable, royalty-f
 
 This license includes the right for Bingham Family Free Clinic to allow employees, volunteers, contractors, and future developers to access, maintain, and extend the software on its behalf.
 
-## Restrictions
-
-This software may not be sold, sublicensed, or redistributed as a standalone product outside of Bingham Family Free Clinic without explicit written permission from the copyright holder.
-
 ## Data and Content
 
 All clinic data, records, branding, and operational content remain the property of Bingham Family Free Clinic.
