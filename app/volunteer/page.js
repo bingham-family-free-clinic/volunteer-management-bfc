@@ -9,6 +9,7 @@ import { MessageCard } from '../../components/MessageCard'
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotifications.js'
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
 import { MessageTab } from '../../components/MessageTab'
+import VolunteerTasks from '../../components/VolunteerTasks'
 
 
 export const dynamic = 'force-dynamic'
@@ -281,7 +282,7 @@ export default function VolunteerPage() {
 
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('id, full_name, role, default_role, affiliation, license_exp, bls_exp, dea_exp, tb_exp')
+      .select('id, full_name, role, default_role, affiliation, team, license_exp, bls_exp, dea_exp, tb_exp')
       .eq('id', user.id)
       .single()
     setProfile(profileData)
@@ -659,6 +660,7 @@ export default function VolunteerPage() {
     ['callout', 'Call-Out'],
     ['messages', 'Messages'],
     ...(isIntern ? [['internreport', 'Report Hours']] : []),
+    ...(profile?.team ? [['tasks', 'Tasks']] : []),
     ['account', 'Account'],
   ]
 
@@ -1134,6 +1136,10 @@ export default function VolunteerPage() {
               </form>
             </div>
           </div>
+        )}
+
+        {tab === 'tasks' && (
+          <VolunteerTasks userId={user.id} team={profile?.team} />
         )}
 
         {/* ── ACCOUNT TAB ─────────────────────────────────────────────────── */}

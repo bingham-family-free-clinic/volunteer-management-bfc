@@ -11,6 +11,7 @@ import Waitlist from '../../components/Waitlist'
 import LunchScheduler from '../../components/LunchScheduler'
 import Providers from '../../components/Providers'
 import Live, { computeExpectedNotClockedIn } from '../../components/Live'
+import AdminTasks from '../../components/AdminTasks'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,13 +22,18 @@ const SHIFTS_PAGE    = 25
 const HOURS_PAGE     = 20
 const AUDIT_PAGE     = 30
 const CALLOUTS_LIMIT = 60
+const TEAMS = [
+  'Office Manager', 'Information Systems', 'Administrative Assistant',
+  'Media', 'Volunteer Credentialing', 'Provider Credentialing',
+  'Executive Assistant', 'OSSM',
+]
 
 // ── Shared column lists (define once, reuse everywhere) ──────────────────────
 // Full profile — used when we need to display/edit all volunteer fields
 const PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date,avatar_url'
 
 // Slim profile — list views only need identity + filter fields
-const PROFILE_LIST_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date,avatar_url'
+const PROFILE_LIST_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date,team,avatar_url'
 
 const PROVIDER_CRED_FIELDS = [
   { key: 'license_exp', label: 'License' },
@@ -330,6 +336,9 @@ export default function AdminPage() {
 
   const [lightboxUrl, setLightboxUrl] = useState(null)
 
+  const isTaskAdmin = ['Director', 'Administrative Assistant', 'Executive Assistant']
+    .includes(profile?.default_role)
+    
   // ── Profile photo state ──────────────────────────────────────────────────────
   const [profilePhotoUrl, setProfilePhotoUrl]         = useState(null)
   const [profilePhotoLoading, setProfilePhotoLoading] = useState(false)
@@ -728,6 +737,7 @@ export default function AdminPage() {
       license_exp: v.license_exp||'', bls_exp: v.bls_exp||'',
       dea_exp: v.dea_exp||'', ftca_exp: v.ftca_exp||'', tb_exp: v.tb_exp||'',
       end_date: v.end_date || '', status_reason: v.status_reason || '',
+      team: v.team || '',
     })
     setStatusForm({ status: v.status || 'active', status_reason: v.status_reason || '' })
     setEditing(false)
@@ -995,6 +1005,7 @@ export default function AdminPage() {
       default_role: editForm.default_role || null, birthday: editForm.birthday || null,
       end_date: editForm.end_date || null,
       status_reason: editForm.end_date ? (editForm.status_reason || null) : null,
+      team: editForm.team || null,
     }
     const { error } = await supabase.from('profiles').update(updates).eq('id', selectedVolunteer.id)
     if (error) { showMessage(error.message, 'error'); setSaving(false); return }
@@ -1114,7 +1125,7 @@ export default function AdminPage() {
           {[
             ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['lunch', 'Lunch'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
             ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'],
-            ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'],
+            ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
           ].map(([key, label]) => (
             <button key={key} onClick={() => switchTab(key)} style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: tab === key ? 'var(--accent)' : 'var(--surface)', color: tab === key ? '#fff' : 'var(--muted)', border: tab === key ? 'none' : '1px solid var(--border)' }}>
               {label}
@@ -1421,6 +1432,17 @@ export default function AdminPage() {
                   )}
                   <div><label style={labelStyle}>Default Position</label><select value={editForm.default_role} onChange={e => setEditForm({...editForm, default_role: e.target.value})} style={inputStyle}><option value="">— None —</option>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
                   <div><label style={labelStyle}>Birthday</label><input type="date" value={editForm.birthday || ''} onChange={e => setEditForm({ ...editForm, birthday: e.target.value })} style={inputStyle} /></div>
+                  <div>
+                    <label style={labelStyle}>Team</label>
+                    <select
+                      value={editForm.team || ''}
+                      onChange={e => setEditForm({ ...editForm, team: e.target.value || null })}
+                      style={inputStyle}
+                    >
+                      <option value="">— No team —</option>
+                      {TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>                  
                   <div>
                     <label style={labelStyle}>End Date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(auto-deactivates on this date)</span></label>
                     <input type="date" value={editForm.end_date || ''} onChange={e => setEditForm({ ...editForm, end_date: e.target.value })} style={inputStyle} />
@@ -1805,6 +1827,9 @@ export default function AdminPage() {
         {tab === 'providers' && <Providers supabase={supabase} />}
         {tab === 'data'      && <DataDashboard supabase={supabase} />}
         {tab === 'lunch'     && <LunchScheduler supabase={supabase} profile={profile} />}
+        {tab === 'tasks' && (
+          <AdminTasks currentUserId={profile.id} />
+        )}
 
         {/* Toast */}
         {toast && (
