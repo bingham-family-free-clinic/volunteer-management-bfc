@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { MessageCard } from './MessageCard'
+import { formatDateTime } from '../lib/timeUtils'
+import { ROLES } from '../lib/constants'
 
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
@@ -36,31 +38,6 @@ const S = {
   },
 }
 
-// ── ViewCountBadge (broadcast read count) ─────────────────────────────────────
-function ViewCountBadge({ message, broadcastReadCounts }) {
-  if (!BROADCAST_TYPES.includes(message?.recipient_type)) return null
-  const count = broadcastReadCounts[message.id] ?? null
-  return (
-    <span
-      title={count === null ? 'Loading views…' : `${count} ${count === 1 ? 'person has' : 'people have'} read this`}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-        fontSize: '0.72rem', fontWeight: 500, color: 'var(--muted)',
-        background: 'var(--bg)', border: '1px solid var(--border)',
-        borderRadius: '100px', padding: '0.15rem 0.55rem', marginTop: '0.35rem',
-        fontFamily: 'DM Mono, monospace', letterSpacing: '0.01em',
-        userSelect: 'none', whiteSpace: 'nowrap', flexShrink: 0,
-      }}
-    >
-      <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
-        <path d="M1 10s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" />
-        <circle cx="10" cy="10" r="2.5" />
-      </svg>
-      {count === null ? '…' : count}
-    </span>
-  )
-}
-
 // ── ReplyThread: renders a single top-level message + its replies ─────────────
 function ReplyThread({
   message,
@@ -70,22 +47,61 @@ function ReplyThread({
   supabase,
   showToast,
   readMessageIds,
-  broadcastReadCounts,
   setLightboxUrl,
   allUsers,
   onReplySent,
+  onMarkRead,
   senderLabel,
 }) {
+  const isUnread = readMessageIds && (
+    // Received message not yet read
+    (!readMessageIds.has(message.id) && message.sender_id !== user?.id) ||
+    // Sent message that has unread replies — exclude replies the user sent themselves (fix #3)
+    (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
+  )
+  const [expanded, setExpanded]     = useState(!!isUnread)
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
 
-  // Who can reply:
-  //   - Any admin (role === 'admin') can reply to admin-directed messages
-  //   - The original sender can reply to any admin response in their thread
+  // Fix #2: if the thread auto-expanded on mount because it was unread,
+  // write the message_reads rows immediately — don't wait for a click.
+  useEffect(() => {
+    if (isUnread && expanded) {
+      onMarkRead(message.id, replies.map(r => r.id))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // intentionally runs once on mount only
+  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
+  const replyCount = replies.length
+
+  // Surface the latest unread reply in the collapsed preview so admins
+  // can tell which thread has new activity without expanding it.
+  const latestUnreadReply = readMessageIds
+    ? replies
+        .filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)
+        .at(-1) // replies are already sorted oldest→newest, so last = most recent
+    : null
+
+  const previewSource = latestUnreadReply ?? message
+  const previewSnippet = previewSource.body
+    ? previewSource.body.replace(/\n/g, ' ')
+    : '📎 Image'
+  const previewSenderName = latestUnreadReply
+    ? (latestUnreadReply.sender?.full_name || 'Admin')
+    : (senderLabel || message.sender?.full_name || 'Unknown')
+
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
-  const canReply       = message.recipient_type === 'admin' && (isAdmin || isThreadSender)
+  const isOneOnOne     = message.recipient_type === 'volunteer' || message.recipient_type === 'user'
+
+  // Admins can reply to admin-directed messages.
+  // Either party can reply in a one-on-one thread.
+  const isThreadParticipant = isOneOnOne && (
+    isThreadSender || message.recipient_volunteer_id === user?.id
+  )
+  const canReply = (message.recipient_type === 'admin' && (isAdmin || isThreadSender))
+                || isThreadParticipant
 
   async function handleSendReply() {
     if (!replyBody.trim()) return
@@ -99,12 +115,13 @@ function ReplyThread({
           'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          recipient_type: 'admin',
+          recipient_type: isOneOnOne ? 'volunteer' : 'admin',
           body: replyBody.trim(),
           image_url: null,
           parent_message_id: message.id,
-          // Route back to the original sender if admin is replying
-          recipient_volunteer_id: isAdmin && !isThreadSender ? message.sender_id : null,
+          recipient_volunteer_id: isOneOnOne
+            ? (isThreadSender ? message.recipient_volunteer_id : message.sender_id)
+            : (isAdmin && !isThreadSender ? message.sender_id : null),
         }),
       })
       const result = await res.json()
@@ -125,22 +142,116 @@ function ReplyThread({
 
   const hasReplies = replies.length > 0
 
+  if (!expanded) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          padding: '0.45rem 0.75rem',
+          borderRadius: '8px',
+          border: `1px solid ${isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'}`,
+          background: isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
+          userSelect: 'none',
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface)'}
+        onMouseLeave={e => e.currentTarget.style.background = isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)'}
+      >
+        {/* Unread dot */}
+        {isUnread && (
+          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
+        )}
+
+        {/* Clickable two-line content */}
+        <div
+          onClick={() => {
+            setExpanded(true)
+            onMarkRead(message.id, replies.map(r => r.id))
+          }}
+          style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+        >
+          {/* Line 1: sender + timestamp */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName}
+            </span>
+            <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {formatDateTime(previewSource.created_at)}
+            </span>
+          </div>
+          {/* Line 2: reply count + snippet (only rendered if there is content) */}
+          {(replyCount > 0 || bodySnippet) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
+              {replyCount > 0 && (
+                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                  {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
+                </span>
+              )}
+              <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {previewSnippet}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Inline reply button — only for replyable threads */}
+        {canReply && (
+          <button
+            onClick={e => {
+              e.stopPropagation()
+              setExpanded(true)
+              onMarkRead(message.id, replies.map(r => r.id))
+              setReplyOpen(true)
+            }}
+            title="Reply"
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              padding: '0.2rem 0.55rem',
+              background: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: '100px',
+              color: 'var(--muted)',
+              fontSize: '0.7rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              transition: 'border-color 0.15s, color 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+          >
+            <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 14 4 9 9 4" />
+              <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+            </svg>
+            Reply
+          </button>
+        )}
+      </div>
+    )
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-      {/* ── Original message ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0', margin: '0.5rem 0' }}>
+      {/* ── Original message (click to collapse) ── */}
+      <div
+        style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
+        onClick={() => { setExpanded(false); setReplyOpen(false); setReplyBody('') }}
+      >
         <MessageCard
           m={message}
           readMessageIds={readMessageIds}
           user={user}
           setLightboxUrl={setLightboxUrl}
           senderLabel={senderLabel}
+          canReply={canReply}
+          replyOpen={replyOpen}
+          onReply={() => setReplyOpen(true)}
         />
-        {BROADCAST_TYPES.includes(message?.recipient_type) && (
-          <div style={{ paddingLeft: '0.25rem' }}>
-            <ViewCountBadge message={message} broadcastReadCounts={broadcastReadCounts} />
-          </div>
-        )}
       </div>
 
       {/* ── Threaded replies ── */}
@@ -176,7 +287,7 @@ function ReplyThread({
                     padding: '0.1rem 0.5rem',
                     marginBottom: '0.1rem',
                   }}>
-                    Admin replied
+                    {isOneOnOne ? (reply.sender?.full_name?.split(' ')[0] ?? 'Reply') : 'Admin replied'}
                   </span>
                 )}
                 <MessageCard
@@ -192,104 +303,75 @@ function ReplyThread({
       )}
 
       {/* ── Reply composer ── */}
-      {canReply && (
+      {canReply && replyOpen && (
         <div style={{
           marginTop: '0.5rem',
           marginLeft: hasReplies ? '1rem' : '0',
           paddingLeft: hasReplies ? '0.875rem' : '0',
           borderLeft: hasReplies ? '2px solid var(--border)' : 'none',
         }}>
-          {!replyOpen ? (
-            <button
-              onClick={() => setReplyOpen(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                padding: '0.3rem 0.75rem',
-                background: 'none',
-                border: '1px solid var(--border)',
-                borderRadius: '100px',
-                color: 'var(--muted)',
-                fontSize: '0.78rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: 'DM Sans, sans-serif',
-                transition: 'border-color 0.15s, color 0.15s',
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+            padding: '0.75rem',
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+            borderRadius: '10px',
+          }}>
+            <textarea
+              autoFocus
+              value={replyBody}
+              onChange={e => setReplyBody(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
+                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody('') }
               }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-            >
-              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 14 4 9 9 4" />
-                <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-              </svg>
-              {hasReplies ? 'Reply again' : 'Reply'}
-            </button>
-          ) : (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.5rem',
-              padding: '0.75rem',
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: '10px',
-            }}>
-              <textarea
-                autoFocus
-                value={replyBody}
-                onChange={e => setReplyBody(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
-                  if (e.key === 'Escape') { setReplyOpen(false); setReplyBody('') }
-                }}
-                placeholder="Write a reply… (⌘↵ to send)"
-                rows={2}
+              placeholder="Write a reply… (⌘↵ to send)"
+              rows={2}
+              style={{
+                ...S.input,
+                resize: 'vertical',
+                fontSize: '0.82rem',
+                padding: '0.6rem 0.75rem',
+              }}
+            />
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setReplyOpen(false); setReplyBody('') }}
                 style={{
-                  ...S.input,
-                  resize: 'vertical',
-                  fontSize: '0.88rem',
-                  padding: '0.6rem 0.75rem',
+                  padding: '0.35rem 0.75rem',
+                  background: 'none',
+                  border: '1px solid var(--border)',
+                  borderRadius: '7px',
+                  color: 'var(--muted)',
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
                 }}
-              />
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button
-                  onClick={() => { setReplyOpen(false); setReplyBody('') }}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    background: 'none',
-                    border: '1px solid var(--border)',
-                    borderRadius: '7px',
-                    color: 'var(--muted)',
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSendReply}
-                  disabled={sending || !replyBody.trim()}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    background: 'var(--accent)',
-                    border: 'none',
-                    borderRadius: '7px',
-                    color: '#fff',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    cursor: (sending || !replyBody.trim()) ? 'not-allowed' : 'pointer',
-                    opacity: !replyBody.trim() ? 0.5 : 1,
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {sending ? 'Sending…' : 'Send'}
-                </button>
-              </div>
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendReply}
+                disabled={sending || !replyBody.trim()}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  background: 'var(--accent)',
+                  border: 'none',
+                  borderRadius: '7px',
+                  color: '#fff',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: (sending || !replyBody.trim()) ? 'not-allowed' : 'pointer',
+                  opacity: !replyBody.trim() ? 0.5 : 1,
+                  fontFamily: 'DM Sans, sans-serif',
+                }}
+              >
+                {sending ? 'Sending…' : 'Send'}
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>
@@ -307,6 +389,7 @@ export function MessageTab({
   getInboxMessages,
   MAX_FILE_SIZE,
   schedule = [],
+  onUnreadCountChange,
 }) {
   // ── Local state ────────────────────────────────────────────────────────────
   const [messages, setMessages]               = useState([])
@@ -388,20 +471,20 @@ export function MessageTab({
     setAllUsers(usersData || [])
     await loadBroadcastReadCounts(fetched)
 
-    // Mark unread messages as read
-    const unreadIds = fetched
-      .filter(m => m.sender_id !== user.id && !readSet.has(m.id))
-      .map(m => m.id)
-    if (unreadIds.length > 0) {
-      const rows = unreadIds.map(id => ({ user_id: user.id, message_id: id }))
-      await supabase.from('message_reads').upsert(rows, { onConflict: 'user_id,message_id' })
-      setReadMessageIds(prev => {
-        const next = new Set(prev)
-        unreadIds.forEach(id => next.add(id))
-        return next
-      })
-    }
   }, [user, supabase])
+
+  const markThreadRead = useCallback(async (messageId, replyIds = []) => {
+    const allIds = [messageId, ...replyIds]
+    const toMark = allIds.filter(id => !readMessageIds.has(id))
+    if (toMark.length === 0) return
+    const rows = toMark.map(id => ({ user_id: user.id, message_id: id }))
+    await supabase.from('message_reads').upsert(rows, { onConflict: 'user_id,message_id' })
+    setReadMessageIds(prev => {
+      const next = new Set(prev)
+      toMark.forEach(id => next.add(id))
+      return next
+    })
+  }, [user, supabase, readMessageIds])
 
   async function loadMoreMessages() {
     if (!user || !msgCursor || loadingMoreMsgs) return
@@ -485,15 +568,28 @@ export function MessageTab({
   // Inbox threads: messages sent to this user (or admin) that are top-level
   const inboxThreads = inboxTopLevel.filter(m => {
     if (m.sender_id === user?.id) {
-      // Only show own sent messages in inbox if they have replies
-      return (inboxRepliesMap[m.id] || []).length > 0
+      // Fix #4: only show own sent messages in inbox if they have replies from someone ELSE
+      return (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
     }
     return true
   }).filter(m => {
-    // Apply the same inbox filter as getInboxMessages would
     if (!getInboxMessages) return true
-    return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).length > 0
+    return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
   })
+
+  // Unread count across all inbox threads (for tab badge and parent notification)
+  const unreadThreadCount = readMessageIds ? inboxThreads.filter(m => {
+    const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
+    const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
+      r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
+    )
+    return isUnreadMsg || hasUnreadReplies
+  }).length : 0
+
+  // Notify parent whenever unread count changes so the Messages tab badge stays in sync
+  useEffect(() => {
+    onUnreadCountChange?.(unreadThreadCount)
+  }, [unreadThreadCount, onUnreadCountChange])
 
   const recentRecipients = sentMessages
     .filter(m => m.recipient_type === 'volunteer' && m.recipient_volunteer_id)
@@ -529,6 +625,10 @@ export function MessageTab({
   const myRoles = [...new Set([
     ...schedule.filter(s => s.volunteer_id === user?.id).map(s => s.role).filter(Boolean),
   ])]
+
+  // Admins can message any role — use the canonical ROLES constant so it's
+  // always complete regardless of whether the admin has schedule entries
+  const rolesForCompose = isAdmin ? ROLES : myRoles
 
   // ── Image helpers ──────────────────────────────────────────────────────────
   function handleImageSelect(e) {
@@ -625,6 +725,7 @@ export function MessageTab({
             key={key}
             onClick={() => setMsgView(key)}
             style={{
+              position: 'relative',
               padding: '0.45rem 0.9rem',
               borderRadius: '8px',
               fontSize: '0.85rem',
@@ -637,6 +738,17 @@ export function MessageTab({
             }}
           >
             {label}
+            {key === 'inbox' && unreadThreadCount > 0 && (
+              <span style={{
+                position: 'absolute', top: '-5px', right: '-5px',
+                background: '#ef4444', color: '#fff', borderRadius: '50%',
+                width: '17px', height: '17px', fontSize: '0.65rem', fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: '2px solid var(--bg)', lineHeight: 1,
+              }}>
+                {unreadThreadCount > 9 ? '9+' : unreadThreadCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -648,7 +760,7 @@ export function MessageTab({
           {inboxThreads.length === 0 ? (
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No messages yet.</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
               {inboxThreads.map(m => (
                 <ReplyThread
                   key={m.id}
@@ -663,6 +775,7 @@ export function MessageTab({
                   setLightboxUrl={setLightboxUrl}
                   allUsers={allUsers}
                   onReplySent={fetchMessages}
+                  onMarkRead={markThreadRead}
                 />
               ))}
             </div>
@@ -692,7 +805,7 @@ export function MessageTab({
           {sentMessages.length === 0 ? (
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No sent messages yet.</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
               {sentMessages.map(m => {
                 const toLabel =
                   m.recipient_type === 'everyone' ? 'To: Everyone' :
@@ -715,6 +828,7 @@ export function MessageTab({
                     setLightboxUrl={setLightboxUrl}
                     allUsers={allUsers}
                     onReplySent={fetchMessages}
+                    onMarkRead={markThreadRead}
                     senderLabel={toLabel}
                   />
                 )
@@ -751,7 +865,7 @@ export function MessageTab({
                   { value: 'admin',    label: 'Admin' },
                   { value: 'everyone', label: 'Everyone' },
                   ...(myShiftCombos.length > 0 ? [{ value: 'shift', label: 'My Shift' }] : []),
-                  ...(myRoles.length > 0       ? [{ value: 'role',  label: 'My Role'  }] : []),
+                  ...(rolesForCompose.length > 0 ? [{ value: 'role', label: isAdmin ? 'Role' : 'My Role' }] : []),
                   { value: 'user', label: 'Individual' },
                 ].map(opt => (
                   <button
@@ -801,24 +915,22 @@ export function MessageTab({
               )}
 
               {/* Role sub-selector */}
-              {msgRecipientType === 'role' && myRoles.length > 0 && (
-                <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {myRoles.map(r => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setMsgSelectedRole(r)}
-                      style={{
-                        padding: '0.35rem 0.75rem', borderRadius: '8px', fontSize: '0.82rem',
-                        cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
-                        background: msgSelectedRole === r ? 'var(--accent)' : 'var(--bg)',
-                        color:      msgSelectedRole === r ? '#fff' : 'var(--muted)',
-                        border:     msgSelectedRole === r ? 'none' : '1px solid var(--border)',
-                      }}
-                    >
-                      {r}
-                    </button>
-                  ))}
+              {msgRecipientType === 'role' && rolesForCompose.length > 0 && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <select
+                    value={msgSelectedRole || ''}
+                    onChange={e => setMsgSelectedRole(e.target.value || null)}
+                    style={{
+                      ...S.input,
+                      cursor: 'pointer',
+                      color: msgSelectedRole ? 'var(--text)' : 'var(--muted)',
+                    }}
+                  >
+                    <option value="">Select a role…</option>
+                    {rolesForCompose.map(r => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
                 </div>
               )}
 

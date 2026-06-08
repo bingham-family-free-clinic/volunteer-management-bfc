@@ -75,12 +75,18 @@ export async function POST(req) {
     recipientUserIds = (data || []).map(p => p.id)
 
   } else if (recipient_type === 'admin') {
-    const { data } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('role', 'admin')
-      .neq('id', user.id)
-    recipientUserIds = (data || []).map(p => p.id)
+    // If an admin is replying back to a specific volunteer, notify that
+    // volunteer only — not all admins, which is what was spamming them.
+    if (recipient_volunteer_id && recipient_volunteer_id !== user.id) {
+      recipientUserIds = [recipient_volunteer_id]
+    } else {
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('role', 'admin')
+        .neq('id', user.id)
+      recipientUserIds = (data || []).map(p => p.id)
+    }
 
   } else if (recipient_type === 'affiliation_missionary') {
     const { data } = await supabaseAdmin

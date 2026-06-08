@@ -314,6 +314,311 @@ function NoShowRow({ v, isHigh, onNameClick }) {
   )
 }
 
+// ── Weekly Line Chart ─────────────────────────────────────────────────────────
+const AFF_LINES = [
+  { key: 'volunteer',  label: 'Volunteer',              color: '#02416B' },
+  { key: 'provider',   label: 'Clinical Care',          color: '#7dd3fc' },
+  { key: 'missionary', label: 'Missionary',             color: '#818cf8' },
+  { key: 'student',    label: 'Student',                color: '#34d399' },
+  { key: 'intern',     label: 'Intern',                 color: '#fb923c' },
+]
+
+function WeeklyLineChart({ data }) {
+  const [hovered, setHovered] = useState(null)  // { x, y, week, values }
+  const [hidden,  setHidden]  = useState(new Set())
+
+  const W = 700, H = 260
+  const padL = 48, padR = 24, padT = 16, padB = 40
+  const chartW = W - padL - padR
+  const chartH = H - padT - padB
+
+  const visible = AFF_LINES.filter(l => !hidden.has(l.key))
+  const maxVal = Math.max(1, ...data.flatMap(d => visible.map(l => d[l.key] || 0)))
+  const yMax = Math.ceil(maxVal / 10) * 10
+
+  const xScale = (i) => padL + (i / (data.length - 1 || 1)) * chartW
+  const yScale = (v) => padT + chartH - (v / yMax) * chartH
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(yMax * f))
+
+  function buildPath(key) {
+    return data.map((d, i) => {
+      const x = xScale(i), y = yScale(d[key] || 0)
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+  }
+
+  function buildArea(key) {
+    const base = yScale(0)
+    const pts = data.map((d, i) => `${xScale(i).toFixed(1)},${yScale(d[key] || 0).toFixed(1)}`).join(' L')
+    const last = xScale(data.length - 1), first = xScale(0)
+    return `M${first},${base} L${pts} L${last},${base} Z`
+  }
+
+  // X-axis: show every ~8 weeks
+  const step = Math.max(1, Math.floor(data.length / 8))
+  const xLabels = data.filter((_, i) => i % step === 0 || i === data.length - 1)
+
+  function handleMouseMove(e) {
+    const svg = e.currentTarget.getBoundingClientRect()
+    const mx = e.clientX - svg.left - padL
+    const idx = Math.round((mx / chartW) * (data.length - 1))
+    const clamped = Math.max(0, Math.min(data.length - 1, idx))
+    const d = data[clamped]
+    setHovered({ idx: clamped, d, x: xScale(clamped), y: padT + 8 })
+  }
+
+  return (
+    <div>
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+        {AFF_LINES.map(l => {
+          const isHidden = hidden.has(l.key)
+          return (
+            <button
+              key={l.key}
+              onClick={() => setHidden(prev => {
+                const n = new Set(prev)
+                n.has(l.key) ? n.delete(l.key) : n.add(l.key)
+                return n
+              })}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                background: 'none', border: 'none', cursor: 'pointer',
+                padding: '0.2rem 0.5rem', borderRadius: '6px',
+                opacity: isHidden ? 0.35 : 1,
+                transition: 'opacity 0.15s',
+                fontFamily: 'DM Sans, sans-serif',
+              }}
+            >
+              <span style={{ width: 14, height: 3, borderRadius: 2, background: l.color, display: 'inline-block', flexShrink: 0 }} />
+              <span style={{ fontSize: '0.78rem', color: 'var(--text)', fontWeight: 500 }}>{l.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* SVG */}
+      <div style={{ overflowX: 'auto' }}>
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          style={{ width: '100%', minWidth: 320, display: 'block', cursor: 'crosshair' }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setHovered(null)}
+        >
+          {/* Grid lines */}
+          {yTicks.map(v => (
+            <g key={v}>
+              <line x1={padL} y1={yScale(v)} x2={padL + chartW} y2={yScale(v)}
+                stroke="var(--border)" strokeWidth={0.75} strokeDasharray={v === 0 ? 'none' : '3,4'} />
+              <text x={padL - 6} y={yScale(v) + 4} textAnchor="end"
+                style={{ fontSize: 10, fill: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
+                {v}
+              </text>
+            </g>
+          ))}
+
+          {/* Area fills */}
+          {AFF_LINES.filter(l => !hidden.has(l.key)).map(l => (
+            <path key={l.key + '-area'} d={buildArea(l.key)}
+              fill={l.color} opacity={0.07} />
+          ))}
+
+          {/* Lines */}
+          {AFF_LINES.filter(l => !hidden.has(l.key)).map(l => (
+            <path key={l.key} d={buildPath(l.key)}
+              fill="none" stroke={l.color} strokeWidth={2}
+              strokeLinecap="round" strokeLinejoin="round" />
+          ))}
+
+          {/* Hover dots */}
+          {hovered && AFF_LINES.filter(l => !hidden.has(l.key)).map(l => (
+            <circle key={l.key}
+              cx={hovered.x} cy={yScale(hovered.d[l.key] || 0)} r={4}
+              fill={l.color} stroke="var(--surface)" strokeWidth={2} />
+          ))}
+
+          {/* X axis labels */}
+          {xLabels.map((d, i) => {
+            const origIdx = data.indexOf(d)
+            return (
+              <text key={i} x={xScale(origIdx)} y={H - 6} textAnchor="middle"
+                style={{ fontSize: 9.5, fill: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
+                {d.week}
+              </text>
+            )
+          })}
+
+          {/* Hover crosshair + tooltip */}
+          {hovered && (
+            <>
+              <line x1={hovered.x} y1={padT} x2={hovered.x} y2={padT + chartH}
+                stroke="var(--border)" strokeWidth={1} strokeDasharray="3,3" />
+              {/* Tooltip box */}
+              {(() => {
+                const boxW = 148, boxH = 16 + AFF_LINES.filter(l => !hidden.has(l.key)).length * 17 + 8
+                const bx = Math.min(hovered.x + 10, W - padR - boxW)
+                const by = padT
+                return (
+                  <g>
+                    <rect x={bx} y={by} width={boxW} height={boxH} rx={6}
+                      fill="var(--surface)" stroke="var(--border)" strokeWidth={1}
+                      style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.18))' }} />
+                    <text x={bx + 10} y={by + 13} style={{ fontSize: 10, fontWeight: 700, fill: 'var(--text)', fontFamily: 'DM Mono, monospace' }}>
+                      {hovered.d.week}
+                    </text>
+                    {AFF_LINES.filter(l => !hidden.has(l.key)).map((l, i) => (
+                      <g key={l.key}>
+                        <rect x={bx + 10} y={by + 22 + i * 17} width={8} height={8} rx={2} fill={l.color} />
+                        <text x={bx + 24} y={by + 30 + i * 17} style={{ fontSize: 10, fill: 'var(--text)', fontFamily: 'DM Sans, sans-serif' }}>
+                          {l.label}: <tspan fontFamily="DM Mono, monospace" fontWeight={700}>{(hovered.d[l.key] || 0).toFixed(1)}h</tspan>
+                        </text>
+                      </g>
+                    ))}
+                  </g>
+                )
+              })()}
+            </>
+          )}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+// ── Shift Bar Chart ───────────────────────────────────────────────────────────
+function ShiftBarChart({ data, type }) {
+  const [hovered, setHovered] = useState(null)
+
+  // Filter based on type
+  const filtered = data.filter(d => {
+    if (type === 'noshow') return d.noShows > 0
+    if (type === 'late')   return d.late > 0
+    return d.noShows > 0 || d.late > 0
+  })
+
+  const maxVal = Math.max(1, ...filtered.map(d =>
+    type === 'noshow' ? d.noShows :
+    type === 'late'   ? d.late :
+    d.noShows + d.late
+  ))
+
+  const BAR_H = 36, GAP = 8
+  const padL = 90, padR = 60, padT = 16, padB = 24
+  const W = 700
+  const chartW = W - padL - padR
+  const H = padT + filtered.length * (BAR_H + GAP) + padB
+
+  function barWidth(v) { return (v / maxVal) * chartW }
+
+  const noShowColor = '#ef4444'
+  const lateColor   = '#f59e0b'
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      {filtered.length === 0 ? (
+        <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>No data matches the current filter.</p>
+      ) : (
+        <>
+          {/* Legend */}
+          {type === 'both' && (
+            <div style={{ display: 'flex', gap: '1.25rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: noShowColor, display: 'inline-block' }} />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text)', fontWeight: 500 }}>No-shows</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: lateColor, display: 'inline-block' }} />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text)', fontWeight: 500 }}>Late</span>
+              </div>
+            </div>
+          )}
+          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', minWidth: 320, display: 'block' }}>
+            {filtered.map((d, i) => {
+              const y = padT + i * (BAR_H + GAP)
+              const isHov = hovered === i
+              const nsW  = type === 'late'   ? 0 : barWidth(d.noShows)
+              const ltW  = type === 'noshow' ? 0 : barWidth(d.late)
+              const totalW = type === 'noshow' ? nsW : type === 'late' ? ltW : nsW + ltW
+              const displayVal = type === 'noshow' ? d.noShows : type === 'late' ? d.late : d.noShows + d.late
+
+              return (
+                <g key={d.shift}
+                  onMouseEnter={() => setHovered(i)}
+                  onMouseLeave={() => setHovered(null)}
+                  style={{ cursor: 'default' }}
+                >
+                  {/* Shift label */}
+                  <text x={padL - 8} y={y + BAR_H / 2 + 4} textAnchor="end"
+                    style={{ fontSize: 11.5, fill: isHov ? 'var(--text)' : 'var(--muted)', fontFamily: 'DM Mono, monospace', fontWeight: isHov ? 700 : 400, transition: 'fill 0.1s' }}>
+                    {d.shift}
+                  </text>
+
+                  {/* Background track */}
+                  <rect x={padL} y={y + 6} width={chartW} height={BAR_H - 12} rx={4}
+                    fill="var(--bg)" stroke="var(--border)" strokeWidth={0.75} />
+
+                  {/* No-show bar */}
+                  {nsW > 0 && (
+                    <rect x={padL} y={y + 6} width={Math.max(nsW, 4)} height={BAR_H - 12} rx={4}
+                      fill={noShowColor} opacity={isHov ? 0.92 : 0.72} style={{ transition: 'opacity 0.12s' }} />
+                  )}
+
+                  {/* Late bar (stacked) */}
+                  {ltW > 0 && (
+                    <rect x={padL + nsW} y={y + 6} width={Math.max(ltW, 4)} height={BAR_H - 12}
+                      rx={nsW === 0 ? 4 : 0}
+                      style={{ borderRadius: nsW === 0 ? 4 : 0 }}
+                      fill={lateColor} opacity={isHov ? 0.92 : 0.72} />
+                  )}
+
+                  {/* Value label */}
+                  {totalW > 0 && (
+                    <text x={padL + totalW + 7} y={y + BAR_H / 2 + 4}
+                      style={{ fontSize: 11, fontFamily: 'DM Mono, monospace', fontWeight: 700, fill: isHov ? 'var(--text)' : 'var(--muted)' }}>
+                      {type === 'both' ? (
+                        `${d.noShows}/${d.late}`
+                      ) : displayVal}
+                    </text>
+                  )}
+
+                  {/* Hover tooltip */}
+                  {isHov && type === 'both' && (
+                    <g>
+                      {(() => {
+                        const tx = padL + totalW + 50, ty = y - 4
+                        const inBounds = tx + 100 < W
+                        const fx = inBounds ? tx : padL + totalW - 115
+                        return (
+                          <>
+                            <rect x={fx} y={ty} width={110} height={36} rx={6}
+                              fill="var(--surface)" stroke="var(--border)" strokeWidth={1}
+                              style={{ filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.15))' }} />
+                            <text x={fx + 10} y={ty + 14} style={{ fontSize: 10, fill: noShowColor, fontFamily: 'DM Sans, sans-serif', fontWeight: 600 }}>
+                              No-shows: <tspan fontFamily="DM Mono, monospace">{d.noShows}</tspan>
+                            </text>
+                            <text x={fx + 10} y={ty + 27} style={{ fontSize: 10, fill: lateColor, fontFamily: 'DM Sans, sans-serif', fontWeight: 600 }}>
+                              Late: <tspan fontFamily="DM Mono, monospace">{d.late}</tspan>
+                            </text>
+                          </>
+                        )
+                      })()}
+                    </g>
+                  )}
+                </g>
+              )
+            })}
+            {/* X-axis baseline */}
+            <line x1={padL} y1={padT + filtered.length * (BAR_H + GAP) - GAP + 4}
+              x2={padL + chartW} y2={padT + filtered.length * (BAR_H + GAP) - GAP + 4}
+              stroke="var(--border)" strokeWidth={0.75} />
+          </svg>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function DataDashboard({ supabase }) {
   // ── Filter / collapse state ───────────────────────────────
   const [hoursMonth,  setHoursMonth]  = useState(new Date().getMonth() + 1)
@@ -329,7 +634,20 @@ export default function DataDashboard({ supabase }) {
 
   const [noShowOpen,  setNoShowOpen]  = useState(false)
   const [lateOpen,    setLateOpen]    = useState(false)
-  const [missingOpen, setMissingOpen] = useState(false)
+
+  // ── Weekly hours chart state ──────────────────────────────
+  const [weeklyChartOpen,   setWeeklyChartOpen]   = useState(false)
+  const [weeklyChartData,   setWeeklyChartData]   = useState([])   // [{week, volunteer, provider, missionary, student, intern}]
+  const [weeklyChartYear,   setWeeklyChartYear]   = useState(CURRENT_YEAR)
+  const [weeklyChartLoading, setWeeklyChartLoading] = useState(false)
+
+  // ── Shift attendance bar chart state ─────────────────────
+  const [shiftChartOpen,    setShiftChartOpen]    = useState(false)
+  const [shiftChartData,    setShiftChartData]    = useState([])   // [{shift, noShows, late}]
+  const [shiftChartMonth,   setShiftChartMonth]   = useState(0)
+  const [shiftChartYear,    setShiftChartYear]    = useState(CURRENT_YEAR)
+  const [shiftChartType,    setShiftChartType]    = useState('both') // 'both'|'noshow'|'late'
+  const [shiftChartLoading, setShiftChartLoading] = useState(false)
 
   // ── Data state ────────────────────────────────────────────
   const [loading,         setLoading]         = useState(true)
@@ -339,7 +657,6 @@ export default function DataDashboard({ supabase }) {
   const [noShowsWeek,     setNoShowsWeek]     = useState([])   // past week
   const [latePeople,      setLatePeople]      = useState([])
   const [topHours,        setTopHours]        = useState([])
-  const [missingInfo,     setMissingInfo]     = useState([])
   const [profiles,        setProfiles]        = useState([])
 
   // ── Excuse / drawer state ─────────────────────────────────
@@ -566,28 +883,103 @@ export default function DataDashboard({ supabase }) {
   }, [supabase, profiles])
 
   // ── Missing info — missionaries:sma, students:school, all:birthday ──
-  useEffect(() => {
-    if (!profiles.length) return
-    const missing = profiles
-      .filter(p => p.role === 'volunteer' && (p.status ?? 'active') === 'active')
-      .filter(p => {
-        const needsSma    = p.affiliation === 'missionary' && !p.sma_name
-        const needsSchool = p.affiliation === 'student'    && !p.school
-        const needsBday   = !p.birthday
-        return needsSma || needsSchool || needsBday
-      })
-      .map(p => ({
-        id: p.id,
-        name: p.full_name,
-        affiliation: p.affiliation,
-        missingSma:      p.affiliation === 'missionary' && !p.sma_name,
-        missingSchool:   p.affiliation === 'student'    && !p.school,
-        missingBirthday: !p.birthday,
-        smaNA:    p.affiliation !== 'missionary',
-        schoolNA: p.affiliation !== 'student',
-      }))
-    setMissingInfo(missing)
-  }, [profiles])
+  // (section removed)
+
+  // ── Weekly hours by affiliation ───────────────────────────
+  const loadWeeklyChart = useCallback(async () => {
+    setWeeklyChartLoading(true)
+    const fromDate = `${weeklyChartYear}-01-01`
+    const toDate   = `${weeklyChartYear}-12-31`
+    const shiftsData = await fetchAllRows(supabase, 'shifts', (q) =>
+      q.select('clock_in, clock_out, profiles(affiliation)')
+        .not('clock_out', 'is', null)
+        .gte('clock_in', fromDate + 'T00:00:00Z')
+        .lte('clock_in', toDate   + 'T23:59:59Z')
+    )
+    // Group by ISO week number
+    const weekMap = {}
+    ;(shiftsData || []).forEach(s => {
+      const d = asUTC(s.clock_in)
+      if (!d) return
+      const jan1 = new Date(d.getFullYear(), 0, 1)
+      const weekNum = Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7)
+      const key = `W${String(weekNum).padStart(2, '0')}`
+      const aff = s.profiles?.affiliation || 'volunteer'
+      const hrs = (asUTC(s.clock_out) - d) / 3600000
+      if (!weekMap[key]) weekMap[key] = { week: key, volunteer: 0, provider: 0, missionary: 0, student: 0, intern: 0 }
+      const bucket = ['provider','missionary','student','intern'].includes(aff) ? aff : 'volunteer'
+      weekMap[key][bucket] += hrs
+    })
+    const weeks = Object.keys(weekMap).sort()
+    setWeeklyChartData(weeks.map(w => ({
+      ...weekMap[w],
+      volunteer:  +weekMap[w].volunteer.toFixed(1),
+      provider:   +weekMap[w].provider.toFixed(1),
+      missionary: +weekMap[w].missionary.toFixed(1),
+      student:    +weekMap[w].student.toFixed(1),
+      intern:     +weekMap[w].intern.toFixed(1),
+    })))
+    setWeeklyChartLoading(false)
+  }, [supabase, weeklyChartYear])
+
+  // ── Shift attendance by shift time ────────────────────────
+  const loadShiftChart = useCallback(async () => {
+    setShiftChartLoading(true)
+    let fromDate, toDate
+    if (shiftChartYear === 0) {
+      fromDate = `2000-01-01`
+      toDate   = `${CURRENT_YEAR}-12-31`
+    } else if (shiftChartMonth === 0) {
+      fromDate = `${shiftChartYear}-01-01`
+      toDate   = `${shiftChartYear}-12-31`
+    } else {
+      const mm = String(shiftChartMonth).padStart(2, '0')
+      const lastDay = new Date(shiftChartYear, shiftChartMonth, 0).getDate()
+      fromDate = `${shiftChartYear}-${mm}-01`
+      toDate   = `${shiftChartYear}-${mm}-${lastDay}`
+    }
+    const DAY_ORDER = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6 }
+    const DAY_ABBR  = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
+    const [absentData, lateData] = await Promise.all([
+      fetchAllRows(supabase, 'attendance_records', (q) =>
+        q.select('shift_time, day_of_week, shift_date')
+          .eq('status', 'absent')
+          .gte('shift_date', fromDate)
+          .lte('shift_date', toDate)
+          .gte('shift_date', ATTENDANCE_CUTOFF)
+      ),
+      fetchAllRows(supabase, 'attendance_records', (q) =>
+        q.select('shift_time, day_of_week, shift_date')
+          .eq('status', 'late')
+          .gte('shift_date', fromDate)
+          .lte('shift_date', toDate)
+          .gte('shift_date', ATTENDANCE_CUTOFF)
+      ),
+    ])
+    const map = {}
+    const makeKey = (r) => {
+      const day = r.day_of_week || 'unknown'
+      const st  = r.shift_time  || 'unknown'
+      return `${day}||${st}`
+    }
+    ;(absentData || []).forEach(r => {
+      const key = makeKey(r)
+      if (!map[key]) map[key] = { shift: `${DAY_ABBR[r.day_of_week] || r.day_of_week} ${r.shift_time || '?'}`, day: r.day_of_week || 'unknown', time: r.shift_time || 'unknown', noShows: 0, late: 0 }
+      map[key].noShows++
+    })
+    ;(lateData || []).forEach(r => {
+      const key = makeKey(r)
+      if (!map[key]) map[key] = { shift: `${DAY_ABBR[r.day_of_week] || r.day_of_week} ${r.shift_time || '?'}`, day: r.day_of_week || 'unknown', time: r.shift_time || 'unknown', noShows: 0, late: 0 }
+      map[key].late++
+    })
+    const sorted = Object.values(map).sort((a, b) => {
+      const dayDiff = (DAY_ORDER[a.day] ?? 99) - (DAY_ORDER[b.day] ?? 99)
+      if (dayDiff !== 0) return dayDiff
+      return (a.time || '').localeCompare(b.time || '')
+    })
+    setShiftChartData(sorted)
+    setShiftChartLoading(false)
+  }, [supabase, shiftChartMonth, shiftChartYear])
 
   // ── Bootstrap on profiles load ────────────────────────────
   useEffect(() => {
@@ -599,6 +991,10 @@ export default function DataDashboard({ supabase }) {
 
   useEffect(() => { if (profiles.length) loadHours()    }, [hoursMonth, hoursYear, hoursAff, loadHours])
   useEffect(() => { if (profiles.length) loadTopHours() }, [topMonth, topYear, topAff, topCount, loadTopHours])
+
+  // Chart loaders — independent of profiles
+  useEffect(() => { loadWeeklyChart() }, [loadWeeklyChart])
+  useEffect(() => { loadShiftChart()  }, [loadShiftChart])
 
   // ── Excuse handlers ───────────────────────────────────────
   function handleExcused(record) {
@@ -891,56 +1287,59 @@ export default function DataDashboard({ supabase }) {
           )}
         </div>
 
-        {/* ── 5. Missing Profile Info (collapsible) ───────────── */}
+        {/* ── 5. Weekly Hours by Affiliation (Line Chart) ─────── */}
         <div style={card}>
-          <button
-            onClick={() => setMissingOpen(s => !s)}
-            style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'DM Sans, sans-serif' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <Chevron open={missingOpen} />
-              <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text)' }}>Missing Profile Information</span>
-              {missingInfo.length > 0 && (
-                <span style={{ ...pillStyle('#9ca3af'), fontWeight: 600 }}>{missingInfo.length}</span>
-              )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: weeklyChartOpen ? '1.25rem' : 0 }}>
+            <button onClick={() => setWeeklyChartOpen(s => !s)} style={collapseBtn}>
+              <Chevron open={weeklyChartOpen} />
+              <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text)' }}>Weekly Hours by Affiliation</span>
+            </button>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <select value={weeklyChartYear} onChange={e => setWeeklyChartYear(Number(e.target.value))} style={sel}>
+                {YEARS.filter(y => y.value > 0).map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
+              </select>
             </div>
-            <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
-              missionaries: sma · students: school · all: birthday
-            </span>
-          </button>
-          {missingOpen && (
-            <div style={{ marginTop: '1.25rem' }}>
-              {missingInfo.length === 0 ? (
-                <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>All volunteers have complete profile information.</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 80px 80px', gap: '0.5rem', padding: '0.35rem 1rem' }}>
-                    {['Name','SMA','School','Birthday'].map(h => (
-                      <span key={h} style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</span>
-                    ))}
-                  </div>
-                  {missingInfo.map(v => (
-                    <div key={v.id} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 80px 80px', gap: '0.5rem', padding: '0.55rem 1rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)', alignItems: 'center' }}>
-                      <div>
-                        <span style={{ fontWeight: 500, fontSize: '0.88rem' }}>{v.name}</span>
-                        {v.affiliation && (
-                          <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>{v.affiliation === 'provider' ? 'Clinical Care Volunteer' : v.affiliation}</span>
-                        )}
-                      </div>
-                      <span style={{ fontSize: '0.75rem', ...(v.smaNA ? { color: 'var(--muted)', fontStyle: 'italic' } : v.missingSma ? { color: '#ef4444', fontWeight: 600 } : { color: '#4ade80' }) }}>
-                        {v.smaNA ? 'N/A' : v.missingSma ? 'Missing' : '✓'}
-                      </span>
-                      <span style={{ fontSize: '0.75rem', ...(v.schoolNA ? { color: 'var(--muted)', fontStyle: 'italic' } : v.missingSchool ? { color: '#ef4444', fontWeight: 600 } : { color: '#4ade80' }) }}>
-                        {v.schoolNA ? 'N/A' : v.missingSchool ? 'Missing' : '✓'}
-                      </span>
-                      <span style={{ fontSize: '0.75rem', ...(v.missingBirthday ? { color: '#ef4444', fontWeight: 600 } : { color: '#4ade80' }) }}>
-                        {v.missingBirthday ? 'Missing' : '✓'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+          </div>
+          {weeklyChartOpen && (
+            weeklyChartLoading ? (
+              <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Loading chart…</p>
+            ) : weeklyChartData.length === 0 ? (
+              <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>No shift data for {weeklyChartYear}.</p>
+            ) : (
+              <WeeklyLineChart data={weeklyChartData} />
+            )
+          )}
+        </div>
+
+        {/* ── 6. Shift Late/No-Show Bar Chart ─────────────────── */}
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: shiftChartOpen ? '1.25rem' : 0 }}>
+            <button onClick={() => setShiftChartOpen(s => !s)} style={collapseBtn}>
+              <Chevron open={shiftChartOpen} />
+              <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text)' }}>Late &amp; No-Shows by Shift</span>
+            </button>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <select value={shiftChartType} onChange={e => setShiftChartType(e.target.value)} style={sel}>
+                <option value="both">Both</option>
+                <option value="noshow">No-shows only</option>
+                <option value="late">Late only</option>
+              </select>
+              <select value={shiftChartMonth} onChange={e => setShiftChartMonth(Number(e.target.value))} disabled={shiftChartYear === 0} style={{ ...sel, opacity: shiftChartYear === 0 ? 0.4 : 1 }}>
+                {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              <select value={shiftChartYear} onChange={e => setShiftChartYear(Number(e.target.value))} style={sel}>
+                {YEARS.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
+              </select>
             </div>
+          </div>
+          {shiftChartOpen && (
+            shiftChartLoading ? (
+              <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Loading chart…</p>
+            ) : shiftChartData.length === 0 ? (
+              <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>No attendance data for this period.</p>
+            ) : (
+              <ShiftBarChart data={shiftChartData} type={shiftChartType} />
+            )
           )}
         </div>
 

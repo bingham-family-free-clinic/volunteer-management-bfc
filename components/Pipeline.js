@@ -187,6 +187,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [recentUploadingKey, setRecentUploadingKey] = useState(null)
   const [offloadingId,       setOffloadingId]       = useState(null)
   const [expandedId,         setExpandedId]         = useState(null)
+  const [recentPhotoUrls,    setRecentPhotoUrls]    = useState({})   // { [applicantId]: signedUrl }
+  const [recentPhotoUploading, setRecentPhotoUploading] = useState(null) // applicantId currently uploading
 
   // Onboarding form
   const EMPTY_FORM = {
@@ -225,6 +227,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [uploadingKey,    setUploadingKey]    = useState(null)
 
   const [toast, setToast] = useState(null)
+
+  // ── Applicant profile photo state ──────────────────────────────────────────
+  const [applicantPhotoUrl,       setApplicantPhotoUrl]       = useState(null)
+  const [uploadingApplicantPhoto, setUploadingApplicantPhoto] = useState(false)
+  const [applicantAvatarPath,     setApplicantAvatarPath]     = useState(null)
+  const applicantPhotoInputRef = useRef(null)
 
   useEffect(() => { loadAll() }, [])
 
@@ -384,7 +392,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       .from('volunteer_applications').select('*').eq('stage', 'completed').order('full_name', { ascending: true })
     if (!error && data) {
       setCompleted(data)
-      if (data.length > 0) await loadRecentChecklists(data.map(a => a.id))
+      if (data.length > 0) {
+        const ids = data.map(a => a.id)
+        await loadRecentChecklists(ids)
+      }
     }
   }
 
@@ -550,6 +561,32 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setRecentUploadingKey(null)
   }
 
+  async function handleRecentPhotoUpload(applicantId, file) {
+    if (!file) return
+    setRecentPhotoUploading(applicantId)
+    try {
+      const compressed = await compressImage(file)
+      const path = `${applicantId}/avatar.jpg`
+      const { error: upErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, compressed, { contentType: 'image/jpeg', upsert: true })
+      if (upErr) { msg(upErr.message, 'error'); setRecentPhotoUploading(null); return }
+      // Also write avatar_url to the profile row (volunteer_id links application → profile)
+      const app = completed.find(a => a.id === applicantId)
+      if (app?.volunteer_id) {
+        await supabase.from('profiles').update({ avatar_url: path }).eq('id', app.volunteer_id)
+      }
+      const { data } = await supabase.storage.from('avatars').createSignedUrl(path, 3600)
+      if (data?.signedUrl) {
+        setRecentPhotoUrls(prev => ({ ...prev, [applicantId]: data.signedUrl }))
+      }
+      msg('Photo uploaded!')
+    } catch (e) {
+      msg('Upload failed: ' + e.message, 'error')
+    }
+    setRecentPhotoUploading(null)
+  }
+
   async function openFile(bucket, storagePath) {
     const { data, error } = await supabase.storage.from(bucket).createSignedUrl(storagePath, 120)
     if (error) { msg('Could not open file', 'error'); return }
@@ -561,6 +598,51 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const { data, error } = await supabase.storage.from('resumes').createSignedUrl(resumeUrl, 60)
     if (error) { msg('Could not load resume', 'error'); return }
     window.open(data.signedUrl, '_blank')
+  }
+
+  // ─── Applicant photo helpers ──────────────────────────────────────────────
+
+  async function compressImage(file, maxDim = 480, quality = 0.75) {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height)
+          width  = Math.round(width  * scale)
+          height = Math.round(height * scale)
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Canvas toBlob failed')), 'image/jpeg', quality)
+      }
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')) }
+      img.src = url
+    })
+  }
+
+  async function handleApplicantPhotoUpload(file) {
+    if (!file || !selected) return
+    setUploadingApplicantPhoto(true)
+    try {
+      const compressed = await compressImage(file)
+      const path = `${selected.id}/avatar.jpg`
+      const { error: upErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, compressed, { contentType: 'image/jpeg', upsert: true })
+      if (upErr) { msg(upErr.message, 'error'); setUploadingApplicantPhoto(false); return }
+      const { data } = await supabase.storage.from('avatars').createSignedUrl(path, 3600)
+      setApplicantPhotoUrl(data?.signedUrl || null)
+      setApplicantAvatarPath(path)
+      msg('Photo uploaded!')
+    } catch (e) {
+      msg('Upload failed: ' + e.message, 'error')
+    }
+    setUploadingApplicantPhoto(false)
   }
 
   // ─── Offload ──────────────────────────────────────────────────────────────
@@ -665,6 +747,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       default_role: affiliData.default_role || null,
       birthday:     affiliData.birthday     || null,
       status: 'active',
+      avatar_url: applicantAvatarPath || null,
       sma_name:    affil === 'missionary' ? (affiliData.sma_name    || null) : null,
       sma_contact: affil === 'missionary' ? (affiliData.sma_contact || null) : null,
       school:      affil === 'student'    ? (affiliData.school      || null) : null,
@@ -704,6 +787,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setOnboardStep(1)
     setOnboardForm(EMPTY_FORM)
     setChecklist(EMPTY_CHECKLIST)
+    setApplicantPhotoUrl(null)
+    setApplicantAvatarPath(null)
 
     await loadAll()
     setActiveTab('recent')
@@ -747,6 +832,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       setInterviewDate(d.toISOString().slice(0, 10))
       setInterviewTime(d.toTimeString().slice(0, 5))
     }
+
+    // Reset photo state — photo will appear only once uploaded this session
+    setApplicantPhotoUrl(null)
+    setApplicantAvatarPath(null)
   }
 
   // ─── Derived ──────────────────────────────────────────────────────────────
@@ -1066,7 +1155,40 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               {/* ── Card header row ── */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', padding: '1rem 1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: C.primary + '22', border: `2px solid ${C.blue}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1rem', color: C.blue, flexShrink: 0 }}>{a.full_name?.charAt(0)}</div>
+                  {/* Profile photo upload */}
+                  {(() => {
+                    const photoUrl    = recentPhotoUrls[a.id] || null
+                    const isUploading = recentPhotoUploading === a.id
+                    const inputId     = `recent-photo-${a.id}`
+                    return (
+                      <>
+                        <div
+                          onClick={() => { if (!isUploading) document.getElementById(inputId)?.click() }}
+                          title={photoUrl ? 'Click to replace photo' : 'Click to upload photo'}
+                          style={{ position: 'relative', width: 38, height: 38, borderRadius: '50%', background: C.primary + '22', border: `2px solid ${C.blue}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1rem', color: C.blue, overflow: 'hidden', cursor: 'pointer', flexShrink: 0 }}
+                        >
+                          {isUploading
+                            ? <span style={{ fontSize: '0.6rem', color: 'var(--muted)' }}>…</span>
+                            : photoUrl
+                              ? <img src={photoUrl} alt={a.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              : <span>{a.full_name?.charAt(0)}</span>
+                          }
+                          {photoUrl && !isUploading && (
+                            <div style={{ position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, borderRadius: '50%', background: C.blue, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--surface)' }}>
+                              <span style={{ fontSize: '0.45rem', color: '#fff' }}>✎</span>
+                            </div>
+                          )}
+                        </div>
+                        <input
+                          id={inputId}
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={e => { const f = e.target.files?.[0]; if (f) handleRecentPhotoUpload(a.id, f); e.target.value = '' }}
+                        />
+                      </>
+                    )
+                  })()}
                   <div>
                     <p style={{ fontWeight: 600, fontSize: '0.95rem' }}>{a.full_name}</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.15rem', flexWrap: 'wrap' }}>
@@ -1287,7 +1409,31 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ width: 48, height: 48, borderRadius: '50%', background: C.primary + '18', border: `2px solid ${C.blue}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.2rem', color: C.blue, flexShrink: 0 }}>{applicant.full_name?.charAt(0)}</div>
+            {/* Profile photo — click to upload or replace */}
+            <div
+              onClick={() => { if (!uploadingApplicantPhoto) applicantPhotoInputRef.current?.click() }}
+              title={applicantPhotoUrl ? 'Click to replace photo' : 'Click to upload photo'}
+              style={{ position: 'relative', width: 48, height: 48, borderRadius: '50%', background: C.primary + '18', border: `2px solid ${C.blue}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.2rem', color: C.blue, overflow: 'hidden', cursor: 'pointer', flexShrink: 0 }}
+            >
+              {uploadingApplicantPhoto
+                ? <span style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>…</span>
+                : applicantPhotoUrl
+                  ? <img src={applicantPhotoUrl} alt={applicant.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <span>{applicant.full_name?.charAt(0)}</span>
+              }
+              {applicantPhotoUrl && !uploadingApplicantPhoto && (
+                <div style={{ position: 'absolute', bottom: 0, right: 0, width: 16, height: 16, borderRadius: '50%', background: C.blue, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--surface)', cursor: 'pointer' }}>
+                  <span style={{ fontSize: '0.5rem', color: '#fff' }}>✎</span>
+                </div>
+              )}
+            </div>
+            <input
+              ref={applicantPhotoInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleApplicantPhotoUpload(f); e.target.value = '' }}
+            />
             <div>
               <h3 style={{ fontWeight: 600, fontSize: '1.1rem' }}>{applicant.full_name}</h3>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.2rem' }}>
@@ -1563,6 +1709,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 )}
               </div>
             )}
+
+            {/* Reject — always visible in onboarding, separated from step content */}
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: `1px solid ${C.danger}22`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <p style={{ fontSize: '0.78rem', color: 'var(--muted)', fontStyle: 'italic' }}>Need to remove this applicant from onboarding?</p>
+              <button onClick={() => moveToStage(applicant, 'rejected')} disabled={movingStage} style={outlineBtn(C.danger)}>
+                Reject Application
+              </button>
+            </div>
           </div>
         )}
 

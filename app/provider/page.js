@@ -1,9 +1,12 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import nextDynamic from 'next/dynamic'
 import { supabase } from '../../lib/supabase'
 import { SHIFTS, ROLES } from '../../lib/constants'
 import { recurringAppliesToDate, getEffectiveProviderIds } from '../../lib/scheduleUtils'
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
+
+const MessageTab = nextDynamic(() => import('../../components/MessageTab').then(m => m.MessageTab), { ssr: false })
 
 export const dynamic = 'force-dynamic'
 
@@ -136,6 +139,7 @@ export default function ProviderPage() {
   const [totalHours, setTotalHours]       = useState(null)
 
   const fetchedTabs = useRef(new Set())
+  const hasVisitedMessages = useRef(false)
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -453,7 +457,7 @@ export default function ProviderPage() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
-          {[['home', 'My Shifts'], ['schedule', 'Schedule'], ['account', 'Account']].map(([key, label]) => (
+          {[['home', 'My Shifts'], ['schedule', 'Schedule'], ['messages', 'Messages'], ['account', 'Account']].map(([key, label]) => (
             <TabButton key={key} id={key} label={label} active={tab === key} onClick={t => setTab(t)} />
           ))}
         </div>
@@ -720,6 +724,20 @@ export default function ProviderPage() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ══ MESSAGES TAB ══════════════════════════════════════════════════ */}
+        {/* Mount once on first visit, then keep alive hidden to preserve state */}
+        {(() => { if (tab === 'messages') hasVisitedMessages.current = true; return null })()}
+        {hasVisitedMessages.current && (
+          <div style={{ display: tab === 'messages' ? 'block' : 'none' }}>
+            <MessageTab
+              user={user}
+              profile={profile}
+              supabase={supabase}
+              showToast={showToast}
+            />
           </div>
         )}
 

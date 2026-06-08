@@ -61,7 +61,7 @@ function formatBody(text) {
   })
 }
 
-export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel }) {
+export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, replyOpen, onReply }) {
   const isUnread =
     readMessageIds &&
     !readMessageIds.has(m.id) &&
@@ -103,7 +103,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           <span
             style={{
               fontWeight: isUnread ? 700 : 600,
-              fontSize: '0.9rem',
+              fontSize: '0.8rem',
             }}
           >
             {senderLabel || m.sender?.full_name || 'Unknown'}
@@ -113,7 +113,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span
             style={{
-              fontSize: '0.75rem',
+              fontSize: '0.8rem',
               padding: '0.15rem 0.5rem',
               borderRadius: '100px',
               background: 'var(--surface)',
@@ -127,19 +127,48 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           <span
             style={{
               color: 'var(--muted)',
-              fontSize: '0.78rem',
+              fontSize: '0.8rem',
               fontFamily: 'DM Mono, monospace',
             }}
           >
             {formatDateTime(m.created_at)}
           </span>
+
+          {canReply && !replyOpen && (
+            <button
+              onClick={e => { e.stopPropagation(); onReply?.() }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                padding: '0.15rem 0.55rem',
+                background: 'none',
+                border: '1px solid var(--border)',
+                borderRadius: '100px',
+                color: 'var(--muted)',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: 'DM Sans, sans-serif',
+                transition: 'border-color 0.15s, color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+            >
+              <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 14 4 9 9 4" />
+                <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+              </svg>
+              Reply
+            </button>
+          )}
         </div>
       </div>
 
       {m.body && (
-        <p
+        <div
           style={{
-            fontSize: '0.9rem',
+            fontSize: '0.92rem',
             lineHeight: 1.5,
             margin: 0,
             marginBottom: m.image_url ? '0.75rem' : 0,
@@ -148,7 +177,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           }}
         >
           {formatBody(m.body)}
-        </p>
+        </div>
       )}
 
       {m.image_url && (
