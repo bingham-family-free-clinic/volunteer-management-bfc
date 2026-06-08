@@ -527,7 +527,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           applicantEmail: applicant.email,
           applicantName:  applicant.full_name,
           stage,
-          attachmentUrl, // null for interview/rejected, signed URL for onboarding
+          attachmentUrl,
+          senderName: profile?.full_name || 'BFC Volunteer Team',
         },
       })
       if (error) {
@@ -1239,8 +1240,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isDirty = JSON.stringify(draft) !== JSON.stringify(templates[activeTemplate] || {})
 
     // Preview: replace placeholders with sample values
-    const previewSubject = (draft.subject || '').replace(/\{\{name\}\}/g, 'Jane Doe').replace(/\{\{email\}\}/g, 'jane@example.com')
-    const previewBody    = (draft.body    || '').replace(/\{\{name\}\}/g, 'Jane Doe').replace(/\{\{email\}\}/g, 'jane@example.com')
+    const senderPreview  = profile?.full_name || 'Your Name'
+    const previewSubject = (draft.subject || '')
+      .replace(/\{\{name\}\}/g, 'Jane Doe')
+      .replace(/\{\{email\}\}/g, 'jane@example.com')
+      .replace(/\{\{sender_name\}\}/g, senderPreview)
+    const previewBody    = (draft.body    || '')
+      .replace(/\{\{name\}\}/g, 'Jane Doe')
+      .replace(/\{\{email\}\}/g, 'jane@example.com')
+      .replace(/\{\{sender_name\}\}/g, senderPreview)
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1283,7 +1291,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 {TEMPLATE_LABELS[activeTemplate]}
               </p>
               <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
-                Use {'{{name}}'} and {'{{email}}'}
+                Use {'{{name}}'}, {'{{email}}'}, {'{{sender_name}}'}
               </span>
             </div>
 
