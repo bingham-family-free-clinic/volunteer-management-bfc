@@ -454,7 +454,7 @@ export default function VolunteerTasks({ userId, team }) {
         .order('due_date', { ascending: true, nullsFirst: false }),
       supabase
         .from('profiles')
-        .select('id, full_name')
+        .select('id, full_name, team')
         .overlaps('team', teamFilter)              // ← array column, overlaps = member on ANY of the user's teams
         .order('full_name'),
     ])
