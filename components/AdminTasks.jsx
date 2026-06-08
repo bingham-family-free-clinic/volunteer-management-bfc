@@ -346,14 +346,17 @@ function NewTaskForm({ currentUserId, allMembers, onCreated, showToast, onClose 
   )
 }
 
-// ── Team Status Editor ────────────────────────────────────────────────────────
 function TeamStatusEditor({ volunteers, onTeamUpdated, showToast }) {
   const [filterTeam, setFilterTeam] = useState('')
-  const [saving, setSaving] = useState(null) // holds volunteer id being saved
+  const [saving, setSaving] = useState(null)
+  const [addingToTeam, setAddingToTeam] = useState(null) // which team is open for adding
+  const [addVolId, setAddVolId] = useState('')
 
   const displayed = filterTeam
     ? volunteers.filter(v => v.team === filterTeam)
     : volunteers.filter(v => v.team)
+
+  const unassigned = volunteers.filter(v => !v.team)
 
   async function updateTeam(volId, newTeam) {
     setSaving(volId)
@@ -363,19 +366,27 @@ function TeamStatusEditor({ volunteers, onTeamUpdated, showToast }) {
     setSaving(null)
   }
 
+  async function handleAdd() {
+    if (!addVolId || !addingToTeam) return
+    await updateTeam(addVolId, addingToTeam)
+    setAddVolId('')
+    setAddingToTeam(null)
+  }
+
   return (
     <div style={{ ...S.card, display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h3 style={{ fontWeight: 600, fontSize: '0.95rem' }}>Team Assignments</h3>
         <select
           value={filterTeam}
-          onChange={e => setFilterTeam(e.target.value)}
+          onChange={e => { setFilterTeam(e.target.value); setAddingToTeam(null); setAddVolId('') }}
           style={{ ...S.input, width: 'auto', fontSize: '0.82rem', flex: '0 0 auto' }}
         >
           <option value="">All teams</option>
           {TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
+
       {displayed.length === 0 ? (
         <p style={{ fontSize: '0.85rem', color: 'var(--muted)', fontStyle: 'italic' }}>No volunteers assigned to a team.</p>
       ) : (
@@ -402,6 +413,67 @@ function TeamStatusEditor({ volunteers, onTeamUpdated, showToast }) {
           ))}
         </div>
       )}
+
+      {/* Add member to a specific team */}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
+        {addingToTeam ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
+              Adding to <strong style={{ color: 'var(--text)' }}>{addingToTeam}</strong>
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <select
+                value={addVolId}
+                onChange={e => setAddVolId(e.target.value)}
+                style={{ ...S.input, flex: 1, fontSize: '0.85rem' }}
+              >
+                <option value="">— Select person —</option>
+                {unassigned.map(v => <option key={v.id} value={v.id}>{v.full_name}</option>)}
+              </select>
+              <button
+                onClick={handleAdd}
+                disabled={!addVolId || saving}
+                style={{
+                  padding: '0.5rem 0.9rem', background: 'var(--accent)', color: '#fff',
+                  border: 'none', borderRadius: '7px', fontSize: '0.82rem', fontWeight: 600,
+                  cursor: !addVolId ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif',
+                  opacity: !addVolId ? 0.5 : 1,
+                }}
+              >
+                Add
+              </button>
+              <button
+                onClick={() => { setAddingToTeam(null); setAddVolId('') }}
+                style={{
+                  padding: '0.5rem 0.75rem', background: 'var(--surface)', color: 'var(--muted)',
+                  border: '1px solid var(--border)', borderRadius: '7px', fontSize: '0.82rem',
+                  cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>Add someone to:</span>
+            {TEAMS.map(t => (
+              <button
+                key={t}
+                onClick={() => { setAddingToTeam(t); setFilterTeam(''); setAddVolId('') }}
+                style={{
+                  padding: '0.25rem 0.65rem', fontSize: '0.75rem', fontWeight: 500,
+                  background: 'var(--surface)', color: 'var(--muted)',
+                  border: '1px solid var(--border)', borderRadius: '6px',
+                  cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
