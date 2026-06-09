@@ -542,6 +542,32 @@ export default function VolunteerPage() {
   }
 
   async function handleRequestCover(calloutId) {
+    // Find the open shift being requested
+    const openShift = openShifts.find(s => s.id === calloutId)
+    if (openShift) {
+      const shiftDate = openShift.callout_date                        // e.g. "2025-09-10"
+      const shiftTime = openShift.shift_time                          // e.g. "10-2"
+      const dayName   = openShift.day_of_week                         // e.g. "tuesday"
+
+      // 1. Check regular schedule — same day + same shift_time
+      const scheduleConflict = schedule.some(
+        s => s.day_of_week === dayName && s.shift_time === shiftTime
+      )
+      if (scheduleConflict) {
+        showToast("You're already scheduled for that shift.", 'error')
+        return
+      }
+
+      // 2. Check already-approved covers — same date + same shift_time
+      const coverConflict = approvedCovers.some(
+        r => r.callout?.callout_date === shiftDate && r.callout?.shift_time === shiftTime
+      )
+      if (coverConflict) {
+        showToast("You're already covering a shift at that time.", 'error')
+        return
+      }
+    }
+
     setRequestingCoverId(calloutId)
     const { error } = await supabase.from('shift_cover_requests').insert({ callout_id: calloutId, volunteer_id: user.id })
     if (error) showToast(error.message, 'error')
@@ -718,13 +744,34 @@ export default function VolunteerPage() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            {(profile?.role === 'admin' || profile?.default_role === 'Clinical Supervisor') && (
+            {(profile?.role === 'admin' ||
+              profile?.default_role === 'Clinical Supervisor' ||
+              profile?.default_role === 'Office Manager') && (
               <button
                 onClick={() => {
-                  if (profile?.default_role === 'Clinical Supervisor') { window.location.href = '/clinical-supervisor'; return }
-                  if (window.location.pathname.includes('admin')) { window.location.href = '/volunteer' } else { window.location.href = '/admin' }
+                  if (
+                    profile?.default_role === 'Clinical Supervisor' ||
+                    profile?.default_role === 'Office Manager'
+                  ) {
+                    window.location.href = '/clinical-supervisor'
+                    return
+                  }
+
+                  if (window.location.pathname.includes('admin')) {
+                    window.location.href = '/volunteer'
+                  } else {
+                    window.location.href = '/admin'
+                  }
                 }}
-                style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.4rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem' }}
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  color: 'var(--muted)',
+                  padding: '0.4rem 0.9rem',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem'
+                }}
               >
                 Switch View
               </button>
