@@ -8,7 +8,7 @@ const TEAMS = [
   'Office Manager',
   'Information Systems',
   'Administrative Assistant',
-  'Media',
+  'Communications',
   'Volunteer Credentialing',
   'Provider Credentialing',
   'Executive Assistant',
