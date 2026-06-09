@@ -38,10 +38,11 @@ const C = {
 }
 
 const STAGE_COLORS = {
-  applied:    C.light,
-  interview:  C.warn,
-  onboarding: C.blue,
-  rejected:   C.danger,
+  applied:               C.light,
+  interview:             C.warn,
+  onboarding:            C.blue,
+  onboarding_missionary: C.primary,
+  rejected:              C.danger,
 }
 
 const EMAIL_STAGES = ['interview', 'onboarding', 'onboarding_missionary', 'rejected']
