@@ -378,14 +378,28 @@ export default function AdminPage() {
 
   async function loadCallouts() {
     const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
-    const { data } = await supabase
-      .from('callouts')
-      .select('id,volunteer_id,callout_date,day_of_week,shift_time,role,reason,status,is_read,covered_by,submitted_at,volunteer:profiles!callouts_volunteer_id_fkey(full_name)')
-      .gte('callout_date', todayStr)
-      .or('status.eq.pending,status.is.null,and(status.eq.approved,covered_by.is.null)')
-      .order('callout_date', { ascending: true })
-      .limit(CALLOUTS_LIMIT)
-    setCallouts((data || []).map(c => ({ ...c, profiles: c.volunteer, status: c.status ?? (c.is_read ? 'approved' : 'pending') })))
+    const cols = 'id,volunteer_id,callout_date,day_of_week,shift_time,role,reason,status,is_read,covered_by,submitted_at,volunteer:profiles!callouts_volunteer_id_fkey(full_name)'
+
+    // Fetch pending first (priority), then fill remaining slots with approved-but-uncovered
+    const [{ data: pendingData }, { data: approvedData }] = await Promise.all([
+      supabase.from('callouts').select(cols)
+        .gte('callout_date', todayStr)
+        .or('status.eq.pending,status.is.null')
+        .order('callout_date', { ascending: true })
+        .limit(CALLOUTS_LIMIT),
+      supabase.from('callouts').select(cols)
+        .gte('callout_date', todayStr)
+        .eq('status', 'approved')
+        .is('covered_by', null)
+        .order('callout_date', { ascending: true })
+        .limit(CALLOUTS_LIMIT),
+    ])
+
+    const pending  = (pendingData  || [])
+    const approved = (approvedData || []).filter(a => !pending.some(p => p.id === a.id))
+    const merged   = [...pending, ...approved].slice(0, CALLOUTS_LIMIT)
+
+    setCallouts(merged.map(c => ({ ...c, profiles: c.volunteer, status: c.status ?? (c.is_read ? 'approved' : 'pending') })))
   }
 
   async function loadSchedule() {
@@ -397,11 +411,21 @@ export default function AdminPage() {
   }
 
   async function loadCoverRequests() {
-    const { data } = await supabase
-      .from('shift_cover_requests')
-      .select('id,callout_id,volunteer_id,status,requested_at,reviewed_at,profiles(full_name)')
-      .order('requested_at', { ascending: false })
-    setCoverRequests(data || [])
+    // Fetch pending cover requests first, then reviewed ones to fill remaining slots
+    const cols = 'id,callout_id,volunteer_id,status,requested_at,reviewed_at,profiles(full_name)'
+    const COVER_LIMIT = 100
+    const [{ data: pendingData }, { data: reviewedData }] = await Promise.all([
+      supabase.from('shift_cover_requests').select(cols)
+        .eq('status', 'pending')
+        .order('requested_at', { ascending: false }),
+      supabase.from('shift_cover_requests').select(cols)
+        .neq('status', 'pending')
+        .order('requested_at', { ascending: false })
+        .limit(COVER_LIMIT),
+    ])
+    const pending  = (pendingData  || [])
+    const reviewed = (reviewedData || []).filter(r => !pending.some(p => p.id === r.id))
+    setCoverRequests([...pending, ...reviewed])
   }
 
   // ── Shifts pagination ───────────────────────────────────────────────────────
