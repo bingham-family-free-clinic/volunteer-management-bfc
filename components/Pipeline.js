@@ -44,12 +44,13 @@ const STAGE_COLORS = {
   rejected:   C.danger,
 }
 
-const EMAIL_STAGES = ['interview', 'onboarding', 'rejected']
+const EMAIL_STAGES = ['interview', 'onboarding', 'onboarding_missionary', 'rejected']
 
 const TEMPLATE_LABELS = {
-  interview:  'Interview Invitation',
-  onboarding: 'Onboarding Welcome',
-  rejected:   'Rejection Notice',
+  interview:             'Interview Invitation',
+  onboarding:            'Onboarding Welcome',
+  onboarding_missionary: 'Onboarding — Missionary',
+  rejected:              'Rejection Notice',
 }
 
 const AFFILIATION_OPTIONS = [
@@ -222,7 +223,7 @@ function WelcomePacketManager({ supabase, msg, outlineBtn, solidBtn, secLabel, c
         </p>
         <p style={{ fontSize: '0.8rem', color: 'var(--muted)', lineHeight: 1.5 }}>
           {packetPath
-            ? 'A PDF is attached to every onboarding email automatically.'
+            ? 'A PDF is attached to every onboarding email automatically (both standard and missionary).'
             : 'No packet uploaded yet — onboarding emails will send without an attachment.'}
         </p>
       </div>
@@ -418,6 +419,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [activeTab,       setActiveTab]       = useState('pipeline')
   const [stageFilter,     setStageFilter]     = useState('applied')
   const [movingStage,     setMovingStage]     = useState(false)
+  const [affiliationModal, setAffiliationModal] = useState(null)   // { applicant } | null
+  const [affiliationPick,  setAffiliationPick]  = useState('')      // value chosen in modal
   const [interviewDate,   setInterviewDate]   = useState('')
   const [interviewTime,   setInterviewTime]   = useState('')
   const [savingInterview, setSavingInterview] = useState(false)
@@ -750,9 +753,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   async function sendStageEmail(applicant, stage) {
     if (!EMAIL_STAGES.includes(stage)) return
 
-    // For onboarding emails, generate a short-lived signed URL for the welcome packet
+    // For onboarding emails (both regular and missionary), generate a signed URL for the welcome packet
     let attachmentUrl = null
-    if (stage === 'onboarding') {
+    const isOnboardingVariant = stage === 'onboarding' || stage === 'onboarding_missionary'
+    if (isOnboardingVariant) {
       const { data: tmpl } = await supabase
         .from('email_templates')
         .select('welcome_packet_path')
@@ -762,7 +766,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       if (tmpl?.welcome_packet_path) {
         const { data: signed } = await supabase.storage
           .from('onboarding-assets')
-          .createSignedUrl(tmpl.welcome_packet_path, 3600) // 1 hour — plenty of time for the edge function to fetch it
+          .createSignedUrl(tmpl.welcome_packet_path, 3600)
         attachmentUrl = signed?.signedUrl ?? null
       }
     }
@@ -781,7 +785,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         console.error('Email send error:', error)
         msg(`Stage moved, but email failed: ${error.message}`, 'error')
       } else {
-        msg(`Moved to ${STAGE_LABELS[stage]} — email sent to ${applicant.email}`)
+        const stageLabel = stage === 'onboarding_missionary' ? 'Onboarding (Missionary)' : STAGE_LABELS[stage] ?? stage
+        msg(`Moved to ${stageLabel} — email sent to ${applicant.email}`)
       }
     } catch (e) {
       console.error('Email send exception:', e)
@@ -806,6 +811,55 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       await sendStageEmail(applicant, stage)
     }
     setMovingStage(false)
+  }
+
+  // ── NEW: opens the affiliation modal before moving to onboarding ──────────
+  function openAffiliationModal(applicant) {
+    // Pre-fill with any previously saved affiliation on the applicant row
+    setAffiliationPick(applicant.onboard_affiliation || '')
+    setAffiliationModal({ applicant })
+  }
+
+  async function confirmMoveToOnboarding() {
+    if (!affiliationModal) return
+    const { applicant } = affiliationModal
+    const affiliation   = affiliationPick
+
+    setMovingStage(true)
+
+    // Persist the affiliation on the applicant row immediately
+    if (affiliation) {
+      await supabase.from('volunteer_applications')
+        .update({ onboard_affiliation: affiliation })
+        .eq('id', applicant.id)
+    }
+
+    // Move stage
+    const { error } = await supabase.from('volunteer_applications')
+      .update({ stage: 'onboarding', stage_updated_at: new Date().toISOString() })
+      .eq('id', applicant.id)
+
+    if (error) {
+      msg(error.message, 'error')
+      setMovingStage(false)
+      setAffiliationModal(null)
+      return
+    }
+
+    await audit('pipeline_onboarding', 'applicant', applicant.id, applicant.full_name,
+      `affiliation: ${affiliation || 'unknown'}`)
+    await loadApplicants()
+    setSelected(prev => prev?.id === applicant.id
+      ? { ...prev, stage: 'onboarding', onboard_affiliation: affiliation }
+      : prev
+    )
+
+    // Fire the correct email template based on affiliation
+    const emailStage = affiliation === 'missionary' ? 'onboarding_missionary' : 'onboarding'
+    await sendStageEmail({ ...applicant, onboard_affiliation: affiliation }, emailStage)
+
+    setMovingStage(false)
+    setAffiliationModal(null)
   }
 
   async function saveInterviewTime(applicant) {
@@ -1276,6 +1330,109 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     }
   }
 
+  // ─── Affiliation pre-move modal ───────────────────────────────────────────
+
+  function AffiliationModal() {
+    if (!affiliationModal) return null
+    const { applicant } = affiliationModal
+    const canConfirm    = !!affiliationPick
+
+    return (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(2,30,55,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}
+        onClick={e => { if (e.target === e.currentTarget && !movingStage) setAffiliationModal(null) }}
+      >
+        <div style={{ background: 'var(--surface)', borderRadius: '14px', border: '1px solid var(--border)', boxShadow: '0 8px 48px rgba(2,65,107,0.22)', width: '100%', maxWidth: 420, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.25rem' }}>
+                Move to Onboarding
+              </p>
+              <p style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.5 }}>
+                Select <strong>{applicant.full_name}</strong>'s affiliation before confirming. This determines which onboarding email they receive.
+              </p>
+            </div>
+            {!movingStage && (
+              <button
+                onClick={() => setAffiliationModal(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1, padding: '0.1rem 0.3rem', flexShrink: 0 }}
+                title="Cancel"
+              >×</button>
+            )}
+          </div>
+
+          {/* Affiliation picker */}
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Applicant Affiliation <span style={{ color: C.danger }}>*</span>
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '0.5rem' }}>
+              {AFFILIATION_OPTIONS.map(opt => {
+                const active = affiliationPick === opt.value
+                const isMissionary = opt.value === 'missionary'
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setAffiliationPick(opt.value)}
+                    disabled={movingStage}
+                    style={{
+                      padding: '0.65rem 0.75rem',
+                      borderRadius: '10px',
+                      border: `1px solid ${active ? (isMissionary ? C.light : C.blue) : 'var(--border)'}`,
+                      background: active ? (isMissionary ? C.light + '18' : C.blue + '18') : 'var(--bg)',
+                      color: active ? (isMissionary ? C.light : C.blue) : 'var(--text)',
+                      fontWeight: active ? 700 : 400,
+                      cursor: movingStage ? 'not-allowed' : 'pointer',
+                      fontFamily: 'DM Sans, sans-serif',
+                      fontSize: '0.85rem',
+                      transition: 'all 0.15s',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {opt.label}
+                    {isMissionary && (
+                      <span style={{ display: 'block', fontSize: '0.65rem', color: active ? C.light : 'var(--muted)', fontWeight: 400, marginTop: '0.15rem' }}>
+                        missionary email
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Email preview note */}
+          {affiliationPick && (
+            <div style={{ padding: '0.65rem 0.9rem', borderRadius: '8px', background: C.blue + '08', border: `1px solid ${C.blue}33`, fontSize: '0.8rem', color: C.blue, lineHeight: 1.5 }}>
+              {affiliationPick === 'missionary'
+                ? <>Will send the <strong>Onboarding — Missionary</strong> email template.</>
+                : <>Will send the <strong>Onboarding Welcome</strong> email template.</>
+              }
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+            {!movingStage && (
+              <button onClick={() => setAffiliationModal(null)} style={ghostBtn()}>
+                Cancel
+              </button>
+            )}
+            <button
+              onClick={confirmMoveToOnboarding}
+              disabled={!canConfirm || movingStage}
+              style={solidBtn(C.blue, !canConfirm || movingStage)}
+            >
+              {movingStage ? 'Moving...' : 'Confirm & Send Email'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ─── Parking pass modal helpers ───────────────────────────────────────────
 
   function openParkingPassModal(applicantId, applicantName, isRecent = false) {
@@ -1659,7 +1816,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             )}
 
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <button onClick={() => moveToStage(applicant, 'onboarding')} disabled={movingStage || !applicant.interview_scheduled_at} style={outlineBtn(applicant.interview_scheduled_at ? C.blue : C.muted)}>
+              <button onClick={() => openAffiliationModal(applicant)} disabled={movingStage || !applicant.interview_scheduled_at} style={outlineBtn(applicant.interview_scheduled_at ? C.blue : C.muted)}>
                 Accept — Move to Onboarding
               </button>
               <button onClick={() => moveToStage(applicant, 'rejected')} disabled={movingStage} style={outlineBtn(C.danger)}>Reject Application</button>
@@ -1853,6 +2010,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       <div style={{ position: 'relative' }}>
         <ApplicantDetail applicant={selected} />
         {toast && <Toast toast={toast} />}
+        <AffiliationModal />
         <ParkingPassModal />
         <ConfidentialityModal />
       </div>
@@ -1980,6 +2138,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
       {toast && <Toast toast={toast} />}
 
+      <AffiliationModal />
       <ParkingPassModal />
       <ConfidentialityModal />
 
