@@ -369,10 +369,9 @@ export default function VolunteerPage() {
         .order('callout_date', { ascending: true }),
       supabase
         .from('shift_cover_requests')
-        .select('id, callout_id, status, callout:callouts!shift_cover_requests_callout_id_fkey(callout_date, day_of_week, shift_time, role, volunteer:profiles!callouts_volunteer_id_fkey(full_name))')
+        .select('id, callout_id, status, callout:callouts!...(callout_date, day_of_week, shift_time, role, volunteer:profiles!...)')
         .eq('volunteer_id', userId)
         .eq('status', 'approved')
-        .gte('callouts.callout_date', today),
     ])
 
     setSchedule(sched || [])
