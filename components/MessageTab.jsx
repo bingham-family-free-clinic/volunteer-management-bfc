@@ -107,13 +107,12 @@ function ReplyThread({
     if (!replyBody.trim()) return
     setSending(true)
     try {
-      const token = await getFreshToken()
-      if (!token) { setSending(false); return }
+      const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/send-message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           recipient_type: isOneOnOne ? 'volunteer' : 'admin',
@@ -392,17 +391,6 @@ export function MessageTab({
   schedule = [],
   onUnreadCountChange,
 }) {
-  // ── Auth helper ───────────────────────────────────────────────────────────
-  async function getFreshToken() {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { window.location.href = '/'; return null }
-    const expiresAt = session.expires_at * 1000
-    if (Date.now() < expiresAt - 60_000) return session.access_token
-    const { data: { session: fresh } } = await supabase.auth.refreshSession()
-    if (!fresh) { window.location.href = '/'; return null }
-    return fresh.access_token
-  }
-
   // ── Local state ────────────────────────────────────────────────────────────
   const [messages, setMessages]               = useState([])
   const [msgCursor, setMsgCursor]             = useState(null)
@@ -687,12 +675,11 @@ export function MessageTab({
     if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
 
     const recipientType = msgRecipientType === 'user' ? 'volunteer' : msgRecipientType
-    const token = await getFreshToken()
-    if (!token) { setSendingMsg(false); return }
+    const { data: { session } } = await supabase.auth.getSession()
 
     const res = await fetch('/api/send-message', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
       body: JSON.stringify({
         recipient_type: recipientType,
         body: msgBody.trim(),
