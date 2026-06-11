@@ -9,7 +9,7 @@ const TEAMS = [
   'Information Systems',
   'Administrative Assistant',
   'Communications',
-  'Volunteer Credentialing',
+  'Volunteer Coordination',
   'Provider Credentialing',
   'Executive Assistant',
   'OSSM',
