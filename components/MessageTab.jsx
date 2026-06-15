@@ -417,7 +417,8 @@ export function MessageTab({
   const fileInputRef = useRef(null)
   const comboRef     = useRef(null)
 
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin    = profile?.role === 'admin'
+  const isProvider = profile?.default_role === 'Provider'
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -452,7 +453,7 @@ export function MessageTab({
         .eq('user_id', user.id),
       supabase
         .from('profiles')
-        .select('id, full_name')
+        .select('id, full_name, default_role')
         .order('full_name'),
     ])
 
@@ -618,8 +619,9 @@ export function MessageTab({
   ])]
 
   // Admins can message any role — use the canonical ROLES constant so it's
-  // always complete regardless of whether the admin has schedule entries
-  const rolesForCompose = isAdmin ? ROLES : myRoles
+  // always complete regardless of whether the admin has schedule entries.
+  // Providers can message the Provider role group.
+  const rolesForCompose = isAdmin ? ROLES : isProvider ? ['Provider', ...myRoles.filter(r => r !== 'Provider')] : myRoles
 
   // ── Image helpers ──────────────────────────────────────────────────────────
   function handleImageSelect(e) {
@@ -665,7 +667,9 @@ export function MessageTab({
     const imageUrl = await uploadImage(user.id)
     if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
 
-    const recipientType = msgRecipientType === 'user' ? 'volunteer' : msgRecipientType
+    const recipientType = msgRecipientType === 'user'      ? 'volunteer'
+                        : msgRecipientType === 'providers' ? 'role'
+                        : msgRecipientType
     const { data: { session } } = await supabase.auth.getSession()
 
     const res = await fetch('/api/send-message', {
@@ -677,7 +681,9 @@ export function MessageTab({
         image_url: imageUrl || null,
         recipient_shift:        msgRecipientType === 'shift' ? (msgSelectedShift?.shift_time || null) : null,
         recipient_day:          msgRecipientType === 'shift' ? (msgSelectedShift?.day || null) : null,
-        recipient_role:         msgRecipientType === 'role'  ? (msgSelectedRole || null) : null,
+        recipient_role:         msgRecipientType === 'role'      ? (msgSelectedRole || null)
+                              : msgRecipientType === 'providers' ? 'Provider'
+                              : null,
         recipient_volunteer_id: recipientType === 'volunteer' ? (msgRecipientVolId || null) : null,
         parent_message_id: null, // always null for new top-level compose
       }),
@@ -854,7 +860,9 @@ export function MessageTab({
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 {[
                   { value: 'admin',    label: 'Admin' },
-                  { value: 'everyone', label: 'Everyone' },
+                  ...(isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
+                  ...(isProvider && !isAdmin ? [{ value: 'providers', label: 'All Providers' }] : []),
+                  ...(!isProvider && !isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
                   ...(myShiftCombos.length > 0 ? [{ value: 'shift', label: 'My Shift' }] : []),
                   ...(rolesForCompose.length > 0 ? [{ value: 'role', label: isAdmin ? 'Role' : 'My Role' }] : []),
                   { value: 'user', label: 'Individual' },
