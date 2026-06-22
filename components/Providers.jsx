@@ -278,7 +278,7 @@ function ProviderScheduleView({ supabase, providers }) {
     // a while) makes this insert blind to who's actually still covering the shift.
     const [{ data: liveOneTime }, { data: liveRecurring }, { data: liveCallouts }] = await Promise.all([
       supabase.from('provider_shifts')
-        .select('provider_id')
+        .select('provider_id, shift_date, shift_time')
         .eq('shift_date', date).eq('shift_time', shift),
       supabase.from('provider_recurring_schedule')
         .select('provider_id, day_of_week, shift_time, week_pattern, start_date, end_date'),
