@@ -1241,11 +1241,22 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const filteredApplicants = (() => {
     const base = applicants.filter(a => a.stage === stageFilter)
     if (stageFilter === 'interview') {
-      // Applicants with a scheduled interview date come first, sorted newest→oldest by interview date.
-      // Applicants without a date fall below, sorted newest→oldest by application date.
-      const withDate    = base.filter(a =>  a.interview_scheduled_at).sort((a, b) => new Date(b.interview_scheduled_at) - new Date(a.interview_scheduled_at))
-      const withoutDate = base.filter(a => !a.interview_scheduled_at).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      return [...withDate, ...withoutDate]
+      // 1. Upcoming interviews first, soonest→latest (this afternoon, tomorrow, next week...).
+      // 2. Past interviews next, most recent→oldest.
+      // 3. Applicants with no interview date at the bottom, sorted by application date, newest first.
+      const now = new Date()
+      const withDate    = base.filter(a => a.interview_scheduled_at)
+      const withoutDate = base.filter(a => !a.interview_scheduled_at)
+
+      const upcoming = withDate
+        .filter(a => new Date(a.interview_scheduled_at) >= now)
+        .sort((a, b) => new Date(a.interview_scheduled_at) - new Date(b.interview_scheduled_at))
+      const past = withDate
+        .filter(a => new Date(a.interview_scheduled_at) < now)
+        .sort((a, b) => new Date(b.interview_scheduled_at) - new Date(a.interview_scheduled_at))
+      const noDate = [...withoutDate].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+
+      return [...upcoming, ...past, ...noDate]
     }
     if (stageFilter === 'onboarding') {
       // Sort by interview date descending; applicants without one go to the bottom.
