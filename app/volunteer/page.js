@@ -10,6 +10,7 @@ import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotification
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
 import { MessageTab } from '../../components/MessageTab'
 import VolunteerTasks from '../../components/VolunteerTasks'
+import BiannualSurvey, { isSurveyWeek, currentSurveyPeriod } from '../../components/BiannualSurvey'
 
 
 export const dynamic = 'force-dynamic'
@@ -252,6 +253,28 @@ export default function VolunteerPage() {
   // ── UI state ──────────────────────────────────────────────────────────────
   const [toast, setToast]         = useState(null)
   const [lightboxUrl, setLightboxUrl] = useState(null)
+
+  // ── Survey state ──────────────────────────────────────────────────────────
+  const [surveyOpen]      = useState(() => isSurveyWeek())
+  const [surveySubmitted, setSurveySubmitted] = useState(false)
+
+  // Check Supabase (not just local state) for an existing submission this
+  // period, so the banner/badge stay hidden correctly after a page refresh.
+  useEffect(() => {
+    if (!surveyOpen || !user) return
+    let cancelled = false
+    async function checkSurveySubmitted() {
+      const { data } = await supabase
+        .from('volunteer_feedback')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('survey_period', currentSurveyPeriod())
+        .maybeSingle()
+      if (!cancelled && data) setSurveySubmitted(true)
+    }
+    checkSurveySubmitted()
+    return () => { cancelled = true }
+  }, [surveyOpen, user])
 
   // ── Tab fetch dedup guard ─────────────────────────────────────────────────
   // Tracks which tabs have already had their data fetched so we never
@@ -704,6 +727,7 @@ export default function VolunteerPage() {
     ...(isIntern ? [['internreport', 'Report Hours']] : []),
     ...(profile?.team ? [['tasks', 'Tasks']] : []),
     ['account', 'Account'],
+    ...(surveyOpen ? [['feedback', 'Feedback']] : []),
   ]
 
   if (loading) return (
@@ -806,6 +830,37 @@ export default function VolunteerPage() {
           </div>
         </div>
 
+        {/* Survey banner — only shown during survey week if not yet submitted */}
+        {surveyOpen && !surveySubmitted && (
+          <div
+            onClick={() => setTab('feedback')}
+            style={{
+              marginBottom: '1rem',
+              padding: '0.8rem 1.1rem',
+              borderRadius: '10px',
+              background: 'rgba(2,65,107,0.06)',
+              border: '1px solid rgba(2,65,107,0.25)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+            }}
+          >
+            <div>
+              <p style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--accent)', marginBottom: '0.15rem' }}>
+                Volunteer Feedback Survey
+              </p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+                Open through Sunday — takes 2-5 minutes.
+              </p>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </div>
+        )}
+
         {/* Tabs */}
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
           {TABS.map(([key, label]) => (
@@ -815,7 +870,10 @@ export default function VolunteerPage() {
               label={label}
               active={tab === key}
               onClick={handleTabChange}
-              badge={key === 'messages' ? unreadCount : 0}
+              badge={
+                key === 'messages' ? unreadCount :
+                key === 'feedback' && surveyOpen && !surveySubmitted ? 1 : 0
+              }
             />
           ))}
         </div>
@@ -1203,6 +1261,14 @@ export default function VolunteerPage() {
 
         {tab === 'tasks' && (
           <VolunteerTasks userId={user.id} team={profile?.team} />
+        )}
+
+        {/* ── FEEDBACK TAB ────────────────────────────────────────────────── */}
+        {tab === 'feedback' && surveyOpen && (
+          <BiannualSurvey
+            userId={user.id}
+            onSubmitted={() => setSurveySubmitted(true)}
+          />
         )}
 
         {/* ── ACCOUNT TAB ─────────────────────────────────────────────────── */}
