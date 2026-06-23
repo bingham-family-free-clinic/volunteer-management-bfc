@@ -636,7 +636,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setLoading(true); setLoadError(null)
     const [appRes, compRes] = await Promise.all([
       supabase.from('volunteer_applications').select('*').in('stage', STAGES).order('created_at', { ascending: false }),
-      supabase.from('volunteer_applications').select('*').eq('stage', 'completed').order('full_name', { ascending: true }),
+      supabase.from('volunteer_applications').select('*').eq('stage', 'completed').order('stage_updated_at', { ascending: false }),
     ])
     if (appRes.error)  { setLoadError(appRes.error.message); setApplicants([]) }
     else setApplicants(appRes.data || [])
@@ -657,7 +657,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   async function loadCompleted() {
     const { data, error } = await supabase
-      .from('volunteer_applications').select('*').eq('stage', 'completed').order('full_name', { ascending: true })
+      .from('volunteer_applications').select('*').eq('stage', 'completed').order('stage_updated_at', { ascending: false })
     if (!error && data) {
       setCompleted(data)
       if (data.length > 0) {
@@ -1238,7 +1238,28 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // ─── Derived ──────────────────────────────────────────────────────────────
 
-  const filteredApplicants = applicants.filter(a => a.stage === stageFilter)
+  const filteredApplicants = (() => {
+    const base = applicants.filter(a => a.stage === stageFilter)
+    if (stageFilter === 'interview') {
+      // Applicants with a scheduled interview date come first, sorted newest→oldest by interview date.
+      // Applicants without a date fall below, sorted newest→oldest by application date.
+      const withDate    = base.filter(a =>  a.interview_scheduled_at).sort((a, b) => new Date(b.interview_scheduled_at) - new Date(a.interview_scheduled_at))
+      const withoutDate = base.filter(a => !a.interview_scheduled_at).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      return [...withDate, ...withoutDate]
+    }
+    if (stageFilter === 'onboarding') {
+      // Sort by interview date descending; applicants without one go to the bottom.
+      const withDate    = base.filter(a =>  a.interview_scheduled_at).sort((a, b) => new Date(b.interview_scheduled_at) - new Date(a.interview_scheduled_at))
+      const withoutDate = base.filter(a => !a.interview_scheduled_at)
+      return [...withDate, ...withoutDate]
+    }
+    if (stageFilter === 'rejected') {
+      // Alphabetical by full name.
+      return [...base].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+    }
+    // Default (applied): preserve existing order (created_at desc from DB)
+    return base
+  })()
   const stageCounts        = STAGES.reduce((acc, s) => { acc[s] = applicants.filter(a => a.stage === s).length; return acc }, {})
 
   // ─── Non-missionary document validation ────────────────────────────────────
