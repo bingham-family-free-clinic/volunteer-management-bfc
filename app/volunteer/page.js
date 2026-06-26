@@ -761,7 +761,7 @@ export default function VolunteerPage() {
     ...(isIntern ? [['internreport', 'Report Hours']] : []),
     ...(profile?.team ? [['tasks', 'Tasks']] : []),
     ['account', 'Account'],
-    ...(trainingAvailable ? [['training', 'Training']] : []),
+    ...(trainingAvailable && !trainingAcknowledged ? [['training', 'Training']] : []),
     ...(surveyOpen ? [['feedback', 'Feedback']] : []),
   ]
 
@@ -1336,7 +1336,10 @@ export default function VolunteerPage() {
             userId={user.id}
             role={profile?.default_role}
             weekStart={trainingWeekStart}
-            onAcknowledged={() => setTrainingAcknowledged(true)}
+            onAcknowledged={() => {
+              setTrainingAcknowledged(true)
+              setTab('clock')
+            }}
           />
         )}
 
