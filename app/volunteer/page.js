@@ -749,6 +749,10 @@ export default function VolunteerPage() {
     ...(profile?.default_role === 'Lab' ? ['Lab'] : []),
   ])]
 
+  // All roles relevant to this volunteer for training purposes — their
+  // default role plus every role they're actually scheduled for.
+  const trainingRoles = [...new Set([profile?.default_role, ...myRoles].filter(Boolean))]
+
   const calloutSubmitDisabled = calloutMode === 'single'
     ? (!calloutDate || !calloutShift || !calloutRole || !calloutReason.trim())
     : (!calloutStartDate || !calloutEndDate || !calloutReason.trim())
@@ -1334,7 +1338,7 @@ export default function VolunteerPage() {
         {tab === 'training' && trainingAvailable && (
           <WeeklyTrainingBanner
             userId={user.id}
-            role={profile?.default_role}
+            roles={trainingRoles}
             weekStart={trainingWeekStart}
             onAcknowledged={() => {
               setTrainingAcknowledged(true)

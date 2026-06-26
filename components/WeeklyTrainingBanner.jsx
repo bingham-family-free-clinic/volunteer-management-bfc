@@ -27,13 +27,13 @@ const S = {
 // `weekStart` should be passed down from the page so the parent (which uses
 // it to decide whether to show the tab/badge) and this component always
 // agree on which week they're talking about.
-export default function WeeklyTrainingBanner({ userId, role, weekStart, onAcknowledged }) {
+export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, onAcknowledged }) {
   const [training, setTraining]   = useState(null)
   const [checking, setChecking]   = useState(true)
   const [acknowledged, setAcknowledged] = useState(false)
   const [acking, setAcking]       = useState(false)
   const [error, setError]         = useState(null)
-  const [openRoles, setOpenRoles] = useState(() => new Set(role ? [role] : []))
+  const [openRoles, setOpenRoles] = useState(() => new Set(roles))
 
   useEffect(() => {
     if (!userId || !weekStart) return
@@ -187,7 +187,7 @@ export default function WeeklyTrainingBanner({ userId, role, weekStart, onAcknow
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {roleEntries.map(([r, text]) => {
             const open = openRoles.has(r)
-            const isMyRole = r === role
+            const isMyRole = roles.includes(r)
             return (
               <div
                 key={r}
