@@ -10,14 +10,6 @@ Commercial or other use requires written permission.
 
 A full-stack volunteer management platform for **Bingham Family Free Clinic**, built with Next.js 15 and Supabase. The app covers the full lifecycle of clinic volunteer operations — recruitment and onboarding, scheduling, attendance, callouts, shift coverage, weekly training, internal messaging, provider credentialing, and administrative oversight.
 
-## Depth Highlight
-
-At a high level, this app is the clinic's operating system for people who show up to help. When someone applies to volunteer, the **Pipeline** walks an admin from reading their application, scheduling an interview, collecting paperwork, and finally creating their login — after which they land on the **Waitlist** until a shift opens up. Once scheduled, volunteers use the **Clock** tab the way they'd punch a timecard: one tap when they arrive, one when they leave, and the system figures out which role they were supposed to be working. If life gets in the way, **Call-Outs** let them flag an absence and other volunteers can raise their hand to cover; admins approve those swaps so the schedule stays honest.
-
-Behind the scenes, **Scheduling** is a living grid of who should be where each weekday, respecting patterns like "every other Monday." **Live** view is the clinic's pulse during open hours — who's supposed to be here but isn't, who's already clocked in, and what's been called out today. **Messages** replace the old group text chain with targeted broadcasts (everyone, a shift, a role, or one person), and **Weekly Training** gives leadership a way to push a short briefing every week that volunteers must acknowledge before it goes away.
-
-For the people running the clinic rather than staffing the front desk, **Admin** tools cover the rest: reviewing off-system **Hours**, tracking **Provider** credentials before they expire, assigning **Lunch** breaks, reading **Data** reports on attendance patterns, and checking an **Audit Log** of every change an admin made. **Clinical Supervisors** get a trimmed version focused on their own shifts — who's on the floor, which languages are covered, and who's speaking them. **Providers** (doctors and advanced clinicians) have their own portal to sign up for clinical sessions and manage their availability. And the internal **Tasks** board gives leadership teams a shared to-do list so operational work doesn't fall through the cracks. It is a lot of moving parts, but each piece maps to something the clinic already had to do by hand — just centralized, timestamped, and searchable.
-
 ---
 
 ## Table of Contents
@@ -236,13 +228,13 @@ The app has four distinct authenticated views, each with its own route. Role res
 
 | `/admin` | Admins only | `role = 'admin'` in `profiles` |
 
-| `/clinical-supervisor` | Clinical supervisors (and admins) | `default_role = 'Clinical Supervisor'`, or `role = 'admin'` |
+| `/clinical-supervisor` | Clinical supervisors and Office Manager | `default_role = 'Clinical Supervisor'`, or `default_role = 'Office Manager'` |
 
 | `/provider` | Providers | `default_role = 'Provider'` |
 
 
 
-Users with `role = 'admin'` or `default_role = 'Clinical Supervisor'` see a **Switch View** button to toggle between their primary view and `/volunteer`.
+Users with `role = 'admin'`, `default_role = 'Office Manager'`, or `default_role = 'Clinical Supervisor'` see a **Switch View** button to toggle between their primary view and `/volunteer`.
 
 
 
