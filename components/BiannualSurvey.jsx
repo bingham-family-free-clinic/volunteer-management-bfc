@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase'
 // ── Survey window configuration ──────────────────────────────────────────────
 // Adjust these to change when the survey is active.
 // The survey runs during the first full Mon–Sun week of each listed month (0-indexed).
-export const SURVEY_MONTHS = [0, 6] // January (0) and July (6)
+export const SURVEY_MONTHS = [0, 7] // January (0) and July (6)
 // export const SURVEY_MONTHS = [3,10] // April (3) and November (10)
 
 // ── Date logic ────────────────────────────────────────────────────────────────
