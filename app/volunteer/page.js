@@ -1202,12 +1202,14 @@ function VolunteerPageInner() {
         </div>
 
         {/* Status banner */}
-        <div style={{ ...S.card, marginBottom: '1.5rem', borderColor: activeShift ? 'var(--accent)' : 'var(--border)', background: activeShift ? 'rgba(74,222,128,0.05)' : 'var(--surface)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: activeShift ? 'var(--accent)' : 'var(--muted)', boxShadow: activeShift ? '0 0 8px var(--accent)' : 'none' }} />
-            <span style={{ fontWeight: 500 }}>{activeShift ? `Clocked in since ${formatTime(activeShift.clock_in)}` : 'Not clocked in'}</span>
+        {!isMobile && (
+          <div style={{ ...S.card, marginBottom: '1.5rem', borderColor: activeShift ? 'var(--accent)' : 'var(--border)', background: activeShift ? 'rgba(74,222,128,0.05)' : 'var(--surface)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: activeShift ? 'var(--accent)' : 'var(--muted)', boxShadow: activeShift ? '0 0 8px var(--accent)' : 'none' }} />
+              <span style={{ fontWeight: 500 }}>{activeShift ? `Clocked in since ${formatTime(activeShift.clock_in)}` : 'Not clocked in'}</span>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Weekly training banner — shown every week until acknowledged */}
         {trainingAvailable && !trainingAcknowledged && (
@@ -1272,20 +1274,20 @@ function VolunteerPageInner() {
         )}
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-          {TABS
-            .filter(([key]) => !isMobile || !['callout', 'tasks', 'account'].includes(key))
-            .map(([key, label]) => (
-              <TabButton
-                key={key}
-                id={key}
-                label={label}
-                active={tab === key}
-                onClick={handleTabChange}
-                badge={tabBadge(key)}
-              />
-            ))}
-        </div>
+        {!isMobile && (
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+            {TABS.map(([key, label]) => (
+                <TabButton
+                  key={key}
+                  id={key}
+                  label={label}
+                  active={tab === key}
+                  onClick={handleTabChange}
+                  badge={tabBadge(key)}
+                />
+              ))}
+          </div>
+        )}
 
         {/* ── CLOCK TAB ───────────────────────────────────────────────────── */}
         {tab === 'clock' && (
