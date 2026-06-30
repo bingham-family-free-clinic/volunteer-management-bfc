@@ -1068,7 +1068,7 @@ function VolunteerPageInner() {
     const calloutEntry = byKey('callout')
     const tasksEntry   = byKey('tasks')
     const accountEntry = byKey('account')
-    const rest = TABS.filter(([k]) => !['callout', 'tasks', 'account'].includes(k))
+    const rest = TABS.filter(([k]) => !['callout', 'tasks', 'account', 'clock', 'messages', 'schedule'].includes(k))
     const ordered = [
       ...(calloutEntry ? [calloutEntry] : []),
       ...(tasksEntry ? [tasksEntry] : []),
