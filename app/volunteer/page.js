@@ -1089,27 +1089,29 @@ function VolunteerPageInner() {
               </p>
             </div>
           )}
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            {canSwitchView && (
-              <button
-                onClick={handleSwitchView}
-                style={{
-                  background: 'none',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  color: 'var(--muted)',
-                  padding: '0.4rem 0.9rem',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem'
-                }}
-              >
-                Switch View
+          {!isMobile && (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {canSwitchView && (
+                <button
+                  onClick={handleSwitchView}
+                  style={{
+                    background: 'none',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    color: 'var(--muted)',
+                    padding: '0.4rem 0.9rem',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  Switch View
+                </button>
+              )}
+              <button onClick={handleSignOut} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.4rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                Sign out
               </button>
-            )}
-            <button onClick={handleSignOut} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.4rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem' }}>
-              Sign out
-            </button>
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Status banner */}
@@ -1184,16 +1186,18 @@ function VolunteerPageInner() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-          {TABS.map(([key, label]) => (
-            <TabButton
-              key={key}
-              id={key}
-              label={label}
-              active={tab === key}
-              onClick={handleTabChange}
-              badge={tabBadge(key)}
-            />
-          ))}
+          {TABS
+            .filter(([key]) => !isMobile || !['callout', 'tasks', 'account'].includes(key))
+            .map(([key, label]) => (
+              <TabButton
+                key={key}
+                id={key}
+                label={label}
+                active={tab === key}
+                onClick={handleTabChange}
+                badge={tabBadge(key)}
+              />
+            ))}
         </div>
 
         {/* ── CLOCK TAB ───────────────────────────────────────────────────── */}
