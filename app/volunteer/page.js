@@ -387,6 +387,12 @@ function BottomNav({ activeTab, onSelectTab, unreadCount }) {
         alignItems: 'center',
         padding: '1rem 0 calc(1rem + env(safe-area-inset-bottom, 0px))',
         zIndex: 900,
+        // Forces the nav onto its own stable compositor layer so iOS Safari
+        // doesn't glitch-reposition it (float to mid-screen, then drift back
+        // down) while the address bar collapses/expands during scroll.
+        transform: 'translateZ(0)',
+        WebkitTransform: 'translateZ(0)',
+        willChange: 'transform',
       }}
     >
       {items.map(({ key, label, icon }) => {
