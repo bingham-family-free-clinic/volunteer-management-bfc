@@ -1198,6 +1198,29 @@ function VolunteerPageInner() {
               </button>
             </div>
           )}
+          {isMobile && (
+            <button
+              onClick={() => handleTabChange('account')}
+              aria-label="Account"
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                width: '48px',
+                height: '48px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <img
+                src="/logo2.png"
+                alt="Account"
+                style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
+              />
+            </button>
+          )}
         </div>
 
         {/* Status banner */}
