@@ -21,6 +21,9 @@ const CRED_FIELDS = [
   { key: 'tb_exp',      label: 'TB'        },
 ]
 
+// Only these default_position values may view the credential status banner
+const CRED_BANNER_ROLES = ['Director', 'Credentialing', 'Administrative Assistant', 'Executive Assistant']
+
 // ── Style tokens ──────────────────────────────────────────────────────────────
 const card       = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
 const inputStyle = { width: '100%', padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.95rem', outline: 'none', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box' }
@@ -1030,10 +1033,22 @@ export default function Providers({ supabase }) {
   const [selectedId, setSelectedId]   = useState(null)
   const [toast, setToast]             = useState(null)
   const [scheduleTab, setScheduleTab] = useState('grid') // 'grid' | 'recurring'
+  const [myPosition, setMyPosition]   = useState(null)   // current user's default_position
 
   function showToast(text, type = 'success') {
     setToast({ text, type })
     setTimeout(() => setToast(null), 3500)
+  }
+
+  async function loadMyPosition() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase
+      .from('profiles')
+      .select('default_position')
+      .eq('id', user.id)
+      .single()
+    setMyPosition(data?.default_position ?? null)
   }
 
   async function load() {
@@ -1047,9 +1062,10 @@ export default function Providers({ supabase }) {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, []) // eslint-disable-line
+  useEffect(() => { load(); loadMyPosition() }, []) // eslint-disable-line
 
   const selectedProvider = providers.find(p => p.id === selectedId) || null
+  const canViewCredBanner = CRED_BANNER_ROLES.includes(myPosition)
 
   if (loading) return <p style={{ color: 'var(--muted)', padding: '1rem' }}>Loading providers…</p>
 
@@ -1063,10 +1079,12 @@ export default function Providers({ supabase }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       
       {/* ── 1. Credential Status Banner ──────────────────────────────────── */}
-      <CredentialBanner
-        providers={providers}
-        onSelect={p => setSelectedId(id => id === p.id ? null : p.id)}
-      />
+      {canViewCredBanner && (
+        <CredentialBanner
+          providers={providers}
+          onSelect={p => setSelectedId(id => id === p.id ? null : p.id)}
+        />
+      )}
 
       {selectedProvider && (
         <ProviderCard
