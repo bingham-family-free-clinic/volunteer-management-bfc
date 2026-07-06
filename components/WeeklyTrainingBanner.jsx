@@ -96,6 +96,7 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
     )
   }
 
+  {/*
   // ── Completed view ─────────────────────────────────────────────────────────
   if (acknowledged) {
     return (
@@ -116,7 +117,7 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
         </p>
       </div>
     )
-  }
+  } */}
 
   // ── Training content ──────────────────────────────────────────────────────
   const announcements = training.announcements || []
