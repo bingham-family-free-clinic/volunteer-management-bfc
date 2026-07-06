@@ -1057,7 +1057,7 @@ function VolunteerPageInner() {
     ...(isIntern ? [['internreport', 'Report Hours']] : []),
     ...(profile?.team ? [['tasks', 'Tasks']] : []),
     ['account', 'Account'],
-    ...(trainingAvailable && !trainingAcknowledged ? [['training', 'Training']] : []),
+    ...(trainingAvailable ? [['training', 'Training']] : []),
     ...(surveyOpen ? [['feedback', 'Feedback']] : []),
   ]
 
