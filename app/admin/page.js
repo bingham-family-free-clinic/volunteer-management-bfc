@@ -340,6 +340,9 @@ export default function AdminPage() {
   const isTaskAdmin = ['Director', 'Administrative Assistant', 'Executive Assistant']
     .includes(profile?.default_role)
 
+  const canOverrideRoleLimits = ['Director', 'Administrative Assistant', 'Executive Assistant']
+    .includes(profile?.default_role)
+
   const isCredentialing = profile?.default_role === 'Credentialing'
   const isHR = profile?.default_role === 'Human Resources'
     
@@ -952,7 +955,8 @@ export default function AdminPage() {
       return sum + (entry.week_pattern === 'every' ? 1 : 0.5)
     }, 0)
     const limit = ROLE_SUGGESTIONS[addingRole]
-    if (limit && effectiveCount >= limit) { showMessage(`Limit reached for ${addingRole} (${limit})`, 'error'); setAddingEntry(false); return }
+    if (limit && effectiveCount >= limit && !canOverrideRoleLimits) { showMessage(`Limit reached for ${addingRole} (${limit})`, 'error'); setAddingEntry(false); return }
+    if (limit && effectiveCount >= limit && canOverrideRoleLimits) { showMessage(`Limit for ${addingRole} (${limit}) exceeded — adding anyway`, 'success') }
     const exists = schedule.find(s => {
       if (s.volunteer_id !== addVolId || s.day_of_week !== scheduleDay || s.shift_time !== scheduleShift || s.role !== addingRole) return false
       const aStart = s.start_date || '0000-01-01'; const aEnd = s.end_date || '9999-12-31'
@@ -968,7 +972,8 @@ export default function AdminPage() {
       .single()
     if (error) { showMessage(error.message, 'error'); setAddingEntry(false); return }
     showMessage('Volunteer assigned!', 'success')
-    await audit('assigned_schedule', 'schedule', inserted?.id, vol?.full_name, `${scheduleDay} ${scheduleShift} — ${addingRole}`)
+    const overrodeLimit = limit && effectiveCount >= limit && canOverrideRoleLimits
+    await audit('assigned_schedule', 'schedule', inserted?.id, vol?.full_name, `${scheduleDay} ${scheduleShift} — ${addingRole}${overrodeLimit ? ` (limit of ${limit} overridden)` : ''}`)
     setAddingRole(null); setAddVolId(''); setAddStartDate(''); setAddEndDate(''); setAddWeekPattern('every'); setAddNotes('')
     // Append to local schedule — no full re-fetch
     setSchedule(prev => [...prev, inserted].sort((a, b) => (a.role || '').localeCompare(b.role || '')))
