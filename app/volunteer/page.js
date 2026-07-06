@@ -80,39 +80,6 @@ function formatExpDate(dateStr) {
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
-function TabButton({ id, label, active, onClick, badge }) {
-  return (
-    <button
-      onClick={() => onClick(id)}
-      style={{
-        position: 'relative',
-        padding: '0.5rem 1rem',
-        borderRadius: '8px',
-        fontSize: '0.875rem',
-        fontWeight: 500,
-        cursor: 'pointer',
-        fontFamily: 'DM Sans, sans-serif',
-        background: active ? 'var(--accent)' : 'var(--surface)',
-        color: active ? '#fff' : 'var(--muted)',
-        border: active ? 'none' : '1px solid var(--border)',
-      }}
-    >
-      {label}
-      {badge > 0 && (
-        <span style={{
-          position: 'absolute', top: '-5px', right: '-5px',
-          background: '#ef4444', color: '#fff', borderRadius: '50%',
-          width: '17px', height: '17px', fontSize: '0.65rem', fontWeight: 700,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          border: '2px solid var(--bg)', lineHeight: 1,
-        }}>
-          {badge > 9 ? '9+' : badge}
-        </span>
-      )}
-    </button>
-  )
-}
-
 function CredentialInput({ fieldKey, label, value, onChange, allowNA = false }) {
   const mode = value === 'N/A' ? 'na' : value === 'expired' ? 'expired' : 'date'
   return (
@@ -432,6 +399,135 @@ function BottomNav({ activeTab, onSelectTab, unreadCount }) {
   )
 }
 
+function dropdownItemStyle(active) {
+  return {
+    width: '100%',
+    textAlign: 'left',
+    padding: '0.6rem 0.75rem',
+    borderRadius: '8px',
+    border: 'none',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? '#fff' : 'var(--text)',
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: 'DM Sans, sans-serif',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.5rem',
+  }
+}
+
+function DesktopHeader({ activeTab, onSelectTab, otherItems, otherOpen, onToggleOther, onCloseOther, showSwitchView, onSwitchView, onSignOut, unreadCount }) {
+  const mainTabs = [
+    { key: 'clock', label: 'Home' },
+    { key: 'schedule', label: 'Schedule' },
+    { key: 'messages', label: 'Messages', badge: unreadCount },
+  ]
+  const otherActive = otherItems.some(i => i.key === activeTab)
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
+      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+
+      <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
+        {mainTabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => onSelectTab(t.key)}
+            style={{
+              position: 'relative',
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '0.95rem',
+              fontWeight: activeTab === t.key ? 600 : 500,
+              color: activeTab === t.key ? 'var(--text)' : 'var(--muted)',
+            }}
+          >
+            {t.label}
+            {t.badge > 0 && (
+              <span style={{
+                position: 'absolute', top: '-8px', right: '-14px',
+                background: '#ef4444', color: '#fff', borderRadius: '50%',
+                width: '16px', height: '16px', fontSize: '0.6rem', fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+              }}>
+                {t.badge > 9 ? '9+' : t.badge}
+              </span>
+            )}
+          </button>
+        ))}
+
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={onToggleOther}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '0.95rem',
+              fontWeight: otherActive || otherOpen ? 600 : 500,
+              color: otherActive || otherOpen ? 'var(--text)' : 'var(--muted)',
+            }}
+          >
+            Other
+          </button>
+
+          {otherOpen && (
+            <>
+              <div onClick={onCloseOther} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 0.9rem)', right: 0,
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px',
+                minWidth: '210px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
+              }}>
+                {showSwitchView && (
+                  <button onClick={() => { onCloseOther(); onSwitchView() }} style={dropdownItemStyle(false)}>
+                    Switch View
+                  </button>
+                )}
+
+                {otherItems.map(({ key, label, badge }) => (
+                  <button
+                    key={key}
+                    onClick={() => { onCloseOther(); onSelectTab(key) }}
+                    style={dropdownItemStyle(activeTab === key)}
+                  >
+                    <span>{label}</span>
+                    {badge > 0 && (
+                      <span style={{
+                        background: '#ef4444', color: '#fff', borderRadius: '50%',
+                        width: '18px', height: '18px', fontSize: '0.65rem', fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, lineHeight: 1,
+                      }}>
+                        {badge > 9 ? '9+' : badge}
+                      </span>
+                    )}
+                  </button>
+                ))}
+
+                <button
+                  onClick={() => { onCloseOther(); onSignOut() }}
+                  style={{ ...dropdownItemStyle(false), color: 'var(--muted)', marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </nav>
+    </div>
+  )
+}
+
 // ── Debug error boundary ──────────────────────────────────────────────────
 // Wraps the page so that any render error shows up as visible red text +
 // a console.error with the full stack, instead of silently leaving a
@@ -523,6 +619,7 @@ function VolunteerPageInner() {
   const [toast, setToast]         = useState(null)
   const [lightboxUrl, setLightboxUrl] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [otherMenuOpen, setOtherMenuOpen] = useState(false)
 
   // ── Survey state ──────────────────────────────────────────────────────────
   const [surveyOpen]      = useState(() => isSurveyWeek())
@@ -585,10 +682,17 @@ function VolunteerPageInner() {
 
   const [isMobile, setIsMobile] = useState(true)
   useEffect(() => {
+    // Primary signal: device-based detection via the user-agent string.
+    // Secondary signal: a narrow viewport (<428px) also counts as mobile,
+    // so a desktop browser window can't get stuck rendering the mobile
+    // layout at a wide width, but a squeezed-down window still gets it.
+    const ua = navigator.userAgent || navigator.vendor || ''
+    const isMobileUA = /android|iphone|ipad|ipod|iemobile|blackberry|opera mini|mobile/i.test(ua)
     const check = () => {
-      const next = window.innerWidth < 768
+      const isNarrow = window.innerWidth < 428
+      const next = isMobileUA || isNarrow
       setIsMobile(prev => {
-        if (prev !== next) console.log('[VolunteerPage] isMobile changed:', prev, '->', next, 'width:', window.innerWidth)
+        if (prev !== next) console.log('[VolunteerPage] isMobile changed:', prev, '->', next, 'ua match:', isMobileUA, 'width:', window.innerWidth)
         return next
       })
     }
@@ -1090,17 +1194,22 @@ function VolunteerPageInner() {
     profile?.default_role === 'Office Manager'
 
   function handleSwitchView() {
+    // Admins take priority even if they also hold a Clinical Supervisor /
+    // Office Manager default_role — check admin first.
+    if (profile?.role === 'admin') {
+      if (window.location.pathname.includes('admin')) {
+        window.location.href = '/volunteer'
+      } else {
+        window.location.href = '/admin'
+      }
+      return
+    }
     if (
       profile?.default_role === 'Clinical Supervisor' ||
       profile?.default_role === 'Office Manager'
     ) {
       window.location.href = '/clinical-supervisor'
       return
-    }
-    if (window.location.pathname.includes('admin')) {
-      window.location.href = '/volunteer'
-    } else {
-      window.location.href = '/admin'
     }
   }
 
@@ -1145,11 +1254,11 @@ function VolunteerPageInner() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '1.5rem', paddingBottom: isMobile ? '5.5rem' : '1.5rem' }}>
-      <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+      <div style={{ maxWidth: isMobile ? '600px' : '760px', margin: '0 auto' }}>
 
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          {isMobile ? (
+        {isMobile ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label="Open menu"
@@ -1171,40 +1280,6 @@ function VolunteerPageInner() {
               <span style={{ width: '28px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
               <span style={{ width: '28px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
             </button>
-          ) : (
-            <div>
-              <h1 style={{ fontSize: '1.4rem', fontWeight: 600, letterSpacing: '-0.02em' }}>
-                Hey, {profile?.full_name?.split(' ')[0]}
-              </h1>
-              <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-                {new Date().toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'long', month: 'long', day: 'numeric' })}
-              </p>
-            </div>
-          )}
-          {!isMobile && (
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              {canSwitchView && (
-                <button
-                  onClick={handleSwitchView}
-                  style={{
-                    background: 'none',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    color: 'var(--muted)',
-                    padding: '0.4rem 0.9rem',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem'
-                  }}
-                >
-                  Switch View
-                </button>
-              )}
-              <button onClick={handleSignOut} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.4rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem' }}>
-                Sign out
-              </button>
-            </div>
-          )}
-          {isMobile && (
             <button
               onClick={() => handleTabChange('account')}
               aria-label="Account"
@@ -1226,8 +1301,21 @@ function VolunteerPageInner() {
                 style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
               />
             </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <DesktopHeader
+            activeTab={tab}
+            onSelectTab={handleTabChange}
+            otherItems={sidebarNavItems}
+            otherOpen={otherMenuOpen}
+            onToggleOther={() => setOtherMenuOpen(o => !o)}
+            onCloseOther={() => setOtherMenuOpen(false)}
+            showSwitchView={canSwitchView}
+            onSwitchView={handleSwitchView}
+            onSignOut={handleSignOut}
+            unreadCount={unreadCount}
+          />
+        )}
 
         {/* Status banner */}
         {!isMobile && (
@@ -1298,22 +1386,6 @@ function VolunteerPageInner() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <polyline points="9 18 15 12 9 6" />
             </svg>
-          </div>
-        )}
-
-        {/* Tabs */}
-        {!isMobile && (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-            {TABS.map(([key, label]) => (
-                <TabButton
-                  key={key}
-                  id={key}
-                  label={label}
-                  active={tab === key}
-                  onClick={handleTabChange}
-                  badge={tabBadge(key)}
-                />
-              ))}
           </div>
         )}
 

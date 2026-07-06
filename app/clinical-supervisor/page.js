@@ -153,7 +153,16 @@ export default function CSPage() {
   const [isMobile, setIsMobile] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768)
+    // Primary signal: device-based detection via the user-agent string.
+    // Secondary signal: a narrow viewport (<428px) also counts as mobile,
+    // so a desktop browser window can't get stuck rendering the mobile
+    // layout at a wide width, but a squeezed-down window still gets it.
+    const ua = navigator.userAgent || navigator.vendor || ''
+    const isMobileUA = /android|iphone|ipad|ipod|iemobile|blackberry|opera mini|mobile/i.test(ua)
+    const check = () => {
+      const isNarrow = window.innerWidth < 428
+      setIsMobile(isMobileUA || isNarrow)
+    }
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
