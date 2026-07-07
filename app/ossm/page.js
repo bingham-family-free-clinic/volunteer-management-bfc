@@ -167,7 +167,6 @@ function AttendanceSummary({ records, loading }) {
   }, [records])
 
   const total = records.length
-  const rate = total > 0 ? Math.round(((total - counts.absent) / total) * 100) : null
 
   const [showAll, setShowAll] = useState(false)
   const visibleRecords = showAll ? records : records.slice(0, 8)
@@ -184,7 +183,6 @@ function AttendanceSummary({ records, loading }) {
         <StatBox label="Late" value={counts.late} color={ATTENDANCE_STATUS_STYLE.late.color} />
         <StatBox label="Absent" value={counts.absent} color={ATTENDANCE_STATUS_STYLE.absent.color} />
         <StatBox label="Excused" value={counts.excused} color={ATTENDANCE_STATUS_STYLE.excused.color} />
-        <StatBox label="Attendance Rate" value={rate === null ? '—' : `${rate}%`} color="var(--text)" />
       </div>
 
       {total === 0 ? (
