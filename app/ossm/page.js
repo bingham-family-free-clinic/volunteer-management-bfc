@@ -31,13 +31,6 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
-const STATUS_STYLE = {
-  clocked_in:     { label: 'Clocked In',     color: 'var(--accent)', bg: 'rgba(2,65,107,0.06)',  border: 'rgba(2,65,107,0.3)' },
-  not_clocked_in: { label: 'Not Clocked In', color: '#ef4444',       bg: 'rgba(239,68,68,0.06)', border: 'rgba(239,68,68,0.3)' },
-  called_out:     { label: 'Called Out',     color: '#ef4444',       bg: 'rgba(239,68,68,0.04)', border: 'rgba(239,68,68,0.2)' },
-  covered:        { label: 'Covered',        color: '#60a5fa',       bg: 'rgba(96,165,250,0.06)',border: 'rgba(96,165,250,0.3)' },
-}
-
 const ATTENDANCE_STATUS_STYLE = {
   present: { label: 'Present', color: 'var(--accent)' },
   late:    { label: 'Late',    color: '#f59e0b' },
@@ -132,18 +125,6 @@ async function fetchAllRows(table, buildQuery, pageSize = 1000) {
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
-
-function StatusPill({ status }) {
-  const st = STATUS_STYLE[status] || STATUS_STYLE.not_clocked_in
-  return (
-    <span style={{
-      fontSize: '0.72rem', fontWeight: 600, padding: '0.15rem 0.55rem', borderRadius: '100px',
-      color: st.color, background: st.bg, border: `1px solid ${st.border}`, whiteSpace: 'nowrap',
-    }}>
-      {st.label}
-    </span>
-  )
-}
 
 function InfoRow({ label, value }) {
   return (
@@ -316,7 +297,6 @@ function LiveTab({ schedule, callouts, activeShifts, missionaries, onOpenMission
                           <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{r.role}</span>
                           {r.notes && <span style={{ fontSize: '0.78rem', color: '#60a5fa', fontStyle: 'italic' }}>({r.notes})</span>}
                         </div>
-                        <StatusPill status={r.status} />
                       </div>
                     ))}
                   </div>
