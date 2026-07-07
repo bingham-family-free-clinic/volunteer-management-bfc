@@ -22,15 +22,28 @@ export function getSurveyWindow(year, month) {
   sunday.setHours(23, 59, 59, 999)
   return { start: monday, end: sunday }
 }
-
+/*
 export function isSurveyWeek() {
-  {/* 
   const now = new Date()
   const month = now.getMonth()
   if (!SURVEY_MONTHS.includes(month)) return false
   const { start, end } = getSurveyWindow(now.getFullYear(), month)
-  return now >= start && now <= end*/}
+  return now >= start && now <= end
+}
+*/
+
+export function isSurveyWeek() {
   return true
+}
+  const now = new Date()
+
+  const start = new Date(2026, 6, 13) // July 13, 2026 (month is 0-indexed)
+  start.setHours(0, 0, 0, 0)
+
+  const end = new Date(2026, 6, 19)
+  end.setHours(23, 59, 59, 999)
+
+  return now >= start && now <= end
 }
 
 export function currentSurveyPeriod() {
