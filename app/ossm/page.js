@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, Component } from 'react'
 import { supabase } from '../../lib/supabase'
-import { getMountainNow, formatMountain, formatDate } from '../../lib/timeUtils'
+import { getMountainNow, formatMountain, formatDate, formatTime, asUTC } from '../../lib/timeUtils'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +25,11 @@ const S = {
 }
 
 const SHIFT_TIMES = ['10-2', '2-6']
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
 
 const STATUS_STYLE = {
   clocked_in:     { label: 'Clocked In',     color: 'var(--accent)', bg: 'rgba(2,65,107,0.06)',  border: 'rgba(2,65,107,0.3)' },
@@ -443,6 +448,138 @@ function MissionariesListView({ missionaries, search, setSearch, onSelect }) {
   )
 }
 
+// Collapsible card — closed by default, calls onFirstOpen exactly once the
+// first time it's expanded so callers can lazy-load their data.
+// Closed by default. Children are only mounted once opened, so any data
+// fetching a child does in its own effect is naturally lazy-loaded.
+function CollapsibleCard({ title, children }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div style={{ ...S.card, padding: 0, overflow: 'hidden' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '1rem 1.25rem', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+        }}
+      >
+        <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text)' }}>{title}</span>
+        <span style={{ color: 'var(--muted)', fontSize: '1.1rem', transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ padding: '0 1.25rem 1.25rem' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MonthlyHoursBreakdown({ volunteerId }) {
+  const [loading, setLoading] = useState(false)
+  const [months, setMonths] = useState(null)
+
+  async function load() {
+    setLoading(true)
+    const rows = await fetchAllRows('shifts', (q) =>
+      q.select('clock_in, clock_out')
+        .eq('volunteer_id', volunteerId)
+        .not('clock_out', 'is', null)
+    )
+    const byMonth = {}
+    ;(rows || []).forEach(r => {
+      const start = asUTC(r.clock_in)
+      const end   = asUTC(r.clock_out)
+      if (!start || !end) return
+      const key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`
+      if (!byMonth[key]) byMonth[key] = { hours: 0, count: 0, year: start.getFullYear(), month: start.getMonth() }
+      byMonth[key].hours += (end - start) / 3600000
+      byMonth[key].count += 1
+    })
+    const list = Object.entries(byMonth)
+      .map(([key, v]) => ({ key, hours: +v.hours.toFixed(1), count: v.count, year: v.year, month: v.month }))
+      .sort((a, b) => b.key.localeCompare(a.key))
+    setMonths(list)
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [volunteerId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading || months === null) {
+    return <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading hours…</p>
+  }
+  if (months.length === 0) {
+    return <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No completed shifts on record.</p>
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {months.map(m => (
+        <div key={m.key} style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '0.6rem 0.9rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)',
+        }}>
+          <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>{MONTH_NAMES[m.month]} {m.year}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>{m.count} shift{m.count !== 1 ? 's' : ''}</span>
+            <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.9rem', fontWeight: 600, color: 'var(--accent)' }}>{m.hours}h</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Last30DaysShifts({ volunteerId }) {
+  const [loading, setLoading] = useState(false)
+  const [shifts, setShifts] = useState(null)
+
+  async function load() {
+    setLoading(true)
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const rows = await fetchAllRows('shifts', (q) =>
+      q.select('id, clock_in, clock_out, role')
+        .eq('volunteer_id', volunteerId)
+        .gte('clock_in', cutoff)
+        .order('clock_in', { ascending: false })
+    )
+    setShifts(rows || [])
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [volunteerId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading || shifts === null) {
+    return <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading shifts…</p>
+  }
+  if (shifts.length === 0) {
+    return <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No shifts in the last 30 days.</p>
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {shifts.map(s => {
+        const start = asUTC(s.clock_in)
+        const end   = asUTC(s.clock_out)
+        const hours = start && end ? ((end - start) / 3600000).toFixed(1) + 'h' : 'In progress'
+        return (
+          <div key={s.id} style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '0.6rem 0.9rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)',
+          }}>
+            <div>
+              <p style={{ fontWeight: 500, fontSize: '0.9rem' }}>{formatDate(s.clock_in)}</p>
+              <p style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+                {formatTime(s.clock_in)} → {s.clock_out ? formatTime(s.clock_out) : '—'}{s.role ? ` · ${s.role}` : ''}
+              </p>
+            </div>
+            <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.9rem', color: end ? 'var(--accent)' : 'var(--warn)' }}>{hours}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function MissionaryDetailView({ missionary, attendanceRecords, attendanceLoading, onBack }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -471,6 +608,14 @@ function MissionaryDetailView({ missionary, attendanceRecords, attendanceLoading
         <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Volunteer Attendance Summary</h2>
         <AttendanceSummary records={attendanceRecords} loading={attendanceLoading} />
       </div>
+
+      <CollapsibleCard title="Hours by Month">
+        <MonthlyHoursBreakdown volunteerId={missionary.id} />
+      </CollapsibleCard>
+
+      <CollapsibleCard title="Shifts in the Last 30 Days">
+        <Last30DaysShifts volunteerId={missionary.id} />
+      </CollapsibleCard>
     </div>
   )
 }
@@ -670,11 +815,15 @@ function OSSMPageInner() {
 
     const { data: mData } = await supabase
       .from('profiles')
-      .select('id, full_name, email, phone, sma_name, sma_contact, affiliation, status')
+      .select('id, full_name, email, phone, sma_name, sma_contact, affiliation, status, default_role')
       .eq('affiliation', 'missionary')
       .eq('status', 'active')
       .order('full_name')
-    setMissionaries(mData || [])
+
+    // OSSM staff should never show up in their own Missionaries tab, even if
+    // their affiliation happens to also be 'missionary'.
+    const filtered = (mData || []).filter(m => (m.default_role || '').toLowerCase() !== 'ossm')
+    setMissionaries(filtered)
 
     setLoading(false)
   }
@@ -777,6 +926,7 @@ function OSSMPageInner() {
         {tab === 'missionaries' && (
           selectedMissionary ? (
             <MissionaryDetailView
+              key={selectedMissionary.id}
               missionary={selectedMissionary}
               attendanceRecords={attendanceRecords}
               attendanceLoading={attendanceLoading}
