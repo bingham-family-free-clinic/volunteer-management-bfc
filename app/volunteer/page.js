@@ -10,7 +10,7 @@ import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotification
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
 import { MessageTab } from '../../components/MessageTab'
 import VolunteerTasks from '../../components/VolunteerTasks'
-import BiannualSurvey, { isSurveyWeek, currentSurveyPeriod } from '../../components/BiannualSurvey'
+import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
 
@@ -657,23 +657,11 @@ function VolunteerPageInner() {
   }, [user, trainingWeekStart])
 
 
-  // Check Supabase (not just local state) for an existing submission this
-  // period, so the banner/badge stay hidden correctly after a page refresh.
-  useEffect(() => {
-    if (!surveyOpen || !user) return
-    let cancelled = false
-    async function checkSurveySubmitted() {
-      const { data } = await supabase
-        .from('volunteer_feedback')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('survey_period', currentSurveyPeriod())
-        .maybeSingle()
-      if (!cancelled && data) setSurveySubmitted(true)
-    }
-    checkSurveySubmitted()
-    return () => { cancelled = true }
-  }, [surveyOpen, user])
+  // Note: the survey is now fully anonymous — no user_id is ever recorded,
+  // so there is no way (and no need) to check the backend for a prior
+  // submission. `surveySubmitted` is purely local, in-session UI state that
+  // resets on refresh; it only affects the tab badge, never the banner
+  // (see below), and the survey tab/banner never disappear once completed.
 
   // ── Tab fetch dedup guard ─────────────────────────────────────────────────
   // Tracks which tabs have already had their data fetched so we never
@@ -1358,8 +1346,10 @@ function VolunteerPageInner() {
           </div>
         )}
 
-        {/* Survey banner — only shown during survey week if not yet submitted */}
-        {surveyOpen && !surveySubmitted && (
+        {/* Survey banner — stays pinned at the top for the entire survey
+            window, even after submitting, since submissions are anonymous
+            and we have no way (and no need) to know who has completed it. */}
+        {surveyOpen && (
           <div
             onClick={() => setTab('feedback')}
             style={{
@@ -1380,7 +1370,7 @@ function VolunteerPageInner() {
                 Volunteer Feedback Survey
               </p>
               <p style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
-                Open through Sunday — takes 2-5 minutes.
+                Anonymous &amp; open through Sunday — only needs to be completed once, takes 2-5 minutes.
               </p>
             </div>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -1787,10 +1777,12 @@ function VolunteerPageInner() {
           />
         )}
 
-        {/* ── FEEDBACK TAB ────────────────────────────────────────────────── */}
+        {/* ── FEEDBACK TAB ─────────────────────────────────────────────────
+            Fully anonymous — no userId is passed in, since we no longer
+            track who completes the survey. */}
         {tab === 'feedback' && surveyOpen && (
           <BiannualSurvey
-            userId={user.id}
+            submitted={surveySubmitted}
             onSubmitted={() => setSurveySubmitted(true)}
           />
         )}
