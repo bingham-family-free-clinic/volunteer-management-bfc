@@ -345,6 +345,8 @@ export default function AdminPage() {
 
   const isCredentialing = profile?.default_role === 'Credentialing'
   const isHR = profile?.default_role === 'Human Resources'
+  const isOfficeManager = profile?.default_role === 'Office Manager'
+  const isOSSM = profile?.default_role === 'OSSM'
     
   // ── Profile photo state ──────────────────────────────────────────────────────
   const [profilePhotoUrl, setProfilePhotoUrl]         = useState(null)
@@ -705,7 +707,7 @@ export default function AdminPage() {
         .eq('id', user.id).single()
       if (p?.role !== 'admin') { window.location.href = '/volunteer'; return }
       setProfile(p)
-      if (p?.default_role === 'Credentialing') setTab('volunteers')
+      if (p?.default_role === 'Credentialing') setTab('providers')
       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
       setLoading(false)
     }
@@ -1159,8 +1161,19 @@ export default function AdminPage() {
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
           {(isCredentialing
             ? [
-                ['providers', 'Providers'], ['volunteers', 'Volunteers'],
+                ['providers', 'Providers'],
                 ['create', 'Add Volunteer'], ['shifts', 'Shifts'],  ['hours', 'Hours'],
+              ]
+            : isOfficeManager
+            ? [
+                ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+                ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
+                ['training', 'Weekly Training'],
+              ]
+            : isOSSM
+            ? [
+                ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+                ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
               ]
             : isHR
             ? [
