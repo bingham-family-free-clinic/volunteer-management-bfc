@@ -1,8 +1,9 @@
 // TODO Change the survey months to the actual months when the survey is active. The current month represnt the intalization dates that will be phased out for the more more practial months.
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { DAYS, SHIFTS, ROLES } from '../lib/constants'
 
 // ── Survey window configuration ──────────────────────────────────────────────
 // Adjust these to change when the survey is active.
@@ -21,12 +22,25 @@ export function getSurveyWindow(year, month) {
   sunday.setHours(23, 59, 59, 999)
   return { start: monday, end: sunday }
 }
-
+/*
 export function isSurveyWeek() {
   const now = new Date()
   const month = now.getMonth()
   if (!SURVEY_MONTHS.includes(month)) return false
   const { start, end } = getSurveyWindow(now.getFullYear(), month)
+  return now >= start && now <= end
+}
+*/
+
+export function isSurveyWeek() {
+  const now = new Date()
+
+  const start = new Date(2026, 6, 13) // July 13, 2026 (month is 0-indexed)
+  start.setHours(0, 0, 0, 0)
+
+  const end = new Date(2026, 6, 19)
+  end.setHours(23, 59, 59, 999)
+
   return now >= start && now <= end
 }
 
@@ -78,32 +92,21 @@ const S = {
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function BiannualSurvey({ userId, onSubmitted }) {
-  const [answers, setAnswers]       = useState({})
+// This survey is completely anonymous: no user identifier is ever recorded
+// or looked up. Because of that, we have no way (and no need) to check a
+// backend for a prior submission — `submitted` is passed in as a controlled
+// prop from the page's own session-local state, so the confirmation view
+// persists across tab switches but is never tied to any individual.
+export default function BiannualSurvey({ submitted, onSubmitted }) {
+  const [answers, setAnswers]           = useState({})
   const [improvements, setImprovements] = useState([])
+  const [positions, setPositions]       = useState([])
+  const [shifts, setShifts]             = useState([])
   const [frustrations, setFrustrations] = useState('')
-  const [submitted, setSubmitted]   = useState(false)
-  const [checking, setChecking]     = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]           = useState(null)
+  const [submitting, setSubmitting]     = useState(false)
+  const [error, setError]               = useState(null)
 
   const period = currentSurveyPeriod()
-
-  // Check if this volunteer already submitted this period
-  useEffect(() => {
-    if (!userId) return
-    async function check() {
-      const { data } = await supabase
-        .from('volunteer_feedback')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('survey_period', period)
-        .maybeSingle()
-      if (data) setSubmitted(true)
-      setChecking(false)
-    }
-    check()
-  }, [userId, period])
 
   function setScale(id, value) {
     setAnswers(prev => ({ ...prev, [id]: value }))
@@ -115,6 +118,19 @@ export default function BiannualSurvey({ userId, onSubmitted }) {
     )
   }
 
+  function togglePosition(role) {
+    setPositions(prev =>
+      prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role]
+    )
+  }
+
+  function toggleShift(day, shift) {
+    const key = `${day} ${shift}`
+    setShifts(prev =>
+      prev.includes(key) ? prev.filter(s => s !== key) : [...prev, key]
+    )
+  }
+
   const allScaleAnswered = SCALE_QUESTIONS.every(q => answers[q.id])
 
   async function handleSubmit() {
@@ -122,11 +138,14 @@ export default function BiannualSurvey({ userId, onSubmitted }) {
     setSubmitting(true)
     setError(null)
 
+    // No user_id, name, or any other personal identifier is included here —
+    // this row cannot be traced back to the volunteer who submitted it.
     const row = {
-      user_id:       userId,
       survey_period: period,
       submitted_at:  new Date().toISOString(),
       improvements:  improvements,
+      positions:     positions.length ? positions : null,
+      shifts:        shifts.length ? shifts : null,
       frustrations:  frustrations.trim() || null,
     }
     SCALE_QUESTIONS.forEach(q => { row[q.id] = answers[q.id] })
@@ -137,12 +156,9 @@ export default function BiannualSurvey({ userId, onSubmitted }) {
       setSubmitting(false)
       return
     }
-    setSubmitted(true)
     setSubmitting(false)
     if (onSubmitted) onSubmitted()
   }
-
-  if (checking) return null
 
   // ── Submitted / confirmation view ─────────────────────────────────────────
   if (submitted) {
@@ -160,7 +176,7 @@ export default function BiannualSurvey({ userId, onSubmitted }) {
         </div>
         <h2 style={{ fontWeight: 600, fontSize: '1.1rem', marginBottom: '0.5rem' }}>Thank you for your service.</h2>
         <p style={{ color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1.6, maxWidth: '340px', margin: '0 auto' }}>
-          We appreciate this feedback, and will use it to improve the volunteer experience at BFC.
+          We appreciate this feedback, and will use it to improve the volunteer experience at BFC. The survey only needs to be completed once — you're all set until it reopens next cycle.
         </p>
       </div>
     )
@@ -172,8 +188,11 @@ export default function BiannualSurvey({ userId, onSubmitted }) {
 
       {/* Preamble */}
       <div style={{ ...S.card, background: 'rgba(2,65,107,0.03)', borderColor: 'rgba(2,65,107,0.15)' }}>
+        <p style={{ fontSize: '0.88rem', color: 'var(--muted)', lineHeight: 1.65, marginBottom: '0.75rem' }}>
+          This survey will stay open through Sunday — it won't disappear, and it only needs to be completed once.
+        </p>
         <p style={{ fontSize: '0.88rem', color: 'var(--muted)', lineHeight: 1.65 }}>
-          This survey is hosted in the BFC Portal so we can better understand volunteer experiences across different roles and shifts. Responses will be reviewed in aggregate and used to improve the volunteer experience. They will not be used to evaluate, penalize, or negatively affect individual volunteers. The purpose of this form is to highlight areas the clinic should focus efforts to improve.
+          This survey is completely anonymous. We do not record who submits it, and you are not required to share your position or shift below — if you choose to, we'll use that information only to make targeted improvements for specific shifts and roles. No individual submission is ever reviewed on its own, and completing (or not completing) this survey has no bearing on your standing as a volunteer.
         </p>
       </div>
 
@@ -224,7 +243,7 @@ export default function BiannualSurvey({ userId, onSubmitted }) {
 
       {/* Improvement areas */}
       <div style={S.card}>
-        <p style={{ ...S.label, marginBottom: '0.25rem' }}>Question 10</p>
+        <p style={{ ...S.label, marginBottom: '0.25rem' }}>Question 10 (optional)</p>
         <p style={{ fontSize: '0.92rem', lineHeight: 1.5, marginBottom: '1rem', color: 'var(--text)' }}>
           Improvements in which areas would have enhanced your volunteer experience?
         </p>
@@ -270,9 +289,82 @@ export default function BiannualSurvey({ userId, onSubmitted }) {
         </div>
       </div>
 
+      {/* Positions served */}
+      <div style={S.card}>
+        <p style={{ ...S.label, marginBottom: '0.25rem' }}>Question 11 (optional)</p>
+        <p style={{ fontSize: '0.92rem', lineHeight: 1.5, marginBottom: '1rem', color: 'var(--text)' }}>
+          Which position(s) do you currently serve in? Select as many or as few as apply — this is entirely optional.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+          {ROLES.map(role => {
+            const checked = positions.includes(role)
+            return (
+              <button
+                key={role}
+                onClick={() => togglePosition(role)}
+                style={{
+                  padding: '0.5rem 0.85rem',
+                  borderRadius: '100px',
+                  border: checked ? '1px solid rgba(2,65,107,0.35)' : '1px solid var(--border)',
+                  background: checked ? 'rgba(2,65,107,0.06)' : 'var(--bg)',
+                  color: checked ? 'var(--text)' : 'var(--muted)',
+                  fontWeight: checked ? 500 : 400,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                  transition: 'background 0.15s',
+                }}
+              >
+                {role}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Current shifts */}
+      <div style={S.card}>
+        <p style={{ ...S.label, marginBottom: '0.25rem' }}>Question 12 (optional)</p>
+        <p style={{ fontSize: '0.92rem', lineHeight: 1.5, marginBottom: '1rem', color: 'var(--text)' }}>
+          Which shift(s) do you currently serve? Select as many or as few as apply — this is entirely optional.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+          {DAYS.map(day => (
+            <div key={day} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text)', minWidth: '80px' }}>{day}</span>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                {SHIFTS.map(shift => {
+                  const checked = shifts.includes(`${day} ${shift}`)
+                  return (
+                    <button
+                      key={shift}
+                      onClick={() => toggleShift(day, shift)}
+                      style={{
+                        padding: '0.45rem 0.9rem',
+                        borderRadius: '8px',
+                        border: checked ? 'none' : '1px solid var(--border)',
+                        background: checked ? 'var(--accent)' : 'var(--bg)',
+                        color: checked ? '#fff' : 'var(--muted)',
+                        fontFamily: 'DM Mono, monospace',
+                        fontSize: '0.85rem',
+                        fontWeight: checked ? 700 : 400,
+                        cursor: 'pointer',
+                        transition: 'background 0.15s, color 0.15s',
+                      }}
+                    >
+                      {shift}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Open-ended frustrations */}
       <div style={S.card}>
-        <label htmlFor="frustrations" style={{ ...S.label, marginBottom: '0.25rem' }}>Question 11</label>
+        <label htmlFor="frustrations" style={{ ...S.label, marginBottom: '0.25rem' }}>Question 13</label>
         <p style={{ fontSize: '0.92rem', lineHeight: 1.5, marginBottom: '0.75rem', color: 'var(--text)' }}>
           What aspects of your volunteer experience could have been improved? What feedback would you like to share? 
         </p>
