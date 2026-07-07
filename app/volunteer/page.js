@@ -1200,10 +1200,13 @@ function VolunteerPageInner() {
       window.location.href = '/clinical-supervisor'
       return
     }
+    
+    {/*
     if (profile?.default_role === 'OSSM') {
       window.location.href = '/ossm'
       return
     }
+    */}
   }
 
   if (loading) return (
