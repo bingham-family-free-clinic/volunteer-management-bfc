@@ -660,7 +660,7 @@ const TABS = [
   { key: 'missionaries', label: 'Missionaries' },
 ]
 
-function DesktopHeader({ activeTab, onSelectTab, onSignOut }) {
+function DesktopHeader({ activeTab, onSelectTab, onSwitchView, onSignOut }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
       <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
@@ -679,6 +679,15 @@ function DesktopHeader({ activeTab, onSelectTab, onSignOut }) {
             {t.label}
           </button>
         ))}
+        <button
+          onClick={onSwitchView}
+          style={{
+            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+            fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem', fontWeight: 500, color: 'var(--muted)',
+          }}
+        >
+          Switch View
+        </button>
         <button
           onClick={onSignOut}
           style={{
@@ -711,7 +720,7 @@ function MobileTopBar({ onOpenSidebar }) {
   )
 }
 
-function MobileSidebar({ open, onClose, activeTab, onSelectTab, onSignOut }) {
+function MobileSidebar({ open, onClose, activeTab, onSelectTab, onSwitchView, onSignOut }) {
   function handleItemClick(action) {
     action()
     onClose()
@@ -742,6 +751,17 @@ function MobileSidebar({ open, onClose, activeTab, onSelectTab, onSignOut }) {
           ✕
         </button>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <button
+            onClick={() => handleItemClick(onSwitchView)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '0.9rem 1rem', borderRadius: '10px',
+              border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
+              fontSize: '0.95rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+            }}
+          >
+            Switch View
+          </button>
+
           {TABS.map(({ key, label }) => (
             <button
               key={key}
@@ -889,6 +909,10 @@ function OSSMPageInner() {
     window.location.href = '/'
   }
 
+  function handleSwitchView() {
+    window.location.href = '/volunteer'
+  }
+
   const selectedMissionary = missionaries.find(m => m.id === selectedId) || null
 
   if (loading) return (
@@ -910,7 +934,7 @@ function OSSMPageInner() {
         {isMobile ? (
           <MobileTopBar onOpenSidebar={() => setSidebarOpen(true)} />
         ) : (
-          <DesktopHeader activeTab={tab} onSelectTab={setTab} onSignOut={handleSignOut} />
+          <DesktopHeader activeTab={tab} onSelectTab={setTab} onSwitchView={handleSwitchView} onSignOut={handleSignOut} />
         )}
 
         {tab === 'live' && (
@@ -947,6 +971,7 @@ function OSSMPageInner() {
           onClose={() => setSidebarOpen(false)}
           activeTab={tab}
           onSelectTab={(k) => { setTab(k); setSelectedId(null) }}
+          onSwitchView={handleSwitchView}
           onSignOut={handleSignOut}
         />
       </div>
