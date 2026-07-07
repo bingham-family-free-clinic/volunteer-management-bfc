@@ -1113,6 +1113,9 @@ export default function AdminPage() {
       return true
     })
     .sort((a, b) => { const ln = n => (n?.full_name?.split(' ').slice(-1)[0] || '').toLowerCase(); return ln(a).localeCompare(ln(b)) })
+  // Volunteers tab display only — hides Providers from the browsable list without
+  // affecting the volunteer/shift-assignment dropdowns elsewhere, which still use userList.
+  const volunteersTabList = userList.filter(v => v.default_role !== 'Provider')
 
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', gap: '1rem' }}>
@@ -1301,12 +1304,12 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
-            <ExpandableSection label="Volunteers" isOpen={volunteersOpen} onToggle={() => setVolunteersOpen(o => !o)} count={userList.length}>
-              {userList.length === 0 ? (
+            <ExpandableSection label="Volunteers" isOpen={volunteersOpen} onToggle={() => setVolunteersOpen(o => !o)} count={volunteersTabList.length}>
+              {volunteersTabList.length === 0 ? (
                 <p style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No volunteers match these filters.</p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {userList.map(v => {
+                  {volunteersTabList.map(v => {
                     const isInactive = (v.status ?? 'active') === 'inactive'
                     return (
                       <div key={v.id} onClick={() => openVolunteer(v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: isInactive ? 'rgba(156,163,175,0.06)' : 'var(--bg)', cursor: 'pointer', opacity: isInactive ? 0.7 : 1 }} onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'} onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
