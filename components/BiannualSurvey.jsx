@@ -33,8 +33,6 @@ export function isSurveyWeek() {
 */
 
 export function isSurveyWeek() {
-  return true
-}
   const now = new Date()
 
   const start = new Date(2026, 6, 13) // July 13, 2026 (month is 0-indexed)
