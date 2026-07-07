@@ -463,7 +463,7 @@ function MissionaryDetailView({ missionary, attendanceRecords, attendanceLoading
           <InfoRow label="Email" value={missionary.email} />
           <InfoRow label="Phone Number" value={missionary.phone} />
           <InfoRow label="SMA" value={missionary.sma_name} />
-          <InfoRow label="SMA Contact Information" value={missionary.sma_phone || missionary.sma_contact} />
+          <InfoRow label="SMA Contact Information" value={missionary.sma_contact} />
         </div>
       </div>
 
@@ -670,7 +670,7 @@ function OSSMPageInner() {
 
     const { data: mData } = await supabase
       .from('profiles')
-      .select('id, full_name, email, phone, sma_name, sma_phone, sma_contact, affiliation, status')
+      .select('id, full_name, email, phone, sma_name, sma_contact, affiliation, status')
       .eq('affiliation', 'missionary')
       .eq('status', 'active')
       .order('full_name')
