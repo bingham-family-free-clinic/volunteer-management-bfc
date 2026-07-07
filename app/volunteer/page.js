@@ -1180,7 +1180,7 @@ function VolunteerPageInner() {
     profile?.role === 'admin' ||
     profile?.default_role === 'Clinical Supervisor' ||
     profile?.default_role === 'Office Manager' ||
-    profile?.default_role === 'OSSM'
+    {/* profile?.default_role === 'OSSM' */}
 
   function handleSwitchView() {
     // Admins take priority even if they also hold a Clinical Supervisor /
