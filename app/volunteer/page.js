@@ -1179,7 +1179,7 @@ function VolunteerPageInner() {
   const canSwitchView =
     profile?.role === 'admin' ||
     profile?.default_role === 'Clinical Supervisor' ||
-    profile?.default_role === 'Office Manager' ||
+    profile?.default_role === 'Office Manager'
     {/* profile?.default_role === 'OSSM' */}
 
   function handleSwitchView() {
@@ -1200,7 +1200,7 @@ function VolunteerPageInner() {
       window.location.href = '/clinical-supervisor'
       return
     }
-    
+
     {/*
     if (profile?.default_role === 'OSSM') {
       window.location.href = '/ossm'
