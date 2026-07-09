@@ -286,7 +286,7 @@ function LiveTab({ schedule, callouts, activeShifts, missionaries, onOpenMission
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-      {/* Not clocked in banner */}
+      {/* Not clocked in banner 
       {isWeekday && currentShift && (
         <div style={{
           ...S.card,
@@ -318,7 +318,7 @@ function LiveTab({ schedule, callouts, activeShifts, missionaries, onOpenMission
             </div>
           )}
         </div>
-      )}
+      )} */}
 
       {/* Today's full schedule */}
       <div style={S.card}>
