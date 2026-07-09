@@ -389,7 +389,10 @@ export default function AdminPage() {
     const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
     const cols = 'id,volunteer_id,callout_date,day_of_week,shift_time,role,reason,status,is_read,covered_by,submitted_at,volunteer:profiles!callouts_volunteer_id_fkey(full_name)'
 
-    // Fetch pending first (priority), then fill remaining slots with approved-but-uncovered
+    // Fetch pending first (priority), then fill remaining slots with approved
+    // (covered or not — Live.js and the callouts tab need covered ones too,
+    // both to render the "covered" badge and so computeExpectedNotClockedIn
+    // correctly excludes volunteers who called out and got covered).
     const [{ data: pendingData }, { data: approvedData }] = await Promise.all([
       supabase.from('callouts').select(cols)
         .gte('callout_date', todayStr)
@@ -399,7 +402,6 @@ export default function AdminPage() {
       supabase.from('callouts').select(cols)
         .gte('callout_date', todayStr)
         .eq('status', 'approved')
-        .is('covered_by', null)
         .order('callout_date', { ascending: true })
         .limit(CALLOUTS_LIMIT),
     ])
