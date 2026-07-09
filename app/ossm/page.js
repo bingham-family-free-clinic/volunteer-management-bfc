@@ -841,7 +841,8 @@ function OSSMPageInner() {
       supabase
         .from('callouts')
         .select('id, volunteer_id, callout_date, day_of_week, shift_time, role, reason, status, covered_by, profiles(full_name)')
-        .eq('callout_date', todayMtnStr),
+        .eq('callout_date', todayMtnStr)
+        .in('volunteer_id', ids),
       supabase
         .from('shifts')
         .select('id, volunteer_id, clock_in, clock_out, profiles(full_name)')
