@@ -108,6 +108,56 @@ function buildTodaysScheduleRows({ schedule, callouts, activeShifts, missionarie
   return rows
 }
 
+// Compute which missionaries are expected right now (for the current shift)
+// but haven't clocked in yet. Ported 1:1 from Live.js's
+// computeExpectedNotClockedIn so the OSSM red banner and the volunteer-facing
+// Live tab always agree. Two things this captures that a naive
+// "schedule minus clocked-in" pass would miss:
+//   1) week_pattern (odd/even week) is applied before anything else, so
+//      biweekly missionaries aren't flagged on their off-weeks.
+//   2) a missionary covering someone else's approved call-out is added to the
+//      expected set (via covered_by), even though they weren't on the
+//      original schedule row — they still owe a clock-in for that shift.
+function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, missionaries, todayMtnStr, currentDay, currentShift }) {
+  if (!currentShift) return []
+
+  const calledOutIds = new Set(
+    callouts
+      .filter(c => c.callout_date === todayMtnStr && c.shift_time === currentShift && c.status === 'approved')
+      .map(c => c.volunteer_id)
+  )
+  const coverIds = new Set(
+    callouts
+      .filter(c => c.callout_date === todayMtnStr && c.shift_time === currentShift && c.covered_by)
+      .map(c => c.covered_by)
+  )
+
+  const scheduled = schedule.filter(s =>
+    s.day_of_week === currentDay &&
+    s.shift_time  === currentShift &&
+    (!s.start_date || s.start_date <= todayMtnStr) &&
+    (!s.end_date   || s.end_date   >= todayMtnStr) &&
+    isActiveThisWeek(todayMtnStr, s.week_pattern)
+  )
+
+  const clockedInIds = new Set(activeShifts.map(s => s.volunteer_id).filter(Boolean))
+
+  const expectedIds = new Set([
+    ...scheduled.filter(s => !calledOutIds.has(s.volunteer_id)).map(s => s.volunteer_id),
+    ...coverIds,
+  ])
+
+  return [...expectedIds]
+    .filter(id => !clockedInIds.has(id))
+    .map(id => {
+      const vol = missionaries.find(m => m.id === id)
+      if (!vol) return null
+      const entry = scheduled.find(s => s.volunteer_id === id)
+      return { id, full_name: vol.full_name, role: entry?.role || '—', notes: entry?.notes || null }
+    })
+    .filter(Boolean)
+}
+
 // Generic paginated fetch (handles tables larger than one page).
 async function fetchAllRows(table, buildQuery, pageSize = 1000) {
   let allRows = []
@@ -227,7 +277,10 @@ function LiveTab({ schedule, callouts, activeShifts, missionaries, onOpenMission
     [schedule, callouts, activeShifts, missionaries, todayMtnStr, currentDay]
   )
 
-  const notClockedInNow = rows.filter(r => r.shift_time === currentShift && r.status === 'not_clocked_in')
+  const notClockedInNow = useMemo(
+    () => computeExpectedNotClockedIn({ schedule, callouts, activeShifts, missionaries, todayMtnStr, currentDay, currentShift }),
+    [schedule, callouts, activeShifts, missionaries, todayMtnStr, currentDay, currentShift]
+  )
   const todaysCallouts = callouts.filter(c => c.callout_date === todayMtnStr && c.status !== 'denied')
 
   return (
@@ -249,7 +302,7 @@ function LiveTab({ schedule, callouts, activeShifts, missionaries, onOpenMission
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {notClockedInNow.map(r => (
                 <div
-                  key={r.key}
+                  key={r.id}
                   onClick={() => onOpenMissionary(r.id)}
                   style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
