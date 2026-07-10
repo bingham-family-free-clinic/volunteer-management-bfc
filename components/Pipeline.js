@@ -83,7 +83,7 @@ const CHECKLIST_ITEMS = [
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
 const NON_MISSIONARY_REQUIRED = ['background_check', 'id_check', 'immunization']
 
-const TOTAL_STEPS = 5
+const TOTAL_STEPS = 4
 
 // ─── Slot picker ──────────────────────────────────────────────────────────────
 function SlotPicker({ selected, onChange }) {
@@ -461,7 +461,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     intern_school: '', intern_department: '', advisor_name: '', advisor_contact: '',
     credentials: '',
     license_exp: '', bls_exp: '', dea_exp: '', ftca_exp: '', tb_exp: '',
-    birthday: '', default_role: '',
+    default_role: '',
     preferred_slots: [],
     preferred_roles: [],
   }
@@ -1115,8 +1115,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     if (!selected) return
     const affil = onboardForm.affiliation
     if (!affil)                    { msg('Select an affiliation', 'error'); setOnboardStep(1); return }
-    if (!onboardForm.birthday)     { msg('Birthday is required',  'error'); setOnboardStep(2); return }
-    if (!onboardForm.default_role) { msg('Select a default position', 'error'); setOnboardStep(3); return }
+    if (!onboardForm.default_role) { msg('Select a default position', 'error'); setOnboardStep(2); return }
 
     const _missingDocs = getMissingRequiredDocs()
     if (_missingDocs.length > 0) {
@@ -1143,7 +1142,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       phone: selected.phone || null, role: 'volunteer', affiliation: affil || null,
       languages: selected.languages || null,
       default_role: affiliData.default_role || null,
-      birthday:     affiliData.birthday     || null,
       status: 'active',
       avatar_url: applicantAvatarPath || null,
       sma_name:    affil === 'missionary' ? (affiliData.sma_name    || null) : null,
@@ -1204,7 +1202,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const affiliData = a.onboard_affil_data || {}
     setOnboardForm({
       affiliation:   a.onboard_affiliation   || '',
-      birthday:      a.onboard_birthday      || '',
       default_role:  a.onboard_default_role  || '',
       preferred_slots: a.onboard_preferred_slots || [],
       preferred_roles: a.onboard_preferred_roles || [],
@@ -1440,17 +1437,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     if (a === 'intern')  return !!(onboardForm.intern_school && onboardForm.intern_department && onboardForm.advisor_name && onboardForm.advisor_contact)
     return true
   }
-  const step2Valid    = !!onboardForm.birthday
-  const step3Valid    = !!onboardForm.default_role
-  const step4Valid    = onboardForm.preferred_slots.length > 0 && onboardForm.preferred_roles.length > 0
-  const allStepsValid = step1Valid() && step2Valid && step3Valid && step4Valid && docsComplete
+  const step2Valid    = !!onboardForm.default_role
+  const step3Valid    = onboardForm.preferred_slots.length > 0 && onboardForm.preferred_roles.length > 0
+  const allStepsValid = step1Valid() && step2Valid && step3Valid && docsComplete
 
   function profileSummary() {
     const base = [
       { label: 'Name',     value: selected?.full_name },
       { label: 'Email',    value: selected?.email },
       { label: 'Affil.',   value: onboardForm.affiliation },
-      { label: 'Birthday', value: onboardForm.birthday },
       { label: 'Position', value: onboardForm.default_role },
     ]
     if (onboardForm.preferred_slots.length > 0)
@@ -2118,10 +2113,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
               {[
                 { n: 1, label: 'Affiliation',  valid: s1 },
-                { n: 2, label: 'Birthday',     valid: step2Valid },
-                { n: 3, label: 'Position',     valid: step3Valid },
-                { n: 4, label: 'Availability', valid: step4Valid },
-                { n: 5, label: 'Checklist',    valid: checklistCount > 0 },
+                { n: 2, label: 'Position',     valid: step2Valid },
+                { n: 3, label: 'Availability', valid: step3Valid },
+                { n: 4, label: 'Checklist',    valid: checklistCount > 0 },
               ].map(({ n, label, valid }) => (
                 <button key={n} onClick={() => setOnboardStep(n)} style={{ padding: '0.35rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: onboardStep === n ? 700 : 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', border: `1px solid ${onboardStep === n ? C.blue : valid ? C.blue + '44' : 'var(--border)'}`, background: onboardStep === n ? C.blue + '18' : 'var(--bg)', color: onboardStep === n ? C.blue : valid ? C.blue : 'var(--muted)' }}>
                   {valid && onboardStep !== n ? `${label} ✓` : label}
@@ -2134,7 +2128,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>What is their affiliation?</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.6rem' }}>
-                  {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, birthday: f.birthday, default_role: f.default_role, preferred_slots: f.preferred_slots, preferred_roles: f.preferred_roles }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
+                  {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, default_role: f.default_role, preferred_slots: f.preferred_slots, preferred_roles: f.preferred_roles }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
                 </div>
                 {onboardForm.affiliation && <AffiliationExtras />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -2146,31 +2140,19 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             {/* Step 2 */}
             {onboardStep === 2 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Date of Birth</p>
-                <div style={{ maxWidth: 260 }}><label style={labelStyle}>Birthday</label><input type="date" value={onboardForm.birthday} onChange={e => setOnboardForm(f => ({ ...f, birthday: e.target.value }))} style={inputStyle} /></div>
+                <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Default Position</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.6rem' }}>
+                  {ROLES.map(role => { const active = onboardForm.default_role === role; return <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>{role}</button> })}
+                </div>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                   <button onClick={() => setOnboardStep(1)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_birthday: onboardForm.birthday || null }); setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
+                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null }); setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
 
             {/* Step 3 */}
             {onboardStep === 3 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Default Position</p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.6rem' }}>
-                  {ROLES.map(role => { const active = onboardForm.default_role === role; return <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>{role}</button> })}
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                  <button onClick={() => setOnboardStep(2)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null }); setOnboardStep(4) }} disabled={!step3Valid} style={solidBtn(C.blue, !step3Valid)}>Save &amp; Next</button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 4 */}
-            {onboardStep === 4 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div>
                   <p style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.35rem' }}>Availability &amp; Waitlist Preferences</p>
@@ -2197,14 +2179,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   }
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                  <button onClick={() => setOnboardStep(3)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_preferred_slots: onboardForm.preferred_slots, onboard_preferred_roles: onboardForm.preferred_roles }); setOnboardStep(5) }} disabled={!step4Valid} style={solidBtn(C.blue, !step4Valid)}>Save &amp; Next</button>
+                  <button onClick={() => setOnboardStep(2)} style={ghostBtn()}>Back</button>
+                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_preferred_slots: onboardForm.preferred_slots, onboard_preferred_roles: onboardForm.preferred_roles }); setOnboardStep(4) }} disabled={!step3Valid} style={solidBtn(C.blue, !step3Valid)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
 
-            {/* Step 5 */}
-            {onboardStep === 5 && (
+            {/* Step 4 */}
+            {onboardStep === 4 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Onboarding Checklist</p>
@@ -2246,7 +2228,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 )}
 
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  <button onClick={() => setOnboardStep(4)} style={ghostBtn()}>Back</button>
+                  <button onClick={() => setOnboardStep(3)} style={ghostBtn()}>Back</button>
                   <button onClick={handleCreateProfile} disabled={creatingProfile || !allStepsValid} style={solidBtn(C.primary, creatingProfile || !allStepsValid)}>
                     {creatingProfile ? 'Creating...' : 'Create Volunteer Profile'}
                   </button>
@@ -2266,9 +2248,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 {!allStepsValid && (
                   <p style={{ fontSize: '0.82rem', color: C.warn, fontWeight: 500 }}>
                     {!step1Valid() && 'Affiliation details required. '}
-                    {!step2Valid && 'Birthday required. '}
-                    {!step3Valid && 'Default position required. '}
-                    {!step4Valid && 'At least one available shift and one role required. '}
+                    {!step2Valid && 'Default position required. '}
+                    {!step3Valid && 'At least one available shift and one role required. '}
                   </p>
                 )}
               </div>
@@ -2378,7 +2359,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                             {a.resume_url && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontWeight: 600 }}>resume</span>}
                             {a.stage === 'onboarding' && (
                               <span style={{ display: 'flex', gap: '0.2rem' }}>
-                                {[a.onboard_affiliation, a.onboard_birthday, a.onboard_default_role].map((v, i) => (
+                                {[a.onboard_affiliation, a.onboard_default_role].map((v, i) => (
                                   <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: v ? C.light : 'var(--border)' }} />
                                 ))}
                               </span>
