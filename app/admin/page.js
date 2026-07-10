@@ -29,6 +29,18 @@ const TEAMS = [
   'Executive Assistant', 'OSSM',
 ]
 
+// ── RBAC: who may access the admin dashboard's content ───────────────────────
+// A user with role === 'admin' still needs affiliation === 'provider' (Clinical
+// Care Volunteer) OR one of these default_role values to see anything here.
+const ADMIN_ACCESS_DEFAULT_ROLES = [
+  'Lab Director', 'Director', 'Information Systems', 'Provider',
+  'Administrative Assistant', 'Executive Assistant',
+  'OSSM', 'Office Manager', 'Human Resources', 'Credentialing',
+]
+function hasAdminAccess(p) {
+  return p?.affiliation === 'provider' || ADMIN_ACCESS_DEFAULT_ROLES.includes(p?.default_role)
+}
+
 // ── Shared column lists (define once, reuse everywhere) ──────────────────────
 // Full profile — used when we need to display/edit all volunteer fields
 const PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date,avatar_url'
@@ -231,6 +243,7 @@ function LoadMoreButton({ onClick, loading, hasMore, label = 'Load more' }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const [profile, setProfile] = useState(null)
+  const [accessDenied, setAccessDenied] = useState(false)
 
   const [volunteers, setVolunteers]     = useState([])
   const [activeShifts, setActiveShifts] = useState([])
@@ -705,9 +718,15 @@ export default function AdminPage() {
       // Fetch only the admin profile fields we actually use
       const { data: p } = await supabase
         .from('profiles')
-        .select('id,full_name,email,role,default_role')
+        .select('id,full_name,email,role,default_role,affiliation')
         .eq('id', user.id).single()
       if (p?.role !== 'admin') { window.location.href = '/volunteer'; return }
+      if (!hasAdminAccess(p)) {
+        setProfile(p)
+        setAccessDenied(true)
+        setLoading(false)
+        return
+      }
       setProfile(p)
       if (p?.default_role === 'Credentialing') setTab('providers')
       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
@@ -1132,6 +1151,14 @@ export default function AdminPage() {
       </div>
       <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading your page</p>
       <style>{`@keyframes bounce { 0%, 100% { transform: translateY(0); opacity: 0.4; } 50% { transform: translateY(-6px); opacity: 1; } }`}</style>
+    </div>
+  )
+
+  if (accessDenied) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: '1.5rem' }}>
+      <p style={{ color: 'var(--muted)', fontSize: '0.95rem', textAlign: 'center', maxWidth: '420px' }}>
+        Please meet with the Volunteer Committee to change your default role to a role that has administrative privileges.
+      </p>
     </div>
   )
 
