@@ -301,7 +301,7 @@ export default function AdminPage() {
   const [newRole, setNewRole]               = useState('volunteer'); const [newAffiliation, setNewAffiliation] = useState(''); const [newCredentials, setNewCredentials]   = useState('')
   const [newPhone, setNewPhone]             = useState(''); const [newLanguages, setNewLanguages]     = useState(''); const [newSmaName, setNewSmaName]           = useState('')
   const [newSmaContact, setNewSmaContact]   = useState(''); const [newSchool, setNewSchool]           = useState(''); const [newMajor, setNewMajor]               = useState('')
-  const [newBirthday, setNewBirthday]       = useState(''); const [newDefaultRole, setNewDefaultRole] = useState(''); const [creating, setCreating]               = useState(false)
+  const [newDefaultRole, setNewDefaultRole] = useState(''); const [creating, setCreating]               = useState(false)
   const [newAdvisorName, setNewAdvisorName] = useState(''); const [newAdvisorContact, setNewAdvisorContact] = useState('')
   const [newInternSchool, setNewInternSchool]   = useState(''); const [newInternDepartment, setNewInternDepartment] = useState('')
   const [newProviderCreds, setNewProviderCreds] = useState({ license_exp: '', bls_exp: '', dea_exp: '', ftca_exp: '', tb_exp: '' })
@@ -1097,7 +1097,7 @@ export default function AdminPage() {
       license_exp: isProvider ? (newProviderCreds.license_exp||null) : null, bls_exp: isProvider ? (newProviderCreds.bls_exp||null) : null,
       dea_exp: isProvider ? (newProviderCreds.dea_exp||null) : null, ftca_exp: isProvider ? (newProviderCreds.ftca_exp||null) : null,
       tb_exp: isProvider ? (newProviderCreds.tb_exp||null) : null,
-      birthday: newBirthday || null, default_role: newDefaultRole || null, end_date: newEndDate || null,
+      default_role: newDefaultRole || null, end_date: newEndDate || null,
       status: 'active', status_reason: null,
     }
     const { error: pe } = await supabase.from('profiles').insert(profileData)
@@ -1109,7 +1109,7 @@ export default function AdminPage() {
       setNewName(''); setNewEmail(''); setNewPassword(''); setNewRole('volunteer')
       setNewAffiliation(''); setNewCredentials(''); setNewPhone(''); setNewLanguages('')
       setNewSmaName(''); setNewSmaContact(''); setNewSchool(''); setNewMajor('')
-      setNewBirthday(''); setNewDefaultRole(''); setNewEndDate('')
+      setNewDefaultRole(''); setNewEndDate('')
       setNewAdvisorName(''); setNewAdvisorContact('')
       setNewInternSchool(''); setNewInternDepartment('')
       setNewProviderCreds({ license_exp: '', bls_exp: '', dea_exp: '', ftca_exp: '', tb_exp: '' })
@@ -1416,7 +1416,6 @@ export default function AdminPage() {
                     { label: 'Languages', value: selectedVolunteer.languages },
                     { label: 'Role', value: selectedVolunteer.role },
                     { label: 'Default Position', value: selectedVolunteer.default_role },
-                    { label: 'Birthday', value: selectedVolunteer.birthday },
                     { label: 'End Date', value: selectedVolunteer.end_date || null },
                     ...(selectedVolunteer.affiliation === 'missionary' ? [{ label: 'SMA Name', value: selectedVolunteer.sma_name }, { label: 'SMA Contact', value: selectedVolunteer.sma_contact }] : []),
                     ...(selectedVolunteer.affiliation === 'intern' ? [{ label: 'Advisor Name', value: selectedVolunteer.advisor_name }, { label: 'Advisor Contact', value: selectedVolunteer.advisor_contact }, { label: 'School', value: selectedVolunteer.intern_school }, { label: 'Dept / Company', value: selectedVolunteer.intern_department }] : []),
@@ -1526,7 +1525,6 @@ export default function AdminPage() {
                     </div>
                   )}
                   <div><label style={labelStyle}>Default Position</label><select value={editForm.default_role} onChange={e => setEditForm({...editForm, default_role: e.target.value})} style={inputStyle}><option value="">— None —</option>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
-                  <div><label style={labelStyle}>Birthday</label><input type="date" value={editForm.birthday || ''} onChange={e => setEditForm({ ...editForm, birthday: e.target.value })} style={inputStyle} /></div>                
                   <div>
                     <label style={labelStyle}>End Date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(auto-deactivates on this date)</span></label>
                     <input type="date" value={editForm.end_date || ''} onChange={e => setEditForm({ ...editForm, end_date: e.target.value })} style={inputStyle} />
@@ -1884,7 +1882,6 @@ export default function AdminPage() {
                 <div><label style={labelStyle}>Credentials / Skills</label><input type="text" value={newCredentials} onChange={e => setNewCredentials(e.target.value)} placeholder="e.g. EMT, Phlebotomy" style={inputStyle} /></div>
                 <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Languages Spoken</label><input value={newLanguages} onChange={e => setNewLanguages(e.target.value)} placeholder="e.g. Spanish, Mandarin" style={inputStyle} /></div>
                 <div><label style={labelStyle}>Default Position</label><select value={newDefaultRole} onChange={e => setNewDefaultRole(e.target.value)} style={inputStyle}><option value="">— None —</option>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
-                <div><label style={labelStyle}>Birthday</label><input type="date" value={newBirthday} onChange={e => setNewBirthday(e.target.value)} style={inputStyle} /></div>
                 <div>
                   <label style={labelStyle}>End Date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional — auto-deactivates on this date)</span></label>
                   <input type="date" value={newEndDate} onChange={e => setNewEndDate(e.target.value)} style={inputStyle} />
