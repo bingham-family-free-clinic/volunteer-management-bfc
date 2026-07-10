@@ -41,6 +41,20 @@ function hasAdminAccess(p) {
   return p?.affiliation === 'provider' || ADMIN_ACCESS_DEFAULT_ROLES.includes(p?.default_role)
 }
 
+// ── Lab Director restricted view ──────────────────────────────────────────────
+// Lab Director sees Live/Scheduling/Volunteers, but only for lab-affiliated
+// people: anyone whose default_role is Lab or Lab Director, OR anyone
+// scheduled for a Lab shift (schedule.role === LAB_SCHEDULE_ROLE).
+const LAB_DEFAULT_ROLES = ['Lab', 'Lab Director']
+const LAB_SCHEDULE_ROLE = 'Lab' // must match the exact role string used in ROLES/schedule.role for Lab shifts
+function getLabVolunteerIds(volunteers, schedule) {
+  const ids = new Set(
+    volunteers.filter(v => LAB_DEFAULT_ROLES.includes(v?.default_role)).map(v => v.id)
+  )
+  schedule.forEach(s => { if (s.role === LAB_SCHEDULE_ROLE) ids.add(s.volunteer_id) })
+  return ids
+}
+
 // ── Shared column lists (define once, reuse everywhere) ──────────────────────
 // Full profile — used when we need to display/edit all volunteer fields
 const PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,end_date,avatar_url'
@@ -360,6 +374,14 @@ export default function AdminPage() {
   const isHR = profile?.default_role === 'Human Resources'
   const isOfficeManager = profile?.default_role === 'Office Manager'
   const isOSSM = profile?.default_role === 'OSSM'
+  const isLabDirector = profile?.default_role === 'Lab Director'
+
+  // Lab Director's data scope — everyone else gets null (no restriction).
+  const labVolunteerIds = isLabDirector ? getLabVolunteerIds(volunteers, schedule) : null
+  const visibleVolunteers   = labVolunteerIds ? volunteers.filter(v => labVolunteerIds.has(v.id))      : volunteers
+  const visibleSchedule     = labVolunteerIds ? schedule.filter(s => labVolunteerIds.has(s.volunteer_id))    : schedule
+  const visibleActiveShifts = labVolunteerIds ? activeShifts.filter(s => labVolunteerIds.has(s.volunteer_id)) : activeShifts
+  const visibleCallouts     = labVolunteerIds ? callouts.filter(c => labVolunteerIds.has(c.volunteer_id))   : callouts
     
   // ── Profile photo state ──────────────────────────────────────────────────────
   const [profilePhotoUrl, setProfilePhotoUrl]         = useState(null)
@@ -763,11 +785,11 @@ export default function AdminPage() {
   function showMessage(text, type) { setToast({ text, type }); setTimeout(() => setToast(null), 3500) }
 
   function getEntries(day, shift, role) {
-    if (!scheduleDate) return schedule.filter(s => s.day_of_week === day && s.shift_time === shift && s.role === role)
+    if (!scheduleDate) return visibleSchedule.filter(s => s.day_of_week === day && s.shift_time === shift && s.role === role)
     const d = new Date(scheduleDate + 'T12:00:00'); let count = 0; const target = d.getDay()
     const check = new Date(d.getFullYear(), d.getMonth(), 1)
     while (check <= d) { if (check.getDay() === target) count++; check.setDate(check.getDate() + 1) }
-    return schedule.filter(s => {
+    return visibleSchedule.filter(s => {
       if (s.day_of_week !== day || s.shift_time !== shift || s.role !== role) return false
       if (s.start_date && s.start_date > scheduleDate) return false
       if (s.end_date   && s.end_date   < scheduleDate) return false
@@ -777,7 +799,8 @@ export default function AdminPage() {
     })
   }
 
-  const { list: expectedVolunteers } = computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers })
+  const { list: expectedVolunteers } = computeExpectedNotClockedIn({ schedule: visibleSchedule, callouts: visibleCallouts, activeShifts: visibleActiveShifts, volunteers: visibleVolunteers })
+  const visiblePendingHours = labVolunteerIds ? pendingHours.filter(h => labVolunteerIds.has(h.volunteer_id)) : pendingHours
 
   function openVolunteer(v) {
     setTab('volunteers')
@@ -1120,7 +1143,7 @@ export default function AdminPage() {
   // ── Derived lists ───────────────────────────────────────────────────────────
   const adminList = volunteers.filter(v => v.role === 'admin')
   const filteredShifts = shiftFilterVolId ? allShifts.filter(s => s.volunteer_id === shiftFilterVolId) : allShifts
-  const userList = volunteers
+  const userList = visibleVolunteers
     .filter(v => showInactive || (v.status || 'active') === 'active')
     .filter(v => {
       if (filterSearch) { const q = filterSearch.toLowerCase(); if (!(v.full_name || '').toLowerCase().includes(q) && !(v.email || '').toLowerCase().includes(q)) return false }
@@ -1183,8 +1206,8 @@ export default function AdminPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
           {[
             { label: 'Not Clocked In',    value: expectedVolunteers.length, warn: expectedVolunteers.length > 0 },
-            { label: 'Pending Call-Outs', value: callouts.filter(c => !c.status || c.status === 'pending').length, warn: callouts.filter(c => !c.status || c.status === 'pending').length > 0 },
-            { label: 'Pending Hours',     value: pendingHours.filter(h => !h.status || h.status === 'pending').length, warn: pendingHours.some(h => !h.status || h.status === 'pending') },
+            { label: 'Pending Call-Outs', value: visibleCallouts.filter(c => !c.status || c.status === 'pending').length, warn: visibleCallouts.filter(c => !c.status || c.status === 'pending').length > 0 },
+            { label: 'Pending Hours',     value: visiblePendingHours.filter(h => !h.status || h.status === 'pending').length, warn: visiblePendingHours.some(h => !h.status || h.status === 'pending') },
           ].map(s => (
             <div key={s.label} style={{ ...card, textAlign: 'center', borderColor: s.warn ? 'var(--warn)' : 'var(--border)' }}>
               <p style={{ fontSize: '2rem', fontWeight: 700, fontFamily: 'DM Mono, monospace', color: s.warn ? 'var(--warn)' : 'var(--text)' }}>{s.value}</p>
@@ -1195,7 +1218,11 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-          {(isCredentialing
+          {(isLabDirector
+            ? [
+                ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+              ]
+            : isCredentialing
             ? [
                 ['providers', 'Providers'], ['volunteers', 'Volunteers'],
                 ['create', 'Add Volunteer'], ['shifts', 'Shifts'],  ['hours', 'Hours'],
@@ -1231,10 +1258,10 @@ export default function AdminPage() {
         {/* ── LIVE TAB ──────────────────────────────────────────────────────── */}
         {tab === 'dashboard' && (
           <Live
-            schedule={schedule}
-            callouts={callouts}
-            activeShifts={activeShifts}
-            volunteers={volunteers}
+            schedule={visibleSchedule}
+            callouts={visibleCallouts}
+            activeShifts={visibleActiveShifts}
+            volunteers={visibleVolunteers}
             onOpenVolunteer={openVolunteer}
           />
         )}
