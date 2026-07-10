@@ -9,7 +9,7 @@ export default function PrivacyPolicy() {
       <h2 style={h2}>1. Information We Collect</h2>
       <p>When you use the App, we may collect the following categories of personal information:</p>
       <ul style={ul}>
-        <li>- Identity &amp; Contact: full name, email address, phone number, and date of birth.</li>
+        <li>- Identity &amp; Contact: full name, email address, and phone number.</li>
         <li>- Professional Credentials: role, affiliation, credentials or skills (e.g., EMT, Phlebotomy), languages spoken, license expiration dates, BLS, DEA, FTCA, and TB certification dates.</li>
         <li>- Academic &amp; Internship Information: school, major, advisor name and contact, department, or supervising organization (where applicable).</li>
         <li>- Scheduling &amp; Attendance: shift assignments, clock-in and clock-out records, and availability.</li>

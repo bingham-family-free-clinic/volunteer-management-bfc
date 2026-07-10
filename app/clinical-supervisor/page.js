@@ -199,7 +199,7 @@ export default function CSPage() {
     const [shiftsRes, schedRes, volsRes, calloutsRes, mySchedRes] = await Promise.all([
       supabase.from('shifts').select('id, volunteer_id, clock_in, profiles(id, full_name)').is('clock_out', null),
       supabase.from('schedule').select('*, profiles(id, full_name)').order('role'),
-      supabase.from('profiles').select('id, full_name, phone, languages, role, default_role, affiliation, email, status, birthday'),
+      supabase.from('profiles').select('id, full_name, phone, languages, role, default_role, affiliation, email, status'),
       supabase.from('callouts')
         .select('*, volunteer:profiles!callouts_volunteer_id_fkey(full_name)')
         .order('submitted_at', { ascending: false })

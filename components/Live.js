@@ -220,25 +220,6 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
         )
       })()}
 
-      {/* ── Birthdays ────────────────────────────────────────────────────── */}
-      {(() => {
-        const todayMD = `${String(mtnNow.getMonth()+1).padStart(2,'0')}-${String(mtnNow.getDate()).padStart(2,'0')}`
-        const bdays   = volunteers.filter(v => v.birthday && v.birthday.slice(5) === todayMD)
-        if (bdays.length === 0) return null
-        return (
-          <div style={{ ...card, borderColor: 'rgba(129,140,248,0.5)', background: 'rgba(129,140,248,0.04)' }}>
-            <h2 style={{ fontWeight: 600, marginBottom: '0.75rem', fontSize: '1rem' }}>Birthdays Today</h2>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {bdays.map(v => (
-                <span key={v.id} style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: 'rgba(129,140,248,0.12)', color: '#818cf8', border: '1px solid rgba(129,140,248,0.35)', fontSize: '0.875rem', fontWeight: 500 }}>
-                  {v.full_name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )
-      })()}
-
     </div>
   )
 }

@@ -689,7 +689,7 @@ export default function DataDashboard({ supabase }) {
   useEffect(() => {
     supabase
       .from('profiles')
-      .select('id, full_name, affiliation, sma_name, school, birthday, role, status')
+      .select('id, full_name, affiliation, sma_name, school, role, status')
       .then(({ data }) => setProfiles(data || []))
   }, [supabase])
 
@@ -919,9 +919,6 @@ export default function DataDashboard({ supabase }) {
         .sort((a, b) => b.rate - a.rate || b.count - a.count)
     )
   }, [supabase, profiles, noShowMonth, noShowYear, lateMonth, lateYear])
-
-  // ── Missing info — missionaries:sma, students:school, all:birthday ──
-  // (section removed)
 
   // ── Weekly hours by affiliation ───────────────────────────
   const loadWeeklyChart = useCallback(async () => {
