@@ -43,10 +43,10 @@ function hasAdminAccess(p) {
 
 // ── Shared column lists (define once, reuse everywhere) ──────────────────────
 // Full profile — used when we need to display/edit all volunteer fields
-const PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date,avatar_url'
+const PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,end_date,avatar_url'
 
 // Slim profile — list views only need identity + filter fields
-const PROFILE_LIST_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,birthday,end_date,team,avatar_url'
+const PROFILE_LIST_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,end_date,team,avatar_url'
 
 const PROVIDER_CRED_FIELDS = [
   { key: 'license_exp', label: 'License' },
@@ -787,7 +787,7 @@ export default function AdminPage() {
       affiliation: v.affiliation||'', credentials: v.credentials||'',
       languages: v.languages||'', role: v.role||'volunteer',
       sma_name: v.sma_name||'', sma_contact: v.sma_contact||'',
-      school: v.school||'', default_role: v.default_role||'', birthday: v.birthday||'',
+      school: v.school||'', default_role: v.default_role||'',
       advisor_name: v.advisor_name||'', advisor_contact: v.advisor_contact||'',
       intern_school: v.intern_school||'', intern_department: v.intern_department||'',
       license_exp: v.license_exp||'', bls_exp: v.bls_exp||'',
@@ -1060,7 +1060,7 @@ export default function AdminPage() {
       license_exp: isProvider ? (editForm.license_exp||null) : null, bls_exp: isProvider ? (editForm.bls_exp||null) : null,
       dea_exp: isProvider ? (editForm.dea_exp||null) : null, ftca_exp: isProvider ? (editForm.ftca_exp||null) : null,
       tb_exp: isProvider ? (editForm.tb_exp||null) : null,
-      default_role: editForm.default_role || null, birthday: editForm.birthday || null,
+      default_role: editForm.default_role || null,
       end_date: editForm.end_date || null,
       status_reason: editForm.end_date ? (editForm.status_reason || null) : null,
       team: editForm.team || null,
