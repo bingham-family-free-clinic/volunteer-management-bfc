@@ -1117,7 +1117,11 @@ export default function AdminPage() {
     .sort((a, b) => { const ln = n => (n?.full_name?.split(' ').slice(-1)[0] || '').toLowerCase(); return ln(a).localeCompare(ln(b)) })
   // Volunteers tab display only — hides Providers from the browsable list without
   // affecting the volunteer/shift-assignment dropdowns elsewhere, which still use userList.
-  const volunteersTabList = userList.filter(v => v.default_role !== 'Provider')
+  // Credentialing gets a restricted view: only clinical care volunteers (affiliation
+  // === 'provider') and Pharmacy staff (default_role === 'Pharmacy').
+  const volunteersTabList = isCredentialing
+    ? userList.filter(v => v.affiliation === 'provider' || v.default_role === 'Pharmacy')
+    : userList.filter(v => v.default_role !== 'Provider')
 
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', gap: '1rem' }}>
@@ -1166,7 +1170,7 @@ export default function AdminPage() {
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
           {(isCredentialing
             ? [
-                ['providers', 'Providers'],
+                ['providers', 'Providers'], ['volunteers', 'Volunteers'],
                 ['create', 'Add Volunteer'], ['shifts', 'Shifts'],  ['hours', 'Hours'],
               ]
             : isOfficeManager
