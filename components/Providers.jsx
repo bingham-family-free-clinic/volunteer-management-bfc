@@ -1045,10 +1045,10 @@ export default function Providers({ supabase }) {
     if (!user) return
     const { data } = await supabase
       .from('profiles')
-      .select('default_position')
+      .select('default_role')
       .eq('id', user.id)
       .single()
-    setMyPosition(data?.default_position ?? null)
+    setMyPosition(data?.default_role ?? null)
   }
 
   async function load() {
