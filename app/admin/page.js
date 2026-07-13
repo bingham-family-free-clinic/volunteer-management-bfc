@@ -1370,12 +1370,8 @@ export default function AdminPage() {
       <div style={{ maxWidth: '960px', margin: '0 auto' }}>
 
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <div>
-            <h1 style={{ fontSize: '1.4rem', fontWeight: 600, letterSpacing: '-0.02em' }}>Admin Dashboard</h1>
-            <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Bingham Family Clinic &nbsp;·&nbsp;<span style={{ fontFamily: 'DM Mono, monospace' }}>{currentTime.toLocaleTimeString('en-US', { timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit' })} {tzLabel}</span></p>
-          </div>
-          {isMobile ? (
+        {isMobile ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label="Open menu"
@@ -1397,27 +1393,40 @@ export default function AdminPage() {
               <span style={{ width: '26px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
               <span style={{ width: '26px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
             </button>
-          ) : (
+            <img
+              src="/logo2.png"
+              alt="Logo"
+              style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
+            />
+          </div>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <div>
+              <h1 style={{ fontSize: '1.4rem', fontWeight: 600, letterSpacing: '-0.02em' }}>Admin Dashboard</h1>
+              <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Bingham Family Clinic &nbsp;·&nbsp;<span style={{ fontFamily: 'DM Mono, monospace' }}>{currentTime.toLocaleTimeString('en-US', { timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit' })} {tzLabel}</span></p>
+            </div>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <button onClick={() => window.location.href = '/volunteer'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.4rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem' }}>Volunteer View</button>
               <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/' }} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.4rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem' }}>Sign out</button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-          {[
-            { label: 'Not Clocked In',    value: expectedVolunteers.length, warn: expectedVolunteers.length > 0 },
-            { label: 'Pending Call-Outs', value: visibleCallouts.filter(c => !c.status || c.status === 'pending').length, warn: visibleCallouts.filter(c => !c.status || c.status === 'pending').length > 0 },
-            { label: 'Pending Hours',     value: visiblePendingHours.filter(h => !h.status || h.status === 'pending').length, warn: visiblePendingHours.some(h => !h.status || h.status === 'pending') },
-          ].map(s => (
-            <div key={s.label} style={{ ...card, textAlign: 'center', borderColor: s.warn ? 'var(--warn)' : 'var(--border)' }}>
-              <p style={{ fontSize: '2rem', fontWeight: 700, fontFamily: 'DM Mono, monospace', color: s.warn ? 'var(--warn)' : 'var(--text)' }}>{s.value}</p>
-              <p style={{ color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.25rem' }}>{s.label}</p>
-            </div>
-          ))}
-        </div>
+        {/* Stats — on mobile, only shown on the Live tab; unchanged (always shown) on desktop */}
+        {(!isMobile || tab === 'dashboard') && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+            {[
+              { label: 'Not Clocked In',    value: expectedVolunteers.length, warn: expectedVolunteers.length > 0 },
+              { label: 'Pending Call-Outs', value: visibleCallouts.filter(c => !c.status || c.status === 'pending').length, warn: visibleCallouts.filter(c => !c.status || c.status === 'pending').length > 0 },
+              { label: 'Pending Hours',     value: visiblePendingHours.filter(h => !h.status || h.status === 'pending').length, warn: visiblePendingHours.some(h => !h.status || h.status === 'pending') },
+            ].map(s => (
+              <div key={s.label} style={{ ...card, textAlign: 'center', borderColor: s.warn ? 'var(--warn)' : 'var(--border)' }}>
+                <p style={{ fontSize: '2rem', fontWeight: 700, fontFamily: 'DM Mono, monospace', color: s.warn ? 'var(--warn)' : 'var(--text)' }}>{s.value}</p>
+                <p style={{ color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.25rem' }}>{s.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Tabs — pill row on desktop; on mobile these live in the sidebar instead */}
         {!isMobile && (
