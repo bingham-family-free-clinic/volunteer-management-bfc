@@ -1,17 +1,19 @@
 import './globals.css'
 
+const isNonProd = process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production'
+const logo = isNonProd ? '/logo4.png' : '/logo3.png'
+
 export const metadata = {
   title: 'BFC Volunteer Portal',
   description: 'Volunteer Portal for Bingham Family Clinic',
-  manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
     title: 'Portal',
   },
   icons: {
-    icon: '/logo3.png',
-    apple: '/logo3.png',
+    icon: logo,
+    apple: logo,
   },
 }
 
@@ -30,8 +32,7 @@ export default function RootLayout({ children }) {
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="BFC" />
-        <link rel="apple-touch-icon" href="/logo3.png" />
-        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" href={logo} />
       </head>
       <body>
         {children}
