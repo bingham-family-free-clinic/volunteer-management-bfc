@@ -375,6 +375,7 @@ export default function AdminPage() {
   const isOfficeManager = profile?.default_role === 'Office Manager'
   const isOSSM = profile?.default_role === 'OSSM'
   const isLabDirector = profile?.default_role === 'Lab Director'
+  const isDirector = profile?.default_role === 'Director'
 
   // Lab Director's data scope — everyone else gets null (no restriction).
   const labVolunteerIds = isLabDirector ? getLabVolunteerIds(volunteers, schedule) : null
@@ -1161,7 +1162,11 @@ export default function AdminPage() {
   // affecting the volunteer/shift-assignment dropdowns elsewhere, which still use userList.
   // Credentialing gets a restricted view: only clinical care volunteers (affiliation
   // === 'provider') and Pharmacy staff (default_role === 'Pharmacy').
-  const volunteersTabList = isCredentialing
+  // Director is the only role that can see both Providers and non-Providers together
+  // on this tab — everyone else keeps the existing filtered views.
+  const volunteersTabList = isDirector
+    ? userList
+    : isCredentialing
     ? userList.filter(v => v.affiliation === 'provider' || v.default_role === 'Pharmacy')
     : userList.filter(v => v.default_role !== 'Provider')
 
