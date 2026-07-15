@@ -2,6 +2,17 @@
 
 import { useMemo, useState } from 'react'
 
+// ── Language normalization ───────────────────────────────────────────────────
+// profiles.languages is completely free text — "Beginner Spanish",
+// "French, ASL", "Tagalog", etc. This splits on common separators, strips
+// proficiency qualifiers, then maps the remaining word(s) to a canonical
+// language name via the alias table below. If nothing in the table matches,
+// the cleaned text is used as-is as its own language tag — nothing is ever
+// dropped or flagged, so there's no review queue to maintain.
+//
+// English is not tracked at all: it's never parsed out, never counted, and
+// never shown, since every volunteer is assumed to speak it.
+
 const LANGUAGE_ALIASES = {
   spanish: 'Spanish', espanol: 'Spanish', 'español': 'Spanish',
   french: 'French', francais: 'French', 'français': 'French',
@@ -193,10 +204,11 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
     return [...tally.entries()].sort((a, b) => b[1].count - a[1].count)
   }, [parsed])
 
-  // Filtered directory
+  // Filtered directory — only volunteers who actually have a language on file
   const directory = useMemo(() => {
     const q = search.trim().toLowerCase()
     return [...parsed.values()]
+      .filter(({ entries }) => entries.length > 0)
       .filter(({ volunteer, entries }) => {
         if (langFilter !== 'all' && !entries.some(e => e.language === langFilter)) return false
         if (!q) return true
@@ -227,37 +239,6 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Clinic-wide */}
-      <div style={card}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <h3 style={{ fontWeight: 600 }}>Clinic-Wide Coverage</h3>
-          <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
-            {activeCount} active volunteer{activeCount === 1 ? '' : 's'} · {clinicTally.length} language{clinicTally.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        {clinicTally.length === 0 ? (
-          <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No languages on file yet.</p>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
-            {clinicTally.map(([lang, data]) => {
-              const pct = activeCount ? Math.round((data.count / activeCount) * 100) : 0
-              return (
-                <div key={lang} style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '0.85rem 1rem', background: 'var(--bg)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{lang}</span>
-                    <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.8rem', color: 'var(--accent)' }}>{data.count}</span>
-                  </div>
-                  <div style={{ marginTop: '0.4rem', height: '6px', borderRadius: '100px', background: 'var(--border)', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)' }} />
-                  </div>
-                  <p style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.35rem' }}>{pct}% of active volunteers</p>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
       {/* Shift coverage */}
       <div style={card}>
         <h3 style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Coverage by Shift</h3>
@@ -331,7 +312,8 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
 
       {/* Directory */}
       <div style={card}>
-        <h3 style={{ fontWeight: 600, marginBottom: '1rem' }}>Volunteer Directory</h3>
+        <h3 style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Volunteer Directory</h3>
+        <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem' }}>Only shows volunteers with a language listed on their profile.</p>
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
           <div style={{ flex: '1 1 220px' }}>
             <label style={labelStyle}>Search</label>
@@ -354,13 +336,42 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
                 {volunteer.default_role && <p style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{volunteer.default_role}</p>}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', justifyContent: 'flex-end' }}>
-                {entries.length
-                  ? entries.map((e, i) => <LangChip key={i} entry={e} />)
-                  : <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>No languages listed</span>}
+                {entries.map((e, i) => <LangChip key={i} entry={e} />)}
               </div>
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Clinic-wide */}
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ fontWeight: 600 }}>Clinic-Wide Coverage</h3>
+          <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+            {activeCount} active volunteer{activeCount === 1 ? '' : 's'} · {clinicTally.length} language{clinicTally.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        {clinicTally.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No languages on file yet.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
+            {clinicTally.map(([lang, data]) => {
+              const pct = activeCount ? Math.round((data.count / activeCount) * 100) : 0
+              return (
+                <div key={lang} style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '0.85rem 1rem', background: 'var(--bg)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{lang}</span>
+                    <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.8rem', color: 'var(--accent)' }}>{data.count}</span>
+                  </div>
+                  <div style={{ marginTop: '0.4rem', height: '6px', borderRadius: '100px', background: 'var(--border)', overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)' }} />
+                  </div>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.35rem' }}>{pct}% of active volunteers</p>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
