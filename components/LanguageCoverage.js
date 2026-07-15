@@ -2,6 +2,16 @@
 
 import { useMemo, useState } from 'react'
 
+// ── Language normalization ───────────────────────────────────────────────────
+// profiles.languages is completely free text — "Beginner Spanish",
+// "French, ASL", "Tagalog", etc. This splits on common separators, strips
+// proficiency qualifiers, then maps the remaining word(s) to a canonical
+// language name via the alias table below. If nothing in the table matches,
+// the cleaned text is used as-is as its own language tag — nothing is ever
+// dropped or flagged, so there's no review queue to maintain.
+//
+// English is not tracked at all: it's never parsed out, never counted, and
+// never shown, since every volunteer is assumed to speak it.
 
 const LANGUAGE_ALIASES = {
   spanish: 'Spanish', espanol: 'Spanish', 'español': 'Spanish',
