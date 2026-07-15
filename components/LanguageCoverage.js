@@ -2,21 +2,7 @@
 
 import { useMemo, useState } from 'react'
 
-// ── Language normalization ───────────────────────────────────────────────────
-// profiles.languages is completely free text — "Beginner Spanish",
-// "French, English, ASL", "english", etc. This is a best-effort parser:
-// split on common separators, strip proficiency qualifiers, then map the
-// remaining word(s) to a canonical language name via the alias table below.
-// Anything that can't be confidently matched is NOT silently dropped — it
-// shows up in the "Needs Review" panel so an admin can clean up the source
-// data, and the rest of that person's entry is still counted normally.
-//
-// Everyone is assumed to speak English unless proven otherwise: if a
-// profile's languages field doesn't parse out an explicit English entry,
-// one is added automatically and flagged as "assumed".
-
 const LANGUAGE_ALIASES = {
-  english: 'English', eng: 'English',
   spanish: 'Spanish', espanol: 'Spanish', 'español': 'Spanish',
   french: 'French', francais: 'French', 'français': 'French',
   german: 'German', deutsch: 'German',
@@ -71,6 +57,10 @@ const LANGUAGE_ALIASES = {
   czech: 'Czech', slovak: 'Slovak',
 }
 
+// Words/phrases that mean "this is English" — stripped out entirely, never
+// turned into a tag.
+const ENGLISH_WORDS = new Set(['english', 'eng'])
+
 const PROFICIENCY_ALIASES = [
   ['native', 'Native'],
   ['fluent', 'Fluent'],
@@ -92,41 +82,48 @@ const PROFICIENCY_ALIASES = [
 
 const PROFICIENCY_COLOR = { Native: '#22c55e', Fluent: '#22c55e', Conversational: '#7dd3fc', Beginner: '#fbbf24' }
 
+function toTitleCase(s) {
+  return s.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+}
+
 function parseLanguageField(raw) {
   const entries = []
-  const unrecognized = []
-  let hasEnglish = false
 
   if (raw && raw.trim()) {
     const parts = raw.split(/[,;/&+]| and /i).map(s => s.trim()).filter(Boolean)
     for (const part of parts) {
-      let working = part.toLowerCase()
+      let workingLower = part.toLowerCase()
+      let display = part
       let proficiency = null
+
       for (const [word, label] of PROFICIENCY_ALIASES) {
-        if (working.includes(word)) {
+        const re = new RegExp(word, 'i')
+        if (re.test(workingLower)) {
           proficiency = label
-          working = working.replace(word, '').trim()
+          workingLower = workingLower.replace(re, '').trim()
+          display = display.replace(re, '').trim()
         }
       }
-      working = working.replace(/\bspeaker\b|\bspeaking\b|\blanguage\b/gi, '').replace(/\s+/g, ' ').trim()
-      if (!working) continue
 
-      let canonical = LANGUAGE_ALIASES[working]
+      workingLower = workingLower.replace(/\bspeaker\b|\bspeaking\b|\blanguage\b/gi, '').replace(/\s+/g, ' ').trim()
+      display = display.replace(/\bspeaker\b|\bspeaking\b|\blanguage\b/gi, '').replace(/\s+/g, ' ').trim()
+      if (!workingLower) continue
+
+      // Drop English entirely — it's assumed for everyone and never shown.
+      if (ENGLISH_WORDS.has(workingLower)) continue
+
+      let canonical = LANGUAGE_ALIASES[workingLower]
       if (!canonical) {
-        const key = Object.keys(LANGUAGE_ALIASES).find(k => working.includes(k) || k.includes(working))
+        const key = Object.keys(LANGUAGE_ALIASES).find(k => workingLower.includes(k) || k.includes(workingLower))
         if (key) canonical = LANGUAGE_ALIASES[key]
       }
+      // No match? Accept the cleaned text as its own unique language tag
+      // rather than flagging it — nothing gets lost.
+      if (!canonical) canonical = toTitleCase(display)
 
-      if (canonical) {
-        if (canonical === 'English') hasEnglish = true
-        entries.push({ language: canonical, proficiency, raw: part.trim() })
-      } else {
-        unrecognized.push(part.trim())
-      }
+      entries.push({ language: canonical, proficiency, raw: part.trim() })
     }
   }
-
-  if (!hasEnglish) entries.push({ language: 'English', proficiency: null, assumed: true })
 
   // De-dupe by language, preferring whichever mention carries proficiency info
   const byLang = new Map()
@@ -134,22 +131,22 @@ function parseLanguageField(raw) {
     const existing = byLang.get(e.language)
     if (!existing || (!existing.proficiency && e.proficiency)) byLang.set(e.language, e)
   }
-  return { entries: [...byLang.values()], unrecognized }
+  return { entries: [...byLang.values()] }
 }
 
 // ── Small display helpers ────────────────────────────────────────────────────
 function LangChip({ entry }) {
-  const color = entry.language === 'English' ? '#64748b' : (entry.proficiency ? PROFICIENCY_COLOR[entry.proficiency] : 'var(--accent)')
+  const color = entry.proficiency ? PROFICIENCY_COLOR[entry.proficiency] : 'var(--accent)'
   return (
     <span
-      title={entry.raw ? `From profile: "${entry.raw}"` : (entry.assumed ? 'Not listed — assumed' : undefined)}
+      title={entry.raw ? `From profile: "${entry.raw}"` : undefined}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
         padding: '0.2rem 0.6rem', borderRadius: '100px', fontSize: '0.75rem', fontWeight: 500,
         background: color + '22', color, border: `1px solid ${color}55`, whiteSpace: 'nowrap',
       }}
     >
-      {entry.language}{entry.proficiency ? ` · ${entry.proficiency}` : ''}{entry.assumed ? ' (assumed)' : ''}
+      {entry.language}{entry.proficiency ? ` · ${entry.proficiency}` : ''}
     </span>
   )
 }
@@ -164,7 +161,6 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
   const [search, setSearch] = useState('')
   const [langFilter, setLangFilter] = useState('all')
   const [expandedCell, setExpandedCell] = useState(null)
-  const [showReview, setShowReview] = useState(false)
 
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
   const labelStyle = { display: 'block', fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }
@@ -175,8 +171,8 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
     const active = volunteers.filter(v => v.status === 'active')
     const map = new Map()
     for (const v of active) {
-      const { entries, unrecognized } = parseLanguageField(v.languages)
-      map.set(v.id, { volunteer: v, entries, unrecognized })
+      const { entries } = parseLanguageField(v.languages)
+      map.set(v.id, { volunteer: v, entries })
     }
     return map
   }, [volunteers])
@@ -191,25 +187,10 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
         if (!tally.has(e.language)) tally.set(e.language, { count: 0, people: [] })
         const bucket = tally.get(e.language)
         bucket.count += 1
-        bucket.people.push({ name: volunteer.full_name, proficiency: e.proficiency, assumed: e.assumed })
+        bucket.people.push({ name: volunteer.full_name, proficiency: e.proficiency })
       }
     }
-    return [...tally.entries()].sort((a, b) => {
-      if (a[0] === 'English') return -1
-      if (b[0] === 'English') return 1
-      return b[1].count - a[1].count
-    })
-  }, [parsed])
-
-  const nonEnglishCount = clinicTally.filter(([lang]) => lang !== 'English').length
-
-  // Profiles whose text had fragments the parser couldn't match
-  const needsReview = useMemo(() => {
-    const list = []
-    for (const { volunteer, unrecognized } of parsed.values()) {
-      if (unrecognized.length) list.push({ name: volunteer.full_name, raw: volunteer.languages, fragments: unrecognized })
-    }
-    return list
+    return [...tally.entries()].sort((a, b) => b[1].count - a[1].count)
   }, [parsed])
 
   // Filtered directory
@@ -246,49 +227,42 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Intro */}
-      <div style={card}>
-        <h2 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Language Coverage</h2>
-        <p style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: 1.6 }}>
-          Built from the free-text "Languages" field on each volunteer's profile. Since that field isn't
-          standardized, this parses common spellings and proficiency words (e.g. "Beginner Spanish", "French, English, ASL")
-          into consistent tags. Every active volunteer is assumed to speak English unless the field says otherwise.
-          Entries that couldn't be matched confidently are listed under Needs Review at the bottom rather than being dropped.
-        </p>
-      </div>
-
       {/* Clinic-wide */}
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <h3 style={{ fontWeight: 600 }}>Clinic-Wide Coverage</h3>
           <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
-            {activeCount} active volunteer{activeCount === 1 ? '' : 's'} · {nonEnglishCount} language{nonEnglishCount === 1 ? '' : 's'} beyond English
+            {activeCount} active volunteer{activeCount === 1 ? '' : 's'} · {clinicTally.length} language{clinicTally.length === 1 ? '' : 's'}
           </span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
-          {clinicTally.map(([lang, data]) => {
-            const pct = activeCount ? Math.round((data.count / activeCount) * 100) : 0
-            return (
-              <div key={lang} style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '0.85rem 1rem', background: 'var(--bg)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{lang}</span>
-                  <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.8rem', color: 'var(--accent)' }}>{data.count}</span>
+        {clinicTally.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No languages on file yet.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
+            {clinicTally.map(([lang, data]) => {
+              const pct = activeCount ? Math.round((data.count / activeCount) * 100) : 0
+              return (
+                <div key={lang} style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '0.85rem 1rem', background: 'var(--bg)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{lang}</span>
+                    <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.8rem', color: 'var(--accent)' }}>{data.count}</span>
+                  </div>
+                  <div style={{ marginTop: '0.4rem', height: '6px', borderRadius: '100px', background: 'var(--border)', overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)' }} />
+                  </div>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.35rem' }}>{pct}% of active volunteers</p>
                 </div>
-                <div style={{ marginTop: '0.4rem', height: '6px', borderRadius: '100px', background: 'var(--border)', overflow: 'hidden' }}>
-                  <div style={{ width: `${pct}%`, height: '100%', background: lang === 'English' ? '#64748b' : 'var(--accent)' }} />
-                </div>
-                <p style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.35rem' }}>{pct}% of active volunteers</p>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Shift coverage */}
       <div style={card}>
         <h3 style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Coverage by Shift</h3>
         <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem' }}>
-          Languages beyond English available in each regularly scheduled slot (ignores one-off date overrides). Click a cell for names.
+          Languages available in each regularly scheduled slot (ignores one-off date overrides). Click a cell for names.
         </p>
         {grid.days.length === 0 ? (
           <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No schedule entries yet.</p>
@@ -314,7 +288,7 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
                         return <td key={sh} style={{ padding: '0.6rem 0.75rem', borderBottom: '1px solid var(--border)', color: 'var(--muted)', fontSize: '0.78rem', verticalAlign: 'top' }}>—</td>
                       }
                       const langsHere = new Set()
-                      cell.people.forEach(p => p.entries.forEach(e => { if (e.language !== 'English') langsHere.add(e.language) }))
+                      cell.people.forEach(p => p.entries.forEach(e => langsHere.add(e.language)))
                       const isGap = langsHere.size === 0
                       const isOpen = expandedCell === key
                       return (
@@ -324,7 +298,7 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
                           style={{ padding: '0.6rem 0.75rem', borderBottom: '1px solid var(--border)', cursor: 'pointer', verticalAlign: 'top', background: isOpen ? 'rgba(2,65,107,0.06)' : 'transparent' }}
                         >
                           {isGap ? (
-                            <span style={{ fontSize: '0.72rem', color: '#fbbf24', border: '1px solid #fbbf2455', background: '#fbbf2422', padding: '0.15rem 0.5rem', borderRadius: '100px' }}>English only</span>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>No languages listed</span>
                           ) : (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
                               {[...langsHere].map(l => (
@@ -338,7 +312,7 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
                                 <div key={i} style={{ fontSize: '0.78rem' }}>
                                   <span style={{ fontWeight: 500 }}>{p.volunteer.full_name}</span>{' '}
                                   <span style={{ color: 'var(--muted)' }}>
-                                    {p.entries.filter(e => e.language !== 'English').map(e => e.language).join(', ') || 'English only'}
+                                    {p.entries.map(e => e.language).join(', ') || 'No languages listed'}
                                   </span>
                                 </div>
                               ))}
@@ -380,36 +354,14 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
                 {volunteer.default_role && <p style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{volunteer.default_role}</p>}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', justifyContent: 'flex-end' }}>
-                {entries.map((e, i) => <LangChip key={i} entry={e} />)}
+                {entries.length
+                  ? entries.map((e, i) => <LangChip key={i} entry={e} />)
+                  : <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>No languages listed</span>}
               </div>
             </div>
           ))}
         </div>
       </div>
-
-      {/* Needs review */}
-      {needsReview.length > 0 && (
-        <div style={card}>
-          <button onClick={() => setShowReview(s => !s)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: 0, fontFamily: 'DM Sans, sans-serif' }}>
-            <h3 style={{ fontWeight: 600, color: 'var(--text)' }}>Needs Review</h3>
-            <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>({needsReview.length}) {showReview ? '▲' : '▼'}</span>
-          </button>
-          <p style={{ fontSize: '0.8rem', color: 'var(--muted)', margin: '0.4rem 0 0' }}>
-            These profiles have language text the parser couldn't confidently match to a known language. Any languages it did recognize from the same entry are still counted above.
-          </p>
-          {showReview && (
-            <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {needsReview.map((r, i) => (
-                <div key={i} style={{ padding: '0.65rem 0.9rem', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--bg)' }}>
-                  <p style={{ fontWeight: 500, fontSize: '0.85rem' }}>{r.name}</p>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>Raw: "{r.raw}"</p>
-                  <p style={{ fontSize: '0.78rem', color: '#fbbf24' }}>Unmatched: {r.fragments.join(', ')}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }
