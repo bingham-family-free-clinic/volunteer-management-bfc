@@ -886,14 +886,18 @@ function OSSMPageInner() {
     const ids = missionaries.map(m => m.id)
     const todayMtnStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
 
-    const [{ data: sched }, { data: cos }, { data: shifts }] = await Promise.all([
+    const [{ data: sched }, { data: cos, error: coError }, { data: shifts }] = await Promise.all([
       supabase
         .from('schedule')
         .select('id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, volunteer_id')
         .in('volunteer_id', ids),
       supabase
         .from('callouts')
-        .select('id, volunteer_id, callout_date, day_of_week, shift_time, role, reason, status, covered_by, profiles(full_name)')
+        // NOTE: 'callouts' has two FKs into 'profiles' (volunteer_id and covered_by),
+        // so the embed must be disambiguated with an explicit fkey name (as the
+        // admin page does) — otherwise PostgREST returns an ambiguous-relationship
+        // error and this whole query silently comes back empty.
+        .select('id, volunteer_id, callout_date, day_of_week, shift_time, role, reason, status, covered_by, volunteer:profiles!callouts_volunteer_id_fkey(full_name)')
         .eq('callout_date', todayMtnStr)
         .in('volunteer_id', ids),
       supabase
@@ -903,8 +907,10 @@ function OSSMPageInner() {
         .is('clock_out', null),
     ])
 
+    if (coError) console.error('fetchLiveTab callouts error:', coError)
+
     setSchedule(sched || [])
-    setCallouts(cos || [])
+    setCallouts((cos || []).map(c => ({ ...c, profiles: c.volunteer })))
     setActiveShifts(shifts || [])
   }, [missionaries, liveLoaded])
 
