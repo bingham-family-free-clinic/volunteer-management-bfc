@@ -13,6 +13,7 @@ import Providers from '../../components/Providers'
 import Live, { computeExpectedNotClockedIn } from '../../components/Live'
 import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
+import LanguageCoverage from '../../components/LanguageCoverage'
 
 export const dynamic = 'force-dynamic'
 
@@ -518,6 +519,11 @@ export default function AdminPage() {
   const isOSSM = profile?.default_role === 'OSSM'
   const isLabDirector = profile?.default_role === 'Lab Director'
   const isDirector = profile?.default_role === 'Director'
+  const isAdminAssistant = profile?.default_role === 'Administrative Assistant'
+
+  // Language Coverage tab is scoped to exactly these three roles, regardless
+  // of which tabItems branch they fall into below.
+  const canSeeLanguageCoverage = isOfficeManager || isDirector || isAdminAssistant
 
   // Lab Director's data scope — everyone else gets null (no restriction).
   const labVolunteerIds = isLabDirector ? getLabVolunteerIds(volunteers, schedule) : null
@@ -573,6 +579,15 @@ export default function AdminPage() {
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'],
         ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
       ]
+
+  // Insert Language Coverage right after Volunteers, but only for the three
+  // roles allowed to see it. Works regardless of which branch above produced
+  // tabItems, since every branch that could match these roles includes 'volunteers'.
+  if (canSeeLanguageCoverage) {
+    const volIdx = tabItems.findIndex(([key]) => key === 'volunteers')
+    tabItems.splice(volIdx === -1 ? tabItems.length : volIdx + 1, 0, ['languages', 'Languages'])
+  }
+
   const DAY_ORDER   = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6 }
 
   // ── Data loaders ────────────────────────────────────────────────────────────
@@ -2119,6 +2134,9 @@ export default function AdminPage() {
         {tab === 'providers' && <Providers supabase={supabase} />}
         {tab === 'data'      && <DataDashboard supabase={supabase} />}
         {tab === 'training'  && <WeeklyTraining supabase={supabase} profile={profile} />}
+        {tab === 'languages' && canSeeLanguageCoverage && (
+          <LanguageCoverage volunteers={volunteers} schedule={schedule} />
+        )}
         {/* 
         {tab === 'lunch'     && <LunchScheduler supabase={supabase} profile={profile} />}
         */}
