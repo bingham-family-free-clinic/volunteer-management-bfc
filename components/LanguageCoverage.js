@@ -145,14 +145,13 @@ function parseLanguageField(raw) {
 
 // ── Small display helpers ────────────────────────────────────────────────────
 function LangChip({ entry }) {
-  const color = 'var(--accent)'
   return (
     <span
       title={entry.raw ? `From profile: "${entry.raw}"` : undefined}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-        padding: '0.2rem 0.6rem', borderRadius: '100px', fontSize: '0.75rem', fontWeight: 500,
-        background: 'rgba(2,65,107,0.15)', color, border: '1px solid rgba(2,65,107,0.4)', whiteSpace: 'nowrap',
+        padding: '0.2rem 0.4rem', fontSize: '0.75rem', fontWeight: 500,
+        background: 'transparent', color: 'var(--accent)', border: 'none', whiteSpace: 'nowrap',
       }}
     >
       {entry.language}{entry.proficiency ? ` · ${entry.proficiency}` : ''}
