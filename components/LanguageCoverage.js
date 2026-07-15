@@ -91,8 +91,6 @@ const PROFICIENCY_ALIASES = [
   ['some', 'Beginner'],
 ]
 
-const PROFICIENCY_COLOR = { Native: '#22c55e', Fluent: '#22c55e', Conversational: '#7dd3fc', Beginner: '#fbbf24' }
-
 function toTitleCase(s) {
   return s.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
 }
@@ -147,14 +145,13 @@ function parseLanguageField(raw) {
 
 // ── Small display helpers ────────────────────────────────────────────────────
 function LangChip({ entry }) {
-  const color = entry.proficiency ? PROFICIENCY_COLOR[entry.proficiency] : 'var(--accent)'
   return (
     <span
       title={entry.raw ? `From profile: "${entry.raw}"` : undefined}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-        padding: '0.2rem 0.6rem', borderRadius: '100px', fontSize: '0.75rem', fontWeight: 500,
-        background: color + '22', color, border: `1px solid ${color}55`, whiteSpace: 'nowrap',
+        padding: '0.2rem 0.4rem', fontSize: '0.75rem', fontWeight: 500,
+        background: 'transparent', color: 'var(--accent)', border: 'none', whiteSpace: 'nowrap',
       }}
     >
       {entry.language}{entry.proficiency ? ` · ${entry.proficiency}` : ''}
@@ -219,16 +216,22 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
   }, [parsed, search, langFilter])
 
   // Shift coverage grid — built from whatever days/shift times actually
-  // appear in the schedule, so it doesn't drift from lib/constants.
+  // appear in the schedule, so it doesn't drift from lib/constants. Anyone
+  // with no language on file is left out entirely; everyone left is sorted
+  // alphabetically by the first language on their profile.
   const grid = useMemo(() => {
     const days = [...new Set(schedule.map(s => s.day_of_week))].sort((a, b) => (DAY_ORDER[a] ?? 9) - (DAY_ORDER[b] ?? 9))
     const shiftTimes = [...new Set(schedule.map(s => s.shift_time))].sort()
     const cells = new Map() // "day|shift" -> { people: [{ volunteer, entries }] }
     for (const s of schedule) {
+      const p = parsed.get(s.volunteer_id)
+      if (!p || p.entries.length === 0) continue
       const key = `${s.day_of_week}|${s.shift_time}`
       if (!cells.has(key)) cells.set(key, { people: [] })
-      const p = parsed.get(s.volunteer_id)
-      if (p) cells.get(key).people.push(p)
+      cells.get(key).people.push(p)
+    }
+    for (const cell of cells.values()) {
+      cell.people.sort((a, b) => a.entries[0].language.localeCompare(b.entries[0].language))
     }
     return { days, shiftTimes, cells }
   }, [schedule, parsed])
@@ -243,7 +246,7 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
       <div style={card}>
         <h3 style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Coverage by Shift</h3>
         <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem' }}>
-          Languages available in each regularly scheduled slot (ignores one-off date overrides). Click a cell for names.
+          Languages available in each regularly scheduled slot (ignores one-off date overrides). Only volunteers with a language on file are counted. Click a cell for names.
         </p>
         {grid.days.length === 0 ? (
           <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No schedule entries yet.</p>
@@ -270,7 +273,6 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
                       }
                       const langsHere = new Set()
                       cell.people.forEach(p => p.entries.forEach(e => langsHere.add(e.language)))
-                      const isGap = langsHere.size === 0
                       const isOpen = expandedCell === key
                       return (
                         <td
@@ -278,22 +280,18 @@ export default function LanguageCoverage({ volunteers = [], schedule = [] }) {
                           onClick={() => setExpandedCell(isOpen ? null : key)}
                           style={{ padding: '0.6rem 0.75rem', borderBottom: '1px solid var(--border)', cursor: 'pointer', verticalAlign: 'top', background: isOpen ? 'rgba(2,65,107,0.06)' : 'transparent' }}
                         >
-                          {isGap ? (
-                            <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>No languages listed</span>
-                          ) : (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
-                              {[...langsHere].map(l => (
-                                <span key={l} style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', borderRadius: '100px', background: 'rgba(2,65,107,0.15)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.4)' }}>{l}</span>
-                              ))}
-                            </div>
-                          )}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                            {[...langsHere].map(l => (
+                              <span key={l} style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', borderRadius: '100px', background: 'rgba(2,65,107,0.15)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.4)' }}>{l}</span>
+                            ))}
+                          </div>
                           {isOpen && (
                             <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
                               {cell.people.map((p, i) => (
                                 <div key={i} style={{ fontSize: '0.78rem' }}>
                                   <span style={{ fontWeight: 500 }}>{p.volunteer.full_name}</span>{' '}
                                   <span style={{ color: 'var(--muted)' }}>
-                                    {p.entries.map(e => e.language).join(', ') || 'No languages listed'}
+                                    {p.entries.map(e => e.language).join(', ')}
                                   </span>
                                 </div>
                               ))}
