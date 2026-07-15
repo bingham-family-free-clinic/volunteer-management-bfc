@@ -585,7 +585,7 @@ export default function AdminPage() {
   // tabItems, since every branch that could match these roles includes 'volunteers'.
   if (canSeeLanguageCoverage) {
     const volIdx = tabItems.findIndex(([key]) => key === 'volunteers')
-    tabItems.splice(volIdx === -1 ? tabItems.length : volIdx + 1, 0, ['languages', 'Language Coverage'])
+    tabItems.splice(volIdx === -1 ? tabItems.length : volIdx + 1, 0, ['languages', 'Languages'])
   }
 
   const DAY_ORDER   = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6 }
