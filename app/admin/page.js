@@ -520,6 +520,7 @@ export default function AdminPage() {
   const isLabDirector = profile?.default_role === 'Lab Director'
   const isDirector = profile?.default_role === 'Director'
   const isAdminAssistant = profile?.default_role === 'Administrative Assistant'
+  const isProvider = profile?.default_role === 'Provider'
 
   // Language Coverage tab is scoped to exactly these three roles, regardless
   // of which tabItems branch they fall into below.
@@ -1351,9 +1352,9 @@ export default function AdminPage() {
   // affecting the volunteer/shift-assignment dropdowns elsewhere, which still use userList.
   // Credentialing gets a restricted view: only clinical care volunteers (affiliation
   // === 'provider') and Pharmacy staff (default_role === 'Pharmacy').
-  // Director is the only role that can see both Providers and non-Providers together
-  // on this tab — everyone else keeps the existing filtered views.
-  const volunteersTabList = isDirector
+  // Director and Provider are the only roles that can see both Providers and
+  // non-Providers together on this tab — everyone else keeps the existing filtered views.
+  const volunteersTabList = isDirector || isProvider
     ? userList
     : isCredentialing
     ? userList.filter(v => v.affiliation === 'provider' || v.default_role === 'Pharmacy')
@@ -1531,7 +1532,9 @@ export default function AdminPage() {
                             <div><label style={labelStyle}>Start date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="date" value={addStartDate} onChange={e => setAddStartDate(e.target.value)} style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
                             <div><label style={labelStyle}>End date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="date" value={addEndDate} onChange={e => setAddEndDate(e.target.value)} style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
                           </div>
-                          <div><label style={labelStyle}>Schedule note <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="text" value={addNotes} onChange={e => setAddNotes(e.target.value)} placeholder="e.g. arriving late" style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
+                          {profile?.default_role === 'Director' && (
+                            <div><label style={labelStyle}>Schedule note <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="text" value={addNotes} onChange={e => setAddNotes(e.target.value)} placeholder="e.g. arriving late" style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
+                          )}
                           <button onClick={handleAddEntry} disabled={!addVolId || addingEntry} style={{ padding: '0.75rem 1.25rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{addingEntry ? '...' : 'Assign'}</button>
                         </div>
                       )}
@@ -1777,7 +1780,7 @@ export default function AdminPage() {
                       <p style={{ fontSize: '0.78rem', fontWeight: 600, color: '#7dd3fc', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.85rem' }}>Credential Expiration Dates</p>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem' }}>
                         {PROVIDER_CRED_FIELDS.map(f => (
-                          <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={editForm[f.key] || ''} onChange={val => setEditForm({ ...editForm, [f.key]: val })} allowNA={f.key === 'dea_exp'} inputStyle={inputStyle} labelStyle={labelStyle} />
+                          <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={editForm[f.key] || ''} onChange={val => setEditForm({ ...editForm, [f.key]: val })} allowNA={f.key === 'dea_exp' || f.key === 'bls_exp'} inputStyle={inputStyle} labelStyle={labelStyle} />
                         ))}
                       </div>
                     </div>
@@ -2120,7 +2123,7 @@ export default function AdminPage() {
                     <p style={{ fontSize: '0.78rem', fontWeight: 600, color: '#7dd3fc', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.85rem' }}>Credential Expiration Dates</p>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem' }}>
                       {PROVIDER_CRED_FIELDS.map(f => (
-                        <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={newProviderCreds[f.key]} onChange={val => setNewProviderCreds(prev => ({ ...prev, [f.key]: val }))} allowNA={f.key === 'dea_exp'} inputStyle={inputStyle} labelStyle={labelStyle} />
+                        <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={newProviderCreds[f.key]} onChange={val => setNewProviderCreds(prev => ({ ...prev, [f.key]: val }))} allowNA={f.key === 'dea_exp' || f.key === 'bls_exp'} inputStyle={inputStyle} labelStyle={labelStyle} />
                       ))}
                     </div>
                   </div>
