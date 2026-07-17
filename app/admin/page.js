@@ -1780,7 +1780,7 @@ export default function AdminPage() {
                       <p style={{ fontSize: '0.78rem', fontWeight: 600, color: '#7dd3fc', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.85rem' }}>Credential Expiration Dates</p>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem' }}>
                         {PROVIDER_CRED_FIELDS.map(f => (
-                          <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={editForm[f.key] || ''} onChange={val => setEditForm({ ...editForm, [f.key]: val })} allowNA={f.key === 'dea_exp'} inputStyle={inputStyle} labelStyle={labelStyle} />
+                          <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={editForm[f.key] || ''} onChange={val => setEditForm({ ...editForm, [f.key]: val })} allowNA={f.key === 'dea_exp' || f.key === 'bls_exp'} inputStyle={inputStyle} labelStyle={labelStyle} />
                         ))}
                       </div>
                     </div>
@@ -2123,7 +2123,7 @@ export default function AdminPage() {
                     <p style={{ fontSize: '0.78rem', fontWeight: 600, color: '#7dd3fc', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.85rem' }}>Credential Expiration Dates</p>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem' }}>
                       {PROVIDER_CRED_FIELDS.map(f => (
-                        <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={newProviderCreds[f.key]} onChange={val => setNewProviderCreds(prev => ({ ...prev, [f.key]: val }))} allowNA={f.key === 'dea_exp'} inputStyle={inputStyle} labelStyle={labelStyle} />
+                        <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={newProviderCreds[f.key]} onChange={val => setNewProviderCreds(prev => ({ ...prev, [f.key]: val }))} allowNA={f.key === 'dea_exp' || f.key === 'bls_exp'} inputStyle={inputStyle} labelStyle={labelStyle} />
                       ))}
                     </div>
                   </div>
