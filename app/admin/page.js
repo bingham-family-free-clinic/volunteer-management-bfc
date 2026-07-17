@@ -520,6 +520,7 @@ export default function AdminPage() {
   const isLabDirector = profile?.default_role === 'Lab Director'
   const isDirector = profile?.default_role === 'Director'
   const isAdminAssistant = profile?.default_role === 'Administrative Assistant'
+  const isProvider = profile?.default_role === 'Provider'
 
   // Language Coverage tab is scoped to exactly these three roles, regardless
   // of which tabItems branch they fall into below.
@@ -1351,9 +1352,9 @@ export default function AdminPage() {
   // affecting the volunteer/shift-assignment dropdowns elsewhere, which still use userList.
   // Credentialing gets a restricted view: only clinical care volunteers (affiliation
   // === 'provider') and Pharmacy staff (default_role === 'Pharmacy').
-  // Director is the only role that can see both Providers and non-Providers together
-  // on this tab — everyone else keeps the existing filtered views.
-  const volunteersTabList = isDirector
+  // Director and Provider are the only roles that can see both Providers and
+  // non-Providers together on this tab — everyone else keeps the existing filtered views.
+  const volunteersTabList = isDirector || isProvider
     ? userList
     : isCredentialing
     ? userList.filter(v => v.affiliation === 'provider' || v.default_role === 'Pharmacy')
