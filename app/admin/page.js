@@ -1628,8 +1628,8 @@ export default function AdminPage() {
           />
         )}
 
-        {/* Stats — on mobile, only shown on the Live tab; unchanged (always shown) on desktop */}
-        {(!isMobile || tab === 'dashboard') && (
+        {/* Stats — only shown on the Live tab */}
+        {tab === 'dashboard' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
             {[
               { label: 'Not Clocked In',    value: expectedVolunteers.length, warn: expectedVolunteers.length > 0 },
