@@ -1,4 +1,3 @@
-// TODO Change the survey months to the actual months when the survey is active. The current month represnt the intalization dates that will be phased out for the more more practial months.
 'use client'
 
 import { useState } from 'react'
@@ -8,8 +7,7 @@ import { DAYS, SHIFTS, ROLES } from '../lib/constants'
 // ── Survey window configuration ──────────────────────────────────────────────
 // Adjust these to change when the survey is active.
 // The survey runs during the first full Mon–Sun week of each listed month (0-indexed).
-export const SURVEY_MONTHS = [0, 7] // January (0) and July (6)
-// export const SURVEY_MONTHS = [3,10] // April (3) and November (10)
+export const SURVEY_MONTHS = [3,9]
 
 // ── Date logic ────────────────────────────────────────────────────────────────
 export function getSurveyWindow(year, month) {
@@ -22,7 +20,7 @@ export function getSurveyWindow(year, month) {
   sunday.setHours(23, 59, 59, 999)
   return { start: monday, end: sunday }
 }
-/*
+
 export function isSurveyWeek() {
   const now = new Date()
   const month = now.getMonth()
@@ -30,19 +28,7 @@ export function isSurveyWeek() {
   const { start, end } = getSurveyWindow(now.getFullYear(), month)
   return now >= start && now <= end
 }
-*/
 
-export function isSurveyWeek() {
-  const now = new Date()
-
-  const start = new Date(2026, 6, 13) // July 13, 2026 (month is 0-indexed)
-  start.setHours(0, 0, 0, 0)
-
-  const end = new Date(2026, 6, 19)
-  end.setHours(23, 59, 59, 999)
-
-  return now >= start && now <= end
-}
 
 export function currentSurveyPeriod() {
   const now = new Date()
