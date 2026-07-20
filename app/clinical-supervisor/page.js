@@ -8,6 +8,26 @@ import { getMountainNow, getMountainLabel } from '../../lib/timeUtils'
 import ProviderScheduleView from '../../components/ProviderScheduleView'
 import Live from '../../components/Live'
 
+function dropdownItemStyle(active) {
+  return {
+    width: '100%',
+    textAlign: 'left',
+    padding: '0.6rem 0.75rem',
+    borderRadius: '8px',
+    border: 'none',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? '#fff' : 'var(--text)',
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: 'DM Sans, sans-serif',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.5rem',
+  }
+}
+
 function MobileSidebar({ open, onClose, navItems, activeTab, onSelectTab, showSwitchView, onSwitchView, onSignOut }) {
   function handleItemClick(action) {
     action()
@@ -152,6 +172,7 @@ export default function CSPage() {
 
   const [isMobile, setIsMobile] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [otherOpen, setOtherOpen] = useState(false)
   useEffect(() => {
     // Primary signal: device-based detection via the user-agent string.
     // Secondary signal: a narrow viewport (<428px) also counts as mobile,
@@ -430,11 +451,58 @@ export default function CSPage() {
             </div>
           )}
 
-          <img
-            src="/logo2.png"
-            alt="Logo"
-            style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {!isMobile && (
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setOtherOpen(o => !o)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    fontFamily: 'DM Sans, sans-serif',
+                    fontSize: '0.95rem',
+                    fontWeight: otherOpen ? 600 : 500,
+                    color: otherOpen ? 'var(--text)' : 'var(--muted)',
+                  }}
+                >
+                  Other
+                </button>
+
+                {otherOpen && (
+                  <>
+                    <div onClick={() => setOtherOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+                    <div style={{
+                      position: 'absolute', top: 'calc(100% + 0.9rem)', right: 0,
+                      background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px',
+                      minWidth: '180px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
+                    }}>
+                      <button
+                        onClick={() => { setOtherOpen(false); window.location.href = '/volunteer' }}
+                        style={dropdownItemStyle(false)}
+                      >
+                        Volunteer View
+                      </button>
+                      <button
+                        onClick={async () => { setOtherOpen(false); await supabase.auth.signOut(); window.location.href = '/' }}
+                        style={{ ...dropdownItemStyle(false), color: 'var(--muted)', marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <img
+              src="/logo2.png"
+              alt="Logo"
+              style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
+            />
+          </div>
         </div>
 
         {/* Mobile sidebar — all tabs + Volunteer View + Sign out */}
