@@ -30,6 +30,17 @@ const TEAMS = [
   'Executive Assistant', 'OSSM',
 ]
 
+// ── Desktop header groupings ──────────────────────────────────────────────────
+// Which tab keys live under each top-level desktop menu, in display order.
+// 'volunteers' intentionally appears in both VOLUNTEER and PROVIDER groups —
+// it's a shared shortcut, not evidence of provider access on its own (see
+// PROVIDER_GROUP_CORE_KEYS below).
+const VOLUNTEER_GROUP_KEYS = ['volunteers', 'pipeline', 'dashboard', 'schedule', 'shifts', 'callouts']
+const PROVIDER_GROUP_KEYS  = ['providers', 'volunteers', 'hours', 'create']
+// Keys that must be present (beyond the shared 'volunteers') for the
+// Providers menu to be worth showing at all.
+const PROVIDER_GROUP_CORE_KEYS = ['providers', 'hours', 'create']
+
 // ── RBAC: who may access the admin dashboard's content ───────────────────────
 // A user with role === 'admin' still needs affiliation === 'provider' (Clinical
 // Care Volunteer) OR one of these default_role values to see anything here.
@@ -256,6 +267,169 @@ function LoadMoreButton({ onClick, loading, hasMore, label = 'Load more' }) {
 }
 
 // ── Mobile sidebar (mirrors the volunteer page's MobileSidebar) ──────────────
+// ── Desktop header (logo left; Volunteers / Providers / Other menus right) ──
+// Each top-level button opens a dropdown of the tabs that role has access to
+// within that group. A group's button is only rendered if the current user
+// has at least one tab that belongs to it.
+function dropdownItemStyle(active) {
+  return {
+    width: '100%',
+    textAlign: 'left',
+    padding: '0.6rem 0.75rem',
+    borderRadius: '8px',
+    border: 'none',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? '#fff' : 'var(--text)',
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: 'DM Sans, sans-serif',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.5rem',
+  }
+}
+
+function AdminHeaderMenu({ label, items, activeTab, open, onToggle, onClose, onSelectTab }) {
+  const isActive = items.some(([key]) => key === activeTab)
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={onToggle}
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          fontFamily: 'DM Sans, sans-serif',
+          fontSize: '0.95rem',
+          fontWeight: isActive || open ? 600 : 500,
+          color: isActive || open ? 'var(--text)' : 'var(--muted)',
+        }}
+      >
+        {label}
+      </button>
+
+      {open && (
+        <>
+          <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 0.9rem)', right: 0,
+            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px',
+            minWidth: '200px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
+          }}>
+            {items.map(([key, itemLabel]) => (
+              <button
+                key={key}
+                onClick={() => { onClose(); onSelectTab(key) }}
+                style={dropdownItemStyle(activeTab === key)}
+              >
+                {itemLabel}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function AdminDesktopHeader({
+  activeTab, onSelectTab,
+  volunteerItems, providerItems, otherItems,
+  showVolunteers, showProviders,
+  openMenu, onToggleMenu, onCloseMenu,
+  onSwitchView, onSignOut,
+}) {
+  const otherMenuActive = otherItems.some(([key]) => key === activeTab)
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', padding: '0.5rem 0' }}>
+      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+
+      <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
+        {showVolunteers && (
+          <AdminHeaderMenu
+            label="Volunteers"
+            items={volunteerItems}
+            activeTab={activeTab}
+            open={openMenu === 'volunteers'}
+            onToggle={() => onToggleMenu('volunteers')}
+            onClose={onCloseMenu}
+            onSelectTab={onSelectTab}
+          />
+        )}
+
+        {showProviders && (
+          <AdminHeaderMenu
+            label="Providers"
+            items={providerItems}
+            activeTab={activeTab}
+            open={openMenu === 'providers'}
+            onToggle={() => onToggleMenu('providers')}
+            onClose={onCloseMenu}
+            onSelectTab={onSelectTab}
+          />
+        )}
+
+        {/* "Other" always renders — it's also home to Volunteer View / Sign out */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => onToggleMenu('other')}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '0.95rem',
+              fontWeight: otherMenuActive || openMenu === 'other' ? 600 : 500,
+              color: otherMenuActive || openMenu === 'other' ? 'var(--text)' : 'var(--muted)',
+            }}
+          >
+            Other
+          </button>
+
+          {openMenu === 'other' && (
+            <>
+              <div onClick={onCloseMenu} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 0.9rem)', right: 0,
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px',
+                minWidth: '210px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
+              }}>
+                <button onClick={() => { onCloseMenu(); onSwitchView() }} style={dropdownItemStyle(false)}>
+                  Volunteer View
+                </button>
+
+                {otherItems.map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => { onCloseMenu(); onSelectTab(key) }}
+                    style={dropdownItemStyle(activeTab === key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+
+                <button
+                  onClick={() => { onCloseMenu(); onSignOut() }}
+                  style={{ ...dropdownItemStyle(false), color: 'var(--muted)', marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </nav>
+    </div>
+  )
+}
+
 function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitchView, onSignOut }) {
   function handleItemClick(action) {
     action()
@@ -495,6 +669,7 @@ export default function AdminPage() {
   // wide width, but a squeezed-down window still gets it.
   const [isMobile, setIsMobile] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [openMenu, setOpenMenu] = useState(null) // 'volunteers' | 'providers' | 'other' | null — desktop header only
   useEffect(() => {
     const ua = navigator.userAgent || navigator.vendor || ''
     const isMobileUA = /android|iphone|ipad|ipod|iemobile|blackberry|opera mini|mobile/i.test(ua)
@@ -587,6 +762,27 @@ export default function AdminPage() {
   if (canSeeLanguageCoverage) {
     const volIdx = tabItems.findIndex(([key]) => key === 'volunteers')
     tabItems.splice(volIdx === -1 ? tabItems.length : volIdx + 1, 0, ['languages', 'Languages'])
+  }
+
+  // ── Desktop header groupings — derived from tabItems, so they automatically
+  // respect whatever this role does/doesn't have access to. ──────────────────
+  const volunteerMenuItems = VOLUNTEER_GROUP_KEYS
+    .map(k => tabItems.find(([key]) => key === k))
+    .filter(Boolean)
+  const providerMenuItems = PROVIDER_GROUP_KEYS
+    .map(k => tabItems.find(([key]) => key === k))
+    .filter(Boolean)
+  const groupedKeySet = new Set([...VOLUNTEER_GROUP_KEYS, ...PROVIDER_GROUP_KEYS])
+  const otherMenuItems = tabItems.filter(([key]) => !groupedKeySet.has(key))
+
+  const showVolunteersMenu = volunteerMenuItems.length > 0
+  const showProvidersMenu  = providerMenuItems.some(([key]) => PROVIDER_GROUP_CORE_KEYS.includes(key))
+
+  function toggleHeaderMenu(name) {
+    setOpenMenu(m => (m === name ? null : name))
+  }
+  function closeHeaderMenu() {
+    setOpenMenu(null)
   }
 
   const DAY_ORDER   = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6 }
@@ -1416,20 +1612,24 @@ export default function AdminPage() {
             />
           </div>
         ) : (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <div>
-              <h1 style={{ fontSize: '1.4rem', fontWeight: 600, letterSpacing: '-0.02em' }}>Admin Dashboard</h1>
-              <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Bingham Family Clinic &nbsp;·&nbsp;<span style={{ fontFamily: 'DM Mono, monospace' }}>{currentTime.toLocaleTimeString('en-US', { timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit' })} {tzLabel}</span></p>
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <button onClick={() => window.location.href = '/volunteer'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.4rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem' }}>Volunteer View</button>
-              <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/' }} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', padding: '0.4rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem' }}>Sign out</button>
-            </div>
-          </div>
+          <AdminDesktopHeader
+            activeTab={tab}
+            onSelectTab={switchTab}
+            volunteerItems={volunteerMenuItems}
+            providerItems={providerMenuItems}
+            otherItems={otherMenuItems}
+            showVolunteers={showVolunteersMenu}
+            showProviders={showProvidersMenu}
+            openMenu={openMenu}
+            onToggleMenu={toggleHeaderMenu}
+            onCloseMenu={closeHeaderMenu}
+            onSwitchView={() => { window.location.href = '/volunteer' }}
+            onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
+          />
         )}
 
-        {/* Stats — on mobile, only shown on the Live tab; unchanged (always shown) on desktop */}
-        {(!isMobile || tab === 'dashboard') && (
+        {/* Stats — only shown on the Live tab */}
+        {tab === 'dashboard' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
             {[
               { label: 'Not Clocked In',    value: expectedVolunteers.length, warn: expectedVolunteers.length > 0 },
@@ -1444,16 +1644,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Tabs — pill row on desktop; on mobile these live in the sidebar instead */}
-        {!isMobile && (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-            {tabItems.map(([key, label]) => (
-              <button key={key} onClick={() => switchTab(key)} style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: tab === key ? 'var(--accent)' : 'var(--surface)', color: tab === key ? '#fff' : 'var(--muted)', border: tab === key ? 'none' : '1px solid var(--border)' }}>
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Tabs — desktop tabs now live in the header's Volunteers/Providers/Other menus; mobile uses the sidebar */}
 
         {/* ── LIVE TAB ──────────────────────────────────────────────────────── */}
         {tab === 'dashboard' && (
