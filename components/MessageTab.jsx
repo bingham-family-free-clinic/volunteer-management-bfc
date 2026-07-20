@@ -457,7 +457,7 @@ export function MessageTab({
           sender:profiles!messages_sender_id_fkey(full_name, role)
         `)
         .order('created_at', { ascending: false })
-        .limit(MSG_PAGE_SIZE * 2), // fetch extra to account for reply rows
+        .limit(MSG_PAGE_SIZE * 5), // fetch extra to account for reply rows
       supabase
         .from('message_reads')
         .select('message_id')
@@ -477,6 +477,16 @@ export function MessageTab({
     if (topLevel.length > 0) {
       setMsgCursor(topLevel[topLevel.length - 1].created_at)
     }
+
+    console.log("Message pagination debug:", {
+      totalFetched: fetched.length,
+      topLevelCount: topLevel.length,
+      replyCount: fetched.filter(m => m.parent_message_id).length,
+      pageSize: MSG_PAGE_SIZE,
+      hasMoreCalculated: topLevel.length >= MSG_PAGE_SIZE,
+      oldestTopLevel: topLevel[topLevel.length - 1]?.created_at,
+      newestTopLevel: topLevel[0]?.created_at,
+    })
 
     const readSet = new Set((reads || []).map(r => r.message_id))
     setReadMessageIds(readSet)
