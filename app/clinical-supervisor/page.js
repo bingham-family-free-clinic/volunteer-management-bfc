@@ -87,6 +87,13 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
                 minWidth: '210px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
               }}>
+                <button
+                  onClick={() => { onCloseOther(); onSwitchView() }}
+                  style={dropdownItemStyle(false)}
+                >
+                  Volunteer View
+                </button>
+
                 {OTHER_TABS.map(([key, label]) => (
                   <button
                     key={key}
@@ -98,15 +105,8 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
                 ))}
 
                 <button
-                  onClick={() => { onCloseOther(); onSwitchView() }}
-                  style={{ ...dropdownItemStyle(false), marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}
-                >
-                  Volunteer View
-                </button>
-
-                <button
                   onClick={() => { onCloseOther(); onSignOut() }}
-                  style={{ ...dropdownItemStyle(false), color: 'var(--muted)' }}
+                  style={{ ...dropdownItemStyle(false), color: 'var(--muted)', marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}
                 >
                   Sign out
                 </button>
