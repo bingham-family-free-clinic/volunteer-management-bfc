@@ -3,10 +3,121 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
-import { getMountainNow, getMountainLabel } from '../../lib/timeUtils'
+import { getMountainNow } from '../../lib/timeUtils'
 // import LunchScheduler from '../../components/LunchScheduler'
 import ProviderScheduleView from '../../components/ProviderScheduleView'
 import Live from '../../components/Live'
+
+const MAIN_TABS = [
+  ['live', 'Live'],
+  ['schedule', 'Schedule'],
+]
+
+const OTHER_TABS = [
+  ['languages', 'Language Coverage'],
+  ['providers', 'Providers'],
+]
+
+function dropdownItemStyle(active) {
+  return {
+    width: '100%',
+    textAlign: 'left',
+    padding: '0.6rem 0.75rem',
+    borderRadius: '8px',
+    border: 'none',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? '#fff' : 'var(--text)',
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: 'DM Sans, sans-serif',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.5rem',
+  }
+}
+
+function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onCloseOther, onSwitchView, onSignOut }) {
+  const otherActive = OTHER_TABS.some(([key]) => key === activeTab)
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
+      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+
+      <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
+        {MAIN_TABS.map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => onSelectTab(key)}
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem',
+              fontWeight: activeTab === key ? 600 : 500,
+              color: activeTab === key ? 'var(--text)' : 'var(--muted)',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={onToggleOther}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '0.95rem',
+              fontWeight: otherActive || otherOpen ? 600 : 500,
+              color: otherActive || otherOpen ? 'var(--text)' : 'var(--muted)',
+            }}
+          >
+            Other
+          </button>
+
+          {otherOpen && (
+            <>
+              <div onClick={onCloseOther} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 0.9rem)', right: 0,
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px',
+                minWidth: '210px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
+              }}>
+                <button
+                  onClick={() => { onCloseOther(); onSwitchView() }}
+                  style={dropdownItemStyle(false)}
+                >
+                  Volunteer View
+                </button>
+
+                {OTHER_TABS.map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => { onCloseOther(); onSelectTab(key) }}
+                    style={dropdownItemStyle(activeTab === key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+
+                <button
+                  onClick={() => { onCloseOther(); onSignOut() }}
+                  style={{ ...dropdownItemStyle(false), color: 'var(--muted)', marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </nav>
+    </div>
+  )
+}
 
 function MobileSidebar({ open, onClose, navItems, activeTab, onSelectTab, showSwitchView, onSwitchView, onSignOut }) {
   function handleItemClick(action) {
@@ -152,6 +263,7 @@ export default function CSPage() {
 
   const [isMobile, setIsMobile] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [otherOpen, setOtherOpen] = useState(false)
   useEffect(() => {
     // Primary signal: device-based detection via the user-agent string.
     // Secondary signal: a narrow viewport (<428px) also counts as mobile,
@@ -287,14 +399,6 @@ export default function CSPage() {
 
   const card       = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
   const labelStyle = { display: 'block', fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.35rem', textTransform: 'uppercase', letterSpacing: '0.05em' }
-  const tzLabel    = getMountainLabel()
-  const CS_TABS = [
-    ['live', 'Live'],
-    ['schedule', 'Schedule'],
-    ['languages', 'Language Coverage'],
-    // ['lunch', 'Lunch'],
-    ['providers', 'Providers'],
-  ]
 
   // Clickable language bubble
   function LangBubble({ lang, highlighted, day, shift }) {
@@ -382,96 +486,42 @@ export default function CSPage() {
         })()}
 
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
-          {isMobile ? (
+        {isMobile ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+            <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label="Open menu"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                gap: '6px',
-                background: 'none',
-                border: 'none',
-                width: '56px',
-                height: '56px',
-                cursor: 'pointer',
-                padding: '0',
-                alignItems: 'center',
-              }}
+              style={{ background: 'none', border: 'none', padding: '0.4rem', cursor: 'pointer' }}
             >
-              <span style={{ width: '28px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
-              <span style={{ width: '28px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
-              <span style={{ width: '28px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--text)" strokeWidth="1.8" strokeLinecap="round">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
             </button>
-          ) : (
-            <div>
-              <h1 style={{ fontSize: '1.3rem', fontWeight: 600, letterSpacing: '-0.02em', marginBottom: '0.25rem' }}>
-                Clinical Supervisor and Office Manager Dashboard
-              </h1>
-
-              <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-                {currentTime.toLocaleDateString('en-US', {
-                  timeZone: 'America/Denver',
-                  weekday: 'long',
-                  month: 'long',
-                  day: 'numeric'
-                })}
-                &nbsp;·&nbsp;
-                <span style={{ fontFamily: 'DM Mono, monospace' }}>
-                  {currentTime.toLocaleTimeString('en-US', {
-                    timeZone: 'America/Denver',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })} {tzLabel}
-                </span>
-              </p>
-            </div>
-          )}
-
-          <img
-            src="/logo2.png"
-            alt="Logo"
-            style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
+          </div>
+        ) : (
+          <DesktopHeader
+            activeTab={tab}
+            onSelectTab={setTab}
+            otherOpen={otherOpen}
+            onToggleOther={() => setOtherOpen(o => !o)}
+            onCloseOther={() => setOtherOpen(false)}
+            onSwitchView={() => { window.location.href = '/volunteer' }}
+            onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
           />
-        </div>
+        )}
 
         {/* Mobile sidebar — all tabs + Volunteer View + Sign out */}
         <MobileSidebar
           open={isMobile && sidebarOpen}
           onClose={() => setSidebarOpen(false)}
-          navItems={CS_TABS.map(([key, label]) => ({ key, label }))}
+          navItems={[...MAIN_TABS, ...OTHER_TABS].map(([key, label]) => ({ key, label }))}
           activeTab={tab}
           onSelectTab={setTab}
           showSwitchView={true}
           onSwitchView={() => { window.location.href = '/volunteer' }}
           onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
         />
-
-        {!isMobile && (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-           {CS_TABS.map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setTab(key)}
-                style={{
-                  padding: '0.5rem 1rem',
-                  borderRadius: '8px',
-                  fontSize: '0.875rem',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  fontFamily: 'DM Sans, sans-serif',
-                  background: tab === key ? 'var(--accent)' : 'var(--surface)',
-                  color: tab === key ? '#fff' : 'var(--muted)',
-                  border: tab === key ? 'none' : '1px solid var(--border)'
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* ── LIVE TAB ───────────────────────────────────────── */}
         {tab === 'live' && (

@@ -691,7 +691,27 @@ const TABS = [
   { key: 'missionaries', label: 'Missionaries' },
 ]
 
-function DesktopHeader({ activeTab, onSelectTab, onSwitchView, onSignOut }) {
+function dropdownItemStyle(active) {
+  return {
+    width: '100%',
+    textAlign: 'left',
+    padding: '0.6rem 0.75rem',
+    borderRadius: '8px',
+    border: 'none',
+    background: active ? 'var(--accent)' : 'transparent',
+    color: active ? '#fff' : 'var(--text)',
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: 'DM Sans, sans-serif',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.5rem',
+  }
+}
+
+function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onCloseOther, onSwitchView, onSignOut }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
       <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
@@ -710,25 +730,46 @@ function DesktopHeader({ activeTab, onSelectTab, onSwitchView, onSignOut }) {
             {t.label}
           </button>
         ))}
-        <button
-          onClick={onSwitchView}
-          style={{
-            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-            fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem', fontWeight: 500, color: 'var(--muted)',
-          }}
-        >
-          Switch View
-        </button>
-        <button
-          onClick={onSignOut}
-          style={{
-            background: 'none', border: '1px solid var(--border)', borderRadius: '8px',
-            padding: '0.4rem 0.9rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
-            fontSize: '0.85rem', color: 'var(--muted)',
-          }}
-        >
-          Sign out
-        </button>
+
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={onToggleOther}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '0.95rem',
+              fontWeight: otherOpen ? 600 : 500,
+              color: otherOpen ? 'var(--text)' : 'var(--muted)',
+            }}
+          >
+            Other
+          </button>
+
+          {otherOpen && (
+            <>
+              <div onClick={onCloseOther} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 0.9rem)', right: 0,
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px',
+                minWidth: '180px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
+              }}>
+                <button onClick={() => { onCloseOther(); onSwitchView() }} style={dropdownItemStyle(false)}>
+                  Switch View
+                </button>
+                <button
+                  onClick={() => { onCloseOther(); onSignOut() }}
+                  style={{ ...dropdownItemStyle(false), color: 'var(--muted)', marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </nav>
     </div>
   )
@@ -831,6 +872,7 @@ function OSSMPageInner() {
   const [tab, setTab] = useState('live')
   const [isMobile, setIsMobile] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [otherOpen, setOtherOpen] = useState(false)
 
   // Missionaries directory (shared by both tabs)
   const [missionaries, setMissionaries] = useState([])
@@ -972,7 +1014,15 @@ function OSSMPageInner() {
         {isMobile ? (
           <MobileTopBar onOpenSidebar={() => setSidebarOpen(true)} />
         ) : (
-          <DesktopHeader activeTab={tab} onSelectTab={setTab} onSwitchView={handleSwitchView} onSignOut={handleSignOut} />
+          <DesktopHeader
+            activeTab={tab}
+            onSelectTab={setTab}
+            otherOpen={otherOpen}
+            onToggleOther={() => setOtherOpen(o => !o)}
+            onCloseOther={() => setOtherOpen(false)}
+            onSwitchView={handleSwitchView}
+            onSignOut={handleSignOut}
+          />
         )}
 
         {tab === 'live' && (
