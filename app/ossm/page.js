@@ -745,7 +745,7 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
               color: otherOpen ? 'var(--text)' : 'var(--muted)',
             }}
           >
-            Account
+            Other
           </button>
 
           {otherOpen && (
