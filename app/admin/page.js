@@ -1386,76 +1386,163 @@ export default function AdminPage() {
     setCreatingShift(false)
   }
   async function handleAddEntry() {
-    if (!addVolId) return
-    setAddingEntry(true)
+    if (!addVolId) return;
+    setAddingEntry(true);
 
-    const vol = volunteers.find(v => v.id === addVolId)
+    const vol = volunteers.find(v => v.id === addVolId);
 
     // --- DIRECTOR RBAC CHECK ---
-    let needsProfileUpdate = false
+    let needsProfileUpdate = false;
+
     if (ADMIN_ROLES.includes(addingRole)) {
       if (vol?.default_role !== addingRole) {
         if (profile?.default_role !== 'Director') {
-          showMessage(`Only Directors can assign volunteers without default role = ${addingRole} to ${addingRole}.`, 'error')
-          setAddingEntry(false)
-          return
+          showMessage(
+            `Only Directors can assign volunteers without default_role = ${addingRole} to ${addingRole}.`,
+            'error'
+          );
+          setAddingEntry(false);
+          return;
         }
-        needsProfileUpdate = true
+
+        needsProfileUpdate = true;
       }
     }
 
-    const currentEntries = getEntries(scheduleDay, scheduleShift, addingRole)
-    const effectiveCount = currentEntries.reduce((sum, entry) => {
-      if (addStartDate && entry.end_date && entry.end_date < addStartDate) return sum
-      if (addEndDate && entry.start_date && entry.start_date > addEndDate) return sum
-      return sum + (entry.week_pattern === 'every' ? 1 : 0.5)
-    }, 0)
+    const currentEntries = getEntries(scheduleDay, scheduleShift, addingRole);
 
-    const limit = ROLE_SUGGESTIONS[addingRole]
-    if (limit && effectiveCount >= limit && !canOverrideRoleLimits) { 
-      showMessage(`Limit reached for ${addingRole} (${limit})`, 'error'); 
-      setAddingEntry(false); 
-      return 
+    const effectiveCount = currentEntries.reduce((sum, entry) => {
+      if (addStartDate && entry.end_date && entry.end_date < addStartDate)
+        return sum;
+      if (addEndDate && entry.start_date && entry.start_date > addEndDate)
+        return sum;
+
+      return sum + (entry.week_pattern === 'every' ? 1 : 0.5);
+    }, 0);
+
+    const limit = ROLE_SUGGESTIONS[addingRole];
+
+    if (limit && effectiveCount >= limit && !canOverrideRoleLimits) {
+      showMessage(`Limit reached for ${addingRole} (${limit})`, 'error');
+      setAddingEntry(false);
+      return;
     }
-    if (limit && effectiveCount >= limit && canOverrideRoleLimits) { 
-      showMessage(`Limit for ${addingRole} (${limit}) exceeded — adding anyway`, 'success') 
+
+    if (limit && effectiveCount >= limit && canOverrideRoleLimits) {
+      showMessage(
+        `Limit for ${addingRole} (${limit}) exceeded — adding anyway`,
+        'success'
+      );
     }
 
     const exists = schedule.find(s => {
-      if (s.volunteer_id !== addVolId || s.day_of_week !== scheduleDay || s.shift_time !== scheduleShift || s.role !== addingRole) return false
-      const aStart = s.start_date || '0000-01-01'; const aEnd = s.end_date || '9999-12-31'
-      const bStart = addStartDate || '0000-01-01'; const bEnd = addEndDate || '9999-12-31'
-      return aStart <= bEnd && bStart <= aEnd
-    })
-    if (exists) { showMessage('Volunteer already assigned to this slot', 'error'); setAddingEntry(false); return }
+      if (
+        s.volunteer_id !== addVolId ||
+        s.day_of_week !== scheduleDay ||
+        s.shift_time !== scheduleShift ||
+        s.role !== addingRole
+      ) {
+        return false;
+      }
+
+      const aStart = s.start_date || '0000-01-01';
+      const aEnd = s.end_date || '9999-12-31';
+      const bStart = addStartDate || '0000-01-01';
+      const bEnd = addEndDate || '9999-12-31';
+
+      return aStart <= bEnd && bStart <= aEnd;
+    });
+
+    if (exists) {
+      showMessage('Volunteer already assigned to this slot', 'error');
+      setAddingEntry(false);
+      return;
+    }
 
     const { data: inserted, error } = await supabase
       .from('schedule')
-      .insert({ volunteer_id: addVolId, day_of_week: scheduleDay, shift_time: scheduleShift, role: addingRole, start_date: addStartDate || null, end_date: addEndDate || null, week_pattern: addWeekPattern || 'every', notes: addNotes || null })
-      .select('id,volunteer_id,day_of_week,shift_time,role,start_date,end_date,week_pattern,notes,profiles(id,full_name)')
-      .single()
+      .insert({
+        volunteer_id: addVolId,
+        day_of_week: scheduleDay,
+        shift_time: scheduleShift,
+        role: addingRole,
+        start_date: addStartDate || null,
+        end_date: addEndDate || null,
+        week_pattern: addWeekPattern || 'every',
+        notes: addNotes || null,
+      })
+      .select(
+        'id, volunteer_id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, profiles(id, full_name)'
+      )
+      .single();
 
-    if (error) { showMessage(error.message, 'error'); setAddingEntry(false); return }
+    if (error) {
+      showMessage(error.message, 'error');
+      setAddingEntry(false);
+      return;
+    }
 
-    // --- SEAMLESS PROFILE UPDATE ---
+    // --- AUTOMATIC PROFILE UPDATE FOR ADMIN ROLES ---
     if (needsProfileUpdate) {
       const { error: profileErr } = await supabase
         .from('profiles')
-        .update({ default_role: addingRole, affiliation: 'admin' })
-        .eq('id', addVolId)
+        .update({
+          default_role: addingRole,
+          role: 'admin',
+        })
+        .eq('id', addVolId);
 
-      if (!profileErr) {
-        setVolunteers(prev => prev.map(v => v.id === addVolId ? { ...v, default_role: addingRole, affiliation: 'admin' } : v))
+      if (profileErr) {
+        console.error(profileErr);
+        showMessage(
+          `Volunteer was scheduled, but their profile could not be updated: ${profileErr.message}`,
+          'error'
+        );
+      } else {
+        setVolunteers(prev =>
+          prev.map(v =>
+            v.id === addVolId
+              ? {
+                  ...v,
+                  default_role: addingRole,
+                  role: 'admin',
+                }
+              : v
+          )
+        );
       }
     }
 
-    showMessage('Volunteer assigned!', 'success')
-    const overrodeLimit = limit && effectiveCount >= limit && canOverrideRoleLimits
-    await audit('assigned_schedule', 'schedule', inserted?.id, vol?.full_name, `${scheduleDay} ${scheduleShift} — ${addingRole}${overrodeLimit ? ` (limit of ${limit} overridden)` : ''}`)
-    setAddingRole(null); setAddVolId(''); setAddStartDate(''); setAddEndDate(''); setAddWeekPattern('every'); setAddNotes('')
+    showMessage('Volunteer assigned!', 'success');
+
+    const overrodeLimit =
+      limit && effectiveCount >= limit && canOverrideRoleLimits;
+
+    await audit(
+      'assigned_schedule',
+      'schedule',
+      inserted?.id,
+      vol?.full_name,
+      `${scheduleDay} ${scheduleShift} — ${addingRole}${
+        overrodeLimit ? ` (limit of ${limit} overridden)` : ''
+      }`
+    );
+
+    setAddingRole(null);
+    setAddVolId('');
+    setAddStartDate('');
+    setAddEndDate('');
+    setAddWeekPattern('every');
+    setAddNotes('');
+
     // Append to local schedule — no full re-fetch
-    setSchedule(prev => [...prev, inserted].sort((a, b) => (a.role || '').localeCompare(b.role || '')))
-    setAddingEntry(false)
+    setSchedule(prev =>
+      [...prev, inserted].sort((a, b) =>
+        (a.role || '').localeCompare(b.role || '')
+      )
+    );
+
+    setAddingEntry(false);
   }
 
   async function handleRemoveEntry(id) {
