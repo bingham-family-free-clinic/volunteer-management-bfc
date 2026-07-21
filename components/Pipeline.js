@@ -592,45 +592,6 @@ function CalendarTab({
         )}
       </div>
 
-      {/* ── Manually schedule an interview ── */}
-      <div style={card}>
-        <p style={secLabel}>Manually Schedule Interview</p>
-        <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
-          Book an interview time for an applicant directly, as an alternative to them booking it themselves via their
-          scheduling link.
-        </p>
-        {interviewApplicants.length === 0 ? (
-          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No applicants currently in the Interview stage.</p>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr auto', gap: '0.6rem', alignItems: 'end' }}>
-            <div>
-              <label style={labelStyle}>Applicant</label>
-              <select value={manualForm.applicantId} onChange={e => setManualForm(f => ({ ...f, applicantId: e.target.value }))} style={inputStyle}>
-                <option value="">Select applicant…</option>
-                {interviewApplicants.map(a => (
-                  <option key={a.id} value={a.id}>{a.full_name} — {a.email}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Date</label>
-              <input type="date" value={manualForm.date} onChange={e => setManualForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
-            </div>
-            <div>
-              <label style={labelStyle}>Time (optional)</label>
-              <input type="time" value={manualForm.time} onChange={e => setManualForm(f => ({ ...f, time: e.target.value }))} style={inputStyle} />
-            </div>
-            <button
-              onClick={scheduleManual}
-              disabled={schedulingManual || !manualForm.applicantId || !manualForm.date}
-              style={solidBtn(C.warn, schedulingManual || !manualForm.applicantId || !manualForm.date)}
-            >
-              {schedulingManual ? 'Scheduling...' : 'Schedule'}
-            </button>
-          </div>
-        )}
-      </div>
-
       {/* ── Blocked times ── */}
       <div style={card}>
         <p style={secLabel}>Blocked Times</p>
@@ -684,7 +645,46 @@ function CalendarTab({
         )}
       </div>
 
-      {/* ── Scheduling links ── */}
+      {/* ── Manually schedule an interview ── */}
+      <div style={card}>
+        <p style={secLabel}>Manually Schedule Interview</p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+          Book an interview time for an applicant directly, as an alternative to them booking it themselves via their
+          scheduling link.
+        </p>
+        {interviewApplicants.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No applicants currently in the Interview stage.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr auto', gap: '0.6rem', alignItems: 'end' }}>
+            <div>
+              <label style={labelStyle}>Applicant</label>
+              <select value={manualForm.applicantId} onChange={e => setManualForm(f => ({ ...f, applicantId: e.target.value }))} style={inputStyle}>
+                <option value="">Select applicant…</option>
+                {interviewApplicants.map(a => (
+                  <option key={a.id} value={a.id}>{a.full_name} — {a.email}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Date</label>
+              <input type="date" value={manualForm.date} onChange={e => setManualForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Time (optional)</label>
+              <input type="time" value={manualForm.time} onChange={e => setManualForm(f => ({ ...f, time: e.target.value }))} style={inputStyle} />
+            </div>
+            <button
+              onClick={scheduleManual}
+              disabled={schedulingManual || !manualForm.applicantId || !manualForm.date}
+              style={solidBtn(C.warn, schedulingManual || !manualForm.applicantId || !manualForm.date)}
+            >
+              {schedulingManual ? 'Scheduling...' : 'Schedule'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Scheduling links ── 
       <div style={card}>
         <p style={secLabel}>Applicant Scheduling Links</p>
         <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
@@ -708,7 +708,7 @@ function CalendarTab({
             ))}
           </div>
         )}
-      </div>
+      </div>*/}
     </div>
   )
 }
