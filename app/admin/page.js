@@ -1396,7 +1396,7 @@ export default function AdminPage() {
     if (ADMIN_ROLES.includes(addingRole)) {
       if (vol?.default_role !== addingRole) {
         if (profile?.default_role !== 'Director') {
-          showMessage(`Only Directors can assign non-administrative volunteers to ${addingRole}.`, 'error')
+          showMessage(`Only Directors can assign volunteers without default role = ${addingRole} to ${addingRole}.`, 'error')
           setAddingEntry(false)
           return
         }
@@ -1495,55 +1495,102 @@ export default function AdminPage() {
   }
   async function handleSaveEdit() {
     setSaving(true)
+
     if (editForm.end_date && !editForm.status_reason) {
       showMessage('Please select a deactivation reason when setting an end date.', 'error')
       setSaving(false)
       return
     }
 
-    // --- NEW ADMIN PERMISSION LOGIC ---
-    let finalAffiliation = editForm.affiliation;
-    const isNewAdminRole = ADMIN_ROLES.includes(editForm.default_role) && editForm.default_role !== selectedVolunteer.default_role;
+    // --- ADMIN PERMISSION LOGIC ---
+    let finalRole = editForm.role
+
+    const isNewAdminRole =
+      ADMIN_ROLES.includes(editForm.default_role) &&
+      editForm.default_role !== selectedVolunteer.default_role
 
     if (isNewAdminRole) {
       if (profile?.default_role !== 'Director') {
-        showMessage('Only Directors can assign administrative default roles.', 'error');
-        setSaving(false);
-        return;
+        showMessage('Only Directors can assign administrative default roles.', 'error')
+        setSaving(false)
+        return
       }
-      finalAffiliation = 'admin'; // Automatically update affiliation
-    }
-    // ----------------------------------
 
-    const isProvider = finalAffiliation === 'provider'
-    const isIntern   = finalAffiliation === 'intern'
-    const isMission  = finalAffiliation === 'missionary'
-    const isStudent  = finalAffiliation === 'student'
+      // Automatically update role when assigning an admin default role
+      finalRole = 'admin'
+    }
+    // -------------------------------
+
+    const isProvider = editForm.affiliation === 'provider'
+    const isIntern   = editForm.affiliation === 'intern'
+    const isMission  = editForm.affiliation === 'missionary'
+    const isStudent  = editForm.affiliation === 'student'
 
     const updates = {
-      full_name: editForm.full_name, phone: editForm.phone, affiliation: editForm.affiliation || null,
-      credentials: editForm.credentials || null, languages: editForm.languages, role: editForm.role,
-      sma_name: isMission ? (editForm.sma_name||null) : null, sma_contact: isMission ? (editForm.sma_contact||null) : null,
-      school: isStudent ? (editForm.school||null) : null, major: isStudent ? (editForm.major||null) : null,
-      advisor_name: isIntern ? (editForm.advisor_name||null) : null, advisor_contact: isIntern ? (editForm.advisor_contact||null) : null,
-      intern_school: isIntern ? (editForm.intern_school||null) : null, intern_department: isIntern ? (editForm.intern_department||null) : null,
-      license_exp: isProvider ? (editForm.license_exp||null) : null, bls_exp: isProvider ? (editForm.bls_exp||null) : null,
-      dea_exp: isProvider ? (editForm.dea_exp||null) : null, ftca_exp: isProvider ? (editForm.ftca_exp||null) : null,
-      tb_exp: isProvider ? (editForm.tb_exp||null) : null,
+      full_name: editForm.full_name,
+      phone: editForm.phone,
+      affiliation: editForm.affiliation || null,
+      credentials: editForm.credentials || null,
+      languages: editForm.languages,
+      role: finalRole,
+
+      sma_name: isMission ? (editForm.sma_name || null) : null,
+      sma_contact: isMission ? (editForm.sma_contact || null) : null,
+
+      school: isStudent ? (editForm.school || null) : null,
+      major: isStudent ? (editForm.major || null) : null,
+
+      advisor_name: isIntern ? (editForm.advisor_name || null) : null,
+      advisor_contact: isIntern ? (editForm.advisor_contact || null) : null,
+      intern_school: isIntern ? (editForm.intern_school || null) : null,
+      intern_department: isIntern ? (editForm.intern_department || null) : null,
+
+      license_exp: isProvider ? (editForm.license_exp || null) : null,
+      bls_exp: isProvider ? (editForm.bls_exp || null) : null,
+      dea_exp: isProvider ? (editForm.dea_exp || null) : null,
+      ftca_exp: isProvider ? (editForm.ftca_exp || null) : null,
+      tb_exp: isProvider ? (editForm.tb_exp || null) : null,
+
       default_role: editForm.default_role || null,
       end_date: editForm.end_date || null,
-      status_reason: editForm.end_date ? (editForm.status_reason || null) : null,
+      status_reason: editForm.end_date
+        ? (editForm.status_reason || null)
+        : null,
       team: editForm.team || null,
     }
-    const { error } = await supabase.from('profiles').update(updates).eq('id', selectedVolunteer.id)
-    if (error) { showMessage(error.message, 'error'); setSaving(false); return }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', selectedVolunteer.id)
+
+    if (error) {
+      showMessage(error.message, 'error')
+      setSaving(false)
+      return
+    }
+
     showMessage('Profile updated!', 'success')
-    await audit('edited_volunteer', 'volunteer', selectedVolunteer.id, selectedVolunteer.full_name)
+
+    await audit(
+      'edited_volunteer',
+      'volunteer',
+      selectedVolunteer.id,
+      selectedVolunteer.full_name
+    )
+
     // Patch local volunteer list — no round-trip SELECT
-    const fresh = { ...selectedVolunteer, ...updates }
+    const fresh = {
+      ...selectedVolunteer,
+      ...updates,
+    }
+
     setEditing(false)
     setSelectedVolunteer(fresh)
-    setVolunteers(prev => prev.map(v => v.id === selectedVolunteer.id ? fresh : v))
+    setVolunteers(prev =>
+      prev.map(v => (v.id === selectedVolunteer.id ? fresh : v))
+    )
+
     setSaving(false)
   }
 
