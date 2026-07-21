@@ -436,6 +436,11 @@ function CalendarTab({
   const [blockForm,  setBlockForm]  = useState(EMPTY_BLOCK_FORM)
   const [savingBlock, setSavingBlock] = useState(false)
 
+  // Manual interview scheduling (admin picks an applicant + a date/time directly)
+  const EMPTY_MANUAL_FORM = { applicantId: '', date: '', time: '' }
+  const [manualForm,      setManualForm]      = useState(EMPTY_MANUAL_FORM)
+  const [schedulingManual, setSchedulingManual] = useState(false)
+
   useEffect(() => { load() }, [])
 
   async function load() {
@@ -466,6 +471,38 @@ function CalendarTab({
     if (error) msg(`Failed to cancel: ${error.message}`, 'error')
     else { msg('Interview cancelled'); await load() }
     setCancellingId(null)
+  }
+
+  async function scheduleManual() {
+    if (!manualForm.applicantId || !manualForm.date) return
+    setSchedulingManual(true)
+    const iso = manualForm.time
+      ? new Date(`${manualForm.date}T${manualForm.time}`).toISOString()
+      : new Date(`${manualForm.date}T00:00`).toISOString()
+
+    const { error: apptError } = await supabase.from('interview_appointments').insert({
+      applicant_id: manualForm.applicantId,
+      scheduled_at: iso,
+      status:       'booked',
+      source:       'admin',
+    })
+    if (apptError) {
+      msg(`Failed to schedule: ${apptError.message}`, 'error')
+      setSchedulingManual(false)
+      return
+    }
+
+    // Keep the applicant record's cached scheduled time in sync (used to gate
+    // moving an applicant to onboarding on the Pipeline tab).
+    const { error: applicantError } = await supabase.from('volunteer_applications')
+      .update({ interview_scheduled_at: iso })
+      .eq('id', manualForm.applicantId)
+    if (applicantError) msg(`Interview booked, but failed to update applicant record: ${applicantError.message}`, 'error')
+    else msg('Interview scheduled')
+
+    setManualForm(EMPTY_MANUAL_FORM)
+    await load()
+    setSchedulingManual(false)
   }
 
   async function addBlock() {
@@ -551,6 +588,45 @@ function CalendarTab({
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Manually schedule an interview ── */}
+      <div style={card}>
+        <p style={secLabel}>Manually Schedule Interview</p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+          Book an interview time for an applicant directly, as an alternative to them booking it themselves via their
+          scheduling link.
+        </p>
+        {interviewApplicants.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No applicants currently in the Interview stage.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr auto', gap: '0.6rem', alignItems: 'end' }}>
+            <div>
+              <label style={labelStyle}>Applicant</label>
+              <select value={manualForm.applicantId} onChange={e => setManualForm(f => ({ ...f, applicantId: e.target.value }))} style={inputStyle}>
+                <option value="">Select applicant…</option>
+                {interviewApplicants.map(a => (
+                  <option key={a.id} value={a.id}>{a.full_name} — {a.email}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Date</label>
+              <input type="date" value={manualForm.date} onChange={e => setManualForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Time (optional)</label>
+              <input type="time" value={manualForm.time} onChange={e => setManualForm(f => ({ ...f, time: e.target.value }))} style={inputStyle} />
+            </div>
+            <button
+              onClick={scheduleManual}
+              disabled={schedulingManual || !manualForm.applicantId || !manualForm.date}
+              style={solidBtn(C.warn, schedulingManual || !manualForm.applicantId || !manualForm.date)}
+            >
+              {schedulingManual ? 'Scheduling...' : 'Schedule'}
+            </button>
           </div>
         )}
       </div>
@@ -652,9 +728,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [affiliationModal, setAffiliationModal] = useState(null)   // { applicant } | null
   const [affiliationPick,  setAffiliationPick]  = useState('')      // value chosen in modal
   const [rejectModal,      setRejectModal]      = useState(null)   // { applicant } | null — choose notify-email vs silent reject
-  const [interviewDate,   setInterviewDate]   = useState('')
-  const [interviewTime,   setInterviewTime]   = useState('')
-  const [savingInterview, setSavingInterview] = useState(false)
   const [creatingProfile, setCreatingProfile] = useState(false)
 
   // templates shape: { interview: { subject, body }, onboarding: { ... }, rejected: { ... } }
@@ -983,15 +1056,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSavingStep(false)
   }
 
-  function formatInterviewDateTime(isoString) {
-    if (!isoString) return null
-    const d    = new Date(isoString)
-    const date = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
-    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })
-    const hasTime = d.getHours() !== 0 || d.getMinutes() !== 0
-    return hasTime ? `${date} at ${time}` : date
-  }
-
   async function sendStageEmail(applicant, stage) {
     if (!EMAIL_STAGES.includes(stage)) return
 
@@ -1127,19 +1191,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
     setMovingStage(false)
     setAffiliationModal(null)
-  }
-
-  async function saveInterviewTime(applicant) {
-    if (!interviewDate) return
-    setSavingInterview(true)
-    const iso = interviewTime
-      ? new Date(`${interviewDate}T${interviewTime}`).toISOString()
-      : new Date(`${interviewDate}T00:00`).toISOString()
-    const { error } = await supabase.from('volunteer_applications')
-      .update({ interview_scheduled_at: iso }).eq('id', applicant.id)
-    if (error) msg(error.message, 'error')
-    else { msg('Interview scheduled'); await loadApplicants(); setSelected(p => p?.id === applicant.id ? { ...p, interview_scheduled_at: iso } : p) }
-    setSavingInterview(false)
   }
 
   async function toggleChecklistItem(applicantId, key, value) {
@@ -1434,7 +1485,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSelected(a)
     setOnboardStep(1)
     setChecklist(EMPTY_CHECKLIST)
-    setInterviewDate(new Date().toISOString().slice(0, 10)); setInterviewTime('')
 
     const affiliData = a.onboard_affil_data || {}
     setOnboardForm({
@@ -1459,11 +1509,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     })
 
     if (a.stage === 'onboarding') loadChecklist(a.id)
-    if (a.interview_scheduled_at) {
-      const d = new Date(a.interview_scheduled_at)
-      setInterviewDate(d.toISOString().slice(0, 10))
-      setInterviewTime(d.toTimeString().slice(0, 5))
-    }
 
     // Reset photo state — photo will appear only once uploaded this session
     setApplicantPhotoUrl(null)
@@ -2214,8 +2259,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isOnboarding = applicant.stage === 'onboarding'
     const isRejected   = applicant.stage === 'rejected'
 
-    const scheduledLabel = formatInterviewDateTime(applicant.interview_scheduled_at)
-
     const fields = [
       { label: 'Email',       value: applicant.email },
       { label: 'Phone',       value: applicant.phone },
@@ -2305,18 +2348,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           <div style={{ ...card, padding: '1rem 1.25rem', borderColor: C.warn + '55', background: C.warn + '06' }}>
             <p style={{ ...secLabel, color: C.warn }}>Interview</p>
             <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
-              <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Schedule</p>
-              {scheduledLabel && (
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem', padding: '0.45rem 0.9rem', borderRadius: '8px', background: C.warn + '14', border: `1px solid ${C.warn}44` }}>
-                  <span style={{ fontSize: '0.82rem', color: C.warn, fontWeight: 600 }}>{scheduledLabel}</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>— scheduled</span>
-                </div>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '0.75rem', alignItems: 'flex-end' }}>
-                <div><label style={labelStyle}>Date</label><input type="date" value={interviewDate} onChange={e => setInterviewDate(e.target.value)} style={inputStyle} /></div>
-                <div><label style={labelStyle}>Time (optional)</label><input type="time" value={interviewTime} onChange={e => setInterviewTime(e.target.value)} style={inputStyle} /></div>
-                <button onClick={() => saveInterviewTime(applicant)} disabled={savingInterview || !interviewDate} style={solidBtn(C.warn, savingInterview || !interviewDate)}>{savingInterview ? 'Saving...' : 'Save'}</button>
-              </div>
+              <p style={{ ...secLabel, marginBottom: '0.5rem' }}>Schedule</p>
+              <p style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: 1.5 }}>
+                {applicant.interview_scheduled_at
+                  ? 'This applicant has an interview scheduled.'
+                  : 'No interview scheduled yet.'} Manage interview times from the <strong>Calendar</strong> tab.
+              </p>
             </div>
             <p style={{ ...secLabel, marginBottom: '0.65rem' }}>Decision</p>
 
@@ -2584,7 +2621,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                 {filteredApplicants.map(a => {
-                  const interviewLabel = formatInterviewDateTime(a.interview_scheduled_at)
                   return (
                     <div key={a.id} onClick={() => selectApplicant(a)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)', cursor: 'pointer', transition: 'border-color 0.15s' }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -2593,7 +2629,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                           <p style={{ fontWeight: 500, fontSize: '0.9rem' }}>{a.full_name}</p>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{a.email}</p>
-                            {interviewLabel && <span style={{ fontSize: '0.72rem', color: C.warn, fontWeight: 600 }}>{interviewLabel}</span>}
                             {a.resume_url && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontWeight: 600 }}>resume</span>}
                             {a.stage === 'onboarding' && (
                               <span style={{ display: 'flex', gap: '0.2rem' }}>
