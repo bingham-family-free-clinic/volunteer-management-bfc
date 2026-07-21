@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS } from '../lib/constants'
+import { formatSlotFull, formatSlotDayLabel, formatSlotTime, TIMEZONE_LABEL } from '../lib/interview-schedule'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -403,6 +404,230 @@ function EmailTemplatesTab({
             This email is sent automatically when an applicant is moved to <strong>{STAGE_LABELS[activeTemplate]}</strong>.
           </p>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── CalendarTab ──────────────────────────────────────────────────────────────
+// Lifted out of Pipeline so React never remounts it during parent re-renders.
+// Admin-facing view of the interview self-scheduling system: shows booked
+// appointments (however they were booked — by the applicant themselves via
+// their link, or manually by an admin on the applicant's detail page), lets
+// staff carve out blackout windows, and surfaces each interview-stage
+// applicant's personal scheduling link so it can be copied into an email.
+function CalendarTab({
+  supabase, profile, applicants,
+  card, inputStyle, labelStyle, secLabel,
+  solidBtn, ghostBtn, outlineBtn, msg,
+}) {
+  const [appointments,   setAppointments]   = useState([])
+  const [blocked,        setBlocked]        = useState([])
+  const [loading,        setLoading]        = useState(true)
+  const [cancellingId,   setCancellingId]   = useState(null)
+  const [deletingId,     setDeletingId]     = useState(null)
+  const [copiedToken,    setCopiedToken]    = useState(null)
+
+  const EMPTY_BLOCK_FORM = { startDate: '', startTime: '', endDate: '', endTime: '', reason: '' }
+  const [blockForm,  setBlockForm]  = useState(EMPTY_BLOCK_FORM)
+  const [savingBlock, setSavingBlock] = useState(false)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const nowISO = new Date().toISOString()
+    const [{ data: appts, error: apptErr }, { data: blocks, error: blockErr }] = await Promise.all([
+      supabase
+        .from('interview_appointments')
+        .select('id, applicant_id, scheduled_at, status, source, volunteer_applications ( full_name, email )')
+        .eq('status', 'booked')
+        .gte('scheduled_at', nowISO)
+        .order('scheduled_at', { ascending: true }),
+      supabase
+        .from('interview_blocked_times')
+        .select('id, start_at, end_at, reason')
+        .order('start_at', { ascending: true }),
+    ])
+    if (apptErr)  console.error('load appointments failed:', apptErr)
+    if (blockErr) console.error('load blocked times failed:', blockErr)
+    setAppointments(appts ?? [])
+    setBlocked(blocks ?? [])
+    setLoading(false)
+  }
+
+  async function cancelAppointment(appt) {
+    setCancellingId(appt.id)
+    const { error } = await supabase.from('interview_appointments').update({ status: 'cancelled' }).eq('id', appt.id)
+    if (error) msg(`Failed to cancel: ${error.message}`, 'error')
+    else { msg('Interview cancelled'); await load() }
+    setCancellingId(null)
+  }
+
+  async function addBlock() {
+    if (!blockForm.startDate || !blockForm.endDate) return
+    const start = new Date(`${blockForm.startDate}T${blockForm.startTime || '00:00'}`)
+    const end   = new Date(`${blockForm.endDate}T${blockForm.endTime || '23:59'}`)
+    if (end <= start) { msg('End time must be after start time.', 'error'); return }
+
+    setSavingBlock(true)
+    const { error } = await supabase.from('interview_blocked_times').insert({
+      start_at:   start.toISOString(),
+      end_at:     end.toISOString(),
+      reason:     blockForm.reason || null,
+      created_by: profile?.id ?? null,
+    })
+    if (error) msg(`Failed to add blocked time: ${error.message}`, 'error')
+    else { msg('Blocked time added'); setBlockForm(EMPTY_BLOCK_FORM); await load() }
+    setSavingBlock(false)
+  }
+
+  async function deleteBlock(id) {
+    setDeletingId(id)
+    const { error } = await supabase.from('interview_blocked_times').delete().eq('id', id)
+    if (error) msg(`Failed to remove blocked time: ${error.message}`, 'error')
+    else { msg('Blocked time removed'); await load() }
+    setDeletingId(null)
+  }
+
+  function copyLink(token) {
+    const url = `${window.location.origin}/schedule/${token}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedToken(token)
+      setTimeout(() => setCopiedToken(t => (t === token ? null : t)), 2000)
+    })
+  }
+
+  // Group appointments by local calendar day for display
+  const appointmentDays = (() => {
+    const byDay = new Map()
+    for (const a of appointments) {
+      const key = formatSlotDayLabel(a.scheduled_at)
+      if (!byDay.has(key)) byDay.set(key, [])
+      byDay.get(key).push(a)
+    }
+    return Array.from(byDay.entries())
+  })()
+
+  const interviewApplicants = (applicants || []).filter(a => a.stage === 'interview')
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+      {/* ── Scheduling links ── */}
+      <div style={card}>
+        <p style={secLabel}>Applicant Scheduling Links</p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+          Each applicant in the Interview stage has a personal link they can use to pick, reschedule, or cancel
+          their own interview time — no admin action needed. Copy it into their interview invitation email.
+        </p>
+        {interviewApplicants.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No applicants currently in the Interview stage.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {interviewApplicants.map(a => (
+              <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0.9rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)' }}>
+                <div>
+                  <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{a.full_name}</p>
+                  <p style={{ fontSize: '0.76rem', color: 'var(--muted)' }}>{a.email}</p>
+                </div>
+                <button onClick={() => copyLink(a.interview_scheduling_token)} style={outlineBtn(copiedToken === a.interview_scheduling_token ? C.success : C.blue)}>
+                  {copiedToken === a.interview_scheduling_token ? 'Copied ✓' : 'Copy Link'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Upcoming interviews ── */}
+      <div style={card}>
+        <p style={secLabel}>Upcoming Interviews <span style={{ opacity: 0.7 }}>({TIMEZONE_LABEL})</span></p>
+        {loading ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading...</p>
+        ) : appointmentDays.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No interviews booked yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {appointmentDays.map(([day, appts]) => (
+              <div key={day}>
+                <p style={{ fontSize: '0.78rem', fontWeight: 700, color: C.blue, marginBottom: '0.5rem' }}>{day}</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {appts.map(a => (
+                    <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0.9rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.85rem', fontWeight: 600, color: C.primary, minWidth: 84 }}>{formatSlotTime(a.scheduled_at)}</span>
+                        <div>
+                          <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{a.volunteer_applications?.full_name ?? '—'}</p>
+                          <p style={{ fontSize: '0.76rem', color: 'var(--muted)' }}>{a.volunteer_applications?.email}</p>
+                        </div>
+                        <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: (a.source === 'self' ? C.light : C.muted) + '18', color: a.source === 'self' ? C.light : 'var(--muted)', border: `1px solid ${a.source === 'self' ? C.light : 'var(--muted)'}44`, fontWeight: 600 }}>
+                          {a.source === 'self' ? 'self-booked' : 'admin'}
+                        </span>
+                      </div>
+                      <button onClick={() => cancelAppointment(a)} disabled={cancellingId === a.id} style={ghostBtn()}>
+                        {cancellingId === a.id ? 'Cancelling...' : 'Cancel'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Blocked times ── */}
+      <div style={card}>
+        <p style={secLabel}>Blocked Times</p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+          Applicants won't see or be able to book any slot that falls inside a blocked window (vacations, holidays,
+          all-staff meetings, etc.).
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: '0.6rem', alignItems: 'end', marginBottom: '1rem' }}>
+          <div>
+            <label style={labelStyle}>Start date</label>
+            <input type="date" value={blockForm.startDate} onChange={e => setBlockForm(f => ({ ...f, startDate: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Start time</label>
+            <input type="time" value={blockForm.startTime} onChange={e => setBlockForm(f => ({ ...f, startTime: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>End date</label>
+            <input type="date" value={blockForm.endDate} onChange={e => setBlockForm(f => ({ ...f, endDate: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>End time</label>
+            <input type="time" value={blockForm.endTime} onChange={e => setBlockForm(f => ({ ...f, endTime: e.target.value }))} style={inputStyle} />
+          </div>
+          <button onClick={addBlock} disabled={savingBlock || !blockForm.startDate || !blockForm.endDate} style={solidBtn(C.warn, savingBlock || !blockForm.startDate || !blockForm.endDate)}>
+            {savingBlock ? 'Adding...' : 'Add Block'}
+          </button>
+        </div>
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={labelStyle}>Reason (optional)</label>
+          <input type="text" placeholder="e.g. Staff retreat" value={blockForm.reason} onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))} style={inputStyle} />
+        </div>
+
+        {blocked.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No blocked times set.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {blocked.map(b => (
+              <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0.9rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)' }}>
+                <div>
+                  <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{formatSlotFull(b.start_at)} → {formatSlotFull(b.end_at)}</p>
+                  {b.reason && <p style={{ fontSize: '0.76rem', color: 'var(--muted)' }}>{b.reason}</p>}
+                </div>
+                <button onClick={() => deleteBlock(b.id)} disabled={deletingId === b.id} style={ghostBtn()}>
+                  {deletingId === b.id ? 'Removing...' : 'Remove'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -2297,6 +2522,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       <div style={{ display: 'flex', gap: '0.4rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
         {[
           { id: 'pipeline',  label: 'Pipeline' },
+          { id: 'calendar',  label: 'Calendar' },
           { id: 'recent',    label: `Recently Added${completed.length > 0 ? ` (${completed.length})` : ''}` },
           { id: 'templates', label: 'Email Templates' },  
         ].map(tab => (
@@ -2379,6 +2605,23 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             )}
           </div>
         </>
+      )}
+
+      {/* Calendar tab */}
+      {activeTab === 'calendar' && (
+        <CalendarTab
+          supabase={supabase}
+          profile={profile}
+          applicants={applicants}
+          card={card}
+          inputStyle={inputStyle}
+          labelStyle={labelStyle}
+          secLabel={secLabel}
+          solidBtn={solidBtn}
+          ghostBtn={ghostBtn}
+          outlineBtn={outlineBtn}
+          msg={msg}
+        />
       )}
 
       {/* Recently Added tab */}
