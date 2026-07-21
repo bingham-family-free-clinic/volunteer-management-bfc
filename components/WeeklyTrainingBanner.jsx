@@ -72,13 +72,22 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
   }
 
   async function handleAcknowledge() {
+    if (acknowledged) {
+      setError('Training already marked completed')
+      return
+    }
     setAcking(true)
     setError(null)
     const { error: err } = await supabase
       .from('weekly_training_acknowledgments')
       .insert({ user_id: userId, week_start: weekStart })
     if (err) {
-      setError('Something went wrong. Please try again.')
+      // Unique constraint violation (user_id + week_start already exists)
+      if (err.code === '23505') {
+        setError('Training already marked completed')
+      } else {
+        setError('Something went wrong. Please try again.')
+      }
       setAcking(false)
       return
     }
@@ -96,7 +105,6 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
     )
   }
 
-  {/*
   // ── Completed view ─────────────────────────────────────────────────────────
   if (acknowledged) {
     return (
@@ -117,7 +125,7 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
         </p>
       </div>
     )
-  } */}
+  }
 
   // ── Training content ──────────────────────────────────────────────────────
   const announcements = training.announcements || []
