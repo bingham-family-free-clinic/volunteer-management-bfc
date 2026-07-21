@@ -482,6 +482,7 @@ export default function AdminTasks({ currentUserId, volunteers: externalVoluntee
   const [showNewForm, setShowNewForm] = useState(false)
   const [showDone, setShowDone]       = useState(false)
   const [showInactive, setShowInactive] = useState(false)
+  const [showBlocked, setShowBlocked] = useState(false)
   const [filterTeam, setFilterTeam]   = useState('')
   const [filterDue, setFilterDue]   = useState('') // 'overdue' | 'week' | 'month' | ''
   const [toast, setToast]           = useState(null)
@@ -539,7 +540,8 @@ export default function AdminTasks({ currentUserId, volunteers: externalVoluntee
     return true
   })
 
-  const openTasks     = filtered.filter(t => t.status === 'open' || t.status === 'blocked')
+  const openTasks     = filtered.filter(t => t.status === 'open')
+  const blockedTasks  = filtered.filter(t => t.status === 'blocked')
   const closedTasks   = filtered.filter(t => t.status === 'closed')
   const inactiveTasks = filtered.filter(t => t.status === 'inactive')
 
@@ -644,6 +646,40 @@ export default function AdminTasks({ currentUserId, volunteers: externalVoluntee
         Showing {openTasks.length} open task{openTasks.length !== 1 ? 's' : ''}
         {(filterTeam || filterDue) ? ' (filtered)' : ''}
       </p>
+
+      {/* Blocked tasks banner (collapsed by default, above open list) */}
+      {blockedTasks.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowBlocked(s => !s)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              background: STATUS_META.blocked.bg,
+              border: `1px solid ${STATUS_META.blocked.border}`,
+              borderRadius: '8px', cursor: 'pointer',
+              color: STATUS_META.blocked.color, fontSize: '0.82rem', fontWeight: 600,
+              fontFamily: 'DM Sans, sans-serif', padding: '0.5rem 0.75rem', width: '100%',
+            }}
+          >
+            <span style={{ transform: showBlocked ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+            {showBlocked ? 'Hide' : 'Show'} {blockedTasks.length} blocked task{blockedTasks.length !== 1 ? 's' : ''}
+          </button>
+          {showBlocked && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+              {blockedTasks.map(task => (
+                <AdminTaskRow
+                  key={task.id}
+                  task={task}
+                  allMembers={allMembers}
+                  onUpdate={handleUpdate}
+                  onDelete={handleDelete}
+                  showToast={showToast}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Open tasks */}
       {loading ? (
