@@ -275,15 +275,18 @@ function EmailTemplatesTab({
   const isDirty = JSON.stringify(draft) !== JSON.stringify(templates[activeTemplate] || {})
 
   // Preview: replace placeholders with sample values
-  const senderPreview  = profile?.full_name || 'Your Name'
+  const senderPreview   = profile?.full_name || 'Your Name'
+  const schedulingPreview = 'https://yourapp.com/schedule/sample-token-1234'
   const previewSubject = (draft.subject || '')
     .replace(/\{\{name\}\}/g, 'Jane Doe')
     .replace(/\{\{email\}\}/g, 'jane@example.com')
     .replace(/\{\{sender_name\}\}/g, senderPreview)
+    .replace(/\{\{scheduling_link\}\}/g, schedulingPreview)
   const previewBody    = (draft.body    || '')
     .replace(/\{\{name\}\}/g, 'Jane Doe')
     .replace(/\{\{email\}\}/g, 'jane@example.com')
     .replace(/\{\{sender_name\}\}/g, senderPreview)
+    .replace(/\{\{scheduling_link\}\}/g, schedulingPreview)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -334,6 +337,7 @@ function EmailTemplatesTab({
             </p>
             <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
               Use {'{{name}}'}, {'{{email}}'}, {'{{sender_name}}'}
+              {activeTemplate === 'interview' && <>, {'{{scheduling_link}}'}</>}
             </span>
           </div>
 
@@ -1009,6 +1013,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       }
     }
 
+    // For the interview invitation, build the applicant's personal self-scheduling
+    // link so the edge function can substitute it into the {{scheduling_link}}
+    // placeholder in the email body.
+    const schedulingLink = stage === 'interview' && applicant.interview_scheduling_token
+      ? `${window.location.origin}/schedule/${applicant.interview_scheduling_token}`
+      : null
+
     try {
       const { error } = await supabase.functions.invoke('send-stage-email', {
         body: {
@@ -1016,6 +1027,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           applicantName:  applicant.full_name,
           stage,
           attachmentUrl,
+          schedulingLink,
           senderName: profile?.full_name || 'BFC Volunteer Team',
         },
       })
