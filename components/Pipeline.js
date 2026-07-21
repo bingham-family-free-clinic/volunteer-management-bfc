@@ -518,32 +518,6 @@ function CalendarTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-      {/* ── Scheduling links ── */}
-      <div style={card}>
-        <p style={secLabel}>Applicant Scheduling Links</p>
-        <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
-          Each applicant in the Interview stage has a personal link they can use to pick, reschedule, or cancel
-          their own interview time — no admin action needed. Copy it into their interview invitation email.
-        </p>
-        {interviewApplicants.length === 0 ? (
-          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No applicants currently in the Interview stage.</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {interviewApplicants.map(a => (
-              <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0.9rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)' }}>
-                <div>
-                  <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{a.full_name}</p>
-                  <p style={{ fontSize: '0.76rem', color: 'var(--muted)' }}>{a.email}</p>
-                </div>
-                <button onClick={() => copyLink(a.interview_scheduling_token)} style={outlineBtn(copiedToken === a.interview_scheduling_token ? C.success : C.blue)}>
-                  {copiedToken === a.interview_scheduling_token ? 'Copied ✓' : 'Copy Link'}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* ── Upcoming interviews ── */}
       <div style={card}>
         <p style={secLabel}>Upcoming Interviews <span style={{ opacity: 0.7 }}>({TIMEZONE_LABEL})</span></p>
@@ -627,6 +601,32 @@ function CalendarTab({
                 </div>
                 <button onClick={() => deleteBlock(b.id)} disabled={deletingId === b.id} style={ghostBtn()}>
                   {deletingId === b.id ? 'Removing...' : 'Remove'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Scheduling links ── */}
+      <div style={card}>
+        <p style={secLabel}>Applicant Scheduling Links</p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+          Each applicant in the Interview stage has a personal link they can use to pick, reschedule, or cancel
+          their own interview time — no admin action needed. Copy it into their interview invitation email.
+        </p>
+        {interviewApplicants.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No applicants currently in the Interview stage.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {interviewApplicants.map(a => (
+              <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0.9rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)' }}>
+                <div>
+                  <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{a.full_name}</p>
+                  <p style={{ fontSize: '0.76rem', color: 'var(--muted)' }}>{a.email}</p>
+                </div>
+                <button onClick={() => copyLink(a.interview_scheduling_token)} style={outlineBtn(copiedToken === a.interview_scheduling_token ? C.success : C.blue)}>
+                  {copiedToken === a.interview_scheduling_token ? 'Copied ✓' : 'Copy Link'}
                 </button>
               </div>
             ))}
