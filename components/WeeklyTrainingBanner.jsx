@@ -72,13 +72,22 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
   }
 
   async function handleAcknowledge() {
+    if (acknowledged) {
+      setError('Training already marked completed')
+      return
+    }
     setAcking(true)
     setError(null)
     const { error: err } = await supabase
       .from('weekly_training_acknowledgments')
       .insert({ user_id: userId, week_start: weekStart })
     if (err) {
-      setError('Something went wrong. Please try again.')
+      // Unique constraint violation (user_id + week_start already exists)
+      if (err.code === '23505') {
+        setError('Training already marked completed')
+      } else {
+        setError('Something went wrong. Please try again.')
+      }
       setAcking(false)
       return
     }
@@ -95,30 +104,6 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
       </div>
     )
   }
-
-  {/*
-  // ── Completed view ─────────────────────────────────────────────────────────
-  if (acknowledged) {
-    return (
-      <div style={{ ...S.card, textAlign: 'center', padding: '2.5rem 1.5rem' }}>
-        <div style={{
-          width: '48px', height: '48px', borderRadius: '50%',
-          background: 'rgba(2,65,107,0.08)', border: '1px solid rgba(2,65,107,0.2)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          margin: '0 auto 1.25rem',
-        }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        </div>
-        <h2 style={{ fontWeight: 600, fontSize: '1.1rem', marginBottom: '0.5rem' }}>Training complete.</h2>
-        <p style={{ color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1.6, maxWidth: '340px', margin: '0 auto' }}>
-          Thanks for staying current. This week's training won't show again until next week.
-        </p>
-      </div>
-    )
-  } */}
-
   // ── Training content ──────────────────────────────────────────────────────
   const announcements = training.announcements || []
   const roleEntries = TRAINING_ROLES.map(r => [r, training.role_trainings?.[r]?.trim() || ''])
@@ -231,24 +216,26 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
       {error && <p style={{ fontSize: '0.85rem', color: 'var(--danger)', textAlign: 'center' }}>{error}</p>}
 
       {/* Acknowledge */}
-      <button
-        onClick={handleAcknowledge}
-        disabled={acking}
-        style={{
-          padding: '0.95rem',
-          background: 'var(--accent)',
-          color: '#fff',
-          border: 'none',
-          borderRadius: '10px',
-          fontWeight: 600,
-          fontSize: '1rem',
-          cursor: acking ? 'not-allowed' : 'pointer',
-          fontFamily: 'DM Sans, sans-serif',
-          opacity: acking ? 0.7 : 1,
-        }}
-      >
-        {acking ? 'Submitting…' : "I've Completed This Week's Training"}
-      </button>
+      {!acknowledged && (
+        <button
+          onClick={handleAcknowledge}
+          disabled={acking}
+          style={{
+            padding: '0.95rem',
+            background: 'var(--accent)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '10px',
+            fontWeight: 600,
+            fontSize: '1rem',
+            cursor: acking ? 'not-allowed' : 'pointer',
+            fontFamily: 'DM Sans, sans-serif',
+            opacity: acking ? 0.7 : 1,
+          }}
+        >
+          {acking ? 'Submitting…' : "I've Completed This Week's Training"}
+        </button>
+      )}
 
     </div>
   )
