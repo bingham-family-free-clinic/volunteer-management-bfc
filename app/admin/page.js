@@ -49,6 +49,14 @@ const ADMIN_ACCESS_DEFAULT_ROLES = [
   'Administrative Assistant', 'Executive Assistant',
   'OSSM', 'Office Manager', 'Human Resources', 'Credentialing',
 ]
+
+// These are the roles that the Director has to assign. Standard admin don't get to touch this.
+const ADMIN_ROLES = [
+  'Director', 'Executive Assistant', 'Administrative Assistant', 
+  'Office Manager', 'Human Resources', 'Credentialing'
+]
+
+
 function hasAdminAccess(p) {
   return p?.affiliation === 'provider' || ADMIN_ACCESS_DEFAULT_ROLES.includes(p?.default_role)
 }
@@ -1377,19 +1385,42 @@ export default function AdminPage() {
     if (!clockOut) setActiveShifts(prev => [{ id: inserted.id, volunteer_id: inserted.volunteer_id, clock_in: clockIn, profiles: inserted.profiles }, ...prev])
     setCreatingShift(false)
   }
-
   async function handleAddEntry() {
     if (!addVolId) return
     setAddingEntry(true)
+
+    const vol = volunteers.find(v => v.id === addVolId)
+
+    // --- DIRECTOR RBAC CHECK ---
+    let needsProfileUpdate = false
+    if (ADMIN_ROLES.includes(addingRole)) {
+      if (vol?.default_role !== addingRole) {
+        if (profile?.default_role !== 'Director') {
+          showMessage(`Only Directors can assign non-administrative volunteers to ${addingRole}.`, 'error')
+          setAddingEntry(false)
+          return
+        }
+        needsProfileUpdate = true
+      }
+    }
+
     const currentEntries = getEntries(scheduleDay, scheduleShift, addingRole)
     const effectiveCount = currentEntries.reduce((sum, entry) => {
       if (addStartDate && entry.end_date && entry.end_date < addStartDate) return sum
       if (addEndDate && entry.start_date && entry.start_date > addEndDate) return sum
       return sum + (entry.week_pattern === 'every' ? 1 : 0.5)
     }, 0)
+
     const limit = ROLE_SUGGESTIONS[addingRole]
-    if (limit && effectiveCount >= limit && !canOverrideRoleLimits) { showMessage(`Limit reached for ${addingRole} (${limit})`, 'error'); setAddingEntry(false); return }
-    if (limit && effectiveCount >= limit && canOverrideRoleLimits) { showMessage(`Limit for ${addingRole} (${limit}) exceeded — adding anyway`, 'success') }
+    if (limit && effectiveCount >= limit && !canOverrideRoleLimits) { 
+      showMessage(`Limit reached for ${addingRole} (${limit})`, 'error'); 
+      setAddingEntry(false); 
+      return 
+    }
+    if (limit && effectiveCount >= limit && canOverrideRoleLimits) { 
+      showMessage(`Limit for ${addingRole} (${limit}) exceeded — adding anyway`, 'success') 
+    }
+
     const exists = schedule.find(s => {
       if (s.volunteer_id !== addVolId || s.day_of_week !== scheduleDay || s.shift_time !== scheduleShift || s.role !== addingRole) return false
       const aStart = s.start_date || '0000-01-01'; const aEnd = s.end_date || '9999-12-31'
@@ -1397,13 +1428,27 @@ export default function AdminPage() {
       return aStart <= bEnd && bStart <= aEnd
     })
     if (exists) { showMessage('Volunteer already assigned to this slot', 'error'); setAddingEntry(false); return }
-    const vol = volunteers.find(v => v.id === addVolId)
+
     const { data: inserted, error } = await supabase
       .from('schedule')
       .insert({ volunteer_id: addVolId, day_of_week: scheduleDay, shift_time: scheduleShift, role: addingRole, start_date: addStartDate || null, end_date: addEndDate || null, week_pattern: addWeekPattern || 'every', notes: addNotes || null })
       .select('id,volunteer_id,day_of_week,shift_time,role,start_date,end_date,week_pattern,notes,profiles(id,full_name)')
       .single()
+
     if (error) { showMessage(error.message, 'error'); setAddingEntry(false); return }
+
+    // --- SEAMLESS PROFILE UPDATE ---
+    if (needsProfileUpdate) {
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({ default_role: addingRole, affiliation: 'admin' })
+        .eq('id', addVolId)
+
+      if (!profileErr) {
+        setVolunteers(prev => prev.map(v => v.id === addVolId ? { ...v, default_role: addingRole, affiliation: 'admin' } : v))
+      }
+    }
+
     showMessage('Volunteer assigned!', 'success')
     const overrodeLimit = limit && effectiveCount >= limit && canOverrideRoleLimits
     await audit('assigned_schedule', 'schedule', inserted?.id, vol?.full_name, `${scheduleDay} ${scheduleShift} — ${addingRole}${overrodeLimit ? ` (limit of ${limit} overridden)` : ''}`)
@@ -1448,7 +1493,6 @@ export default function AdminPage() {
     setVolunteers(prev => prev.map(v => v.id === volunteerId ? { ...v, ...patch } : v))
     setChangingStatus(false)
   }
-
   async function handleSaveEdit() {
     setSaving(true)
     if (editForm.end_date && !editForm.status_reason) {
@@ -1456,10 +1500,26 @@ export default function AdminPage() {
       setSaving(false)
       return
     }
-    const isProvider = editForm.affiliation === 'provider'
-    const isIntern   = editForm.affiliation === 'intern'
-    const isMission  = editForm.affiliation === 'missionary'
-    const isStudent  = editForm.affiliation === 'student'
+
+    // --- NEW ADMIN PERMISSION LOGIC ---
+    let finalAffiliation = editForm.affiliation;
+    const isNewAdminRole = ADMIN_ROLES.includes(editForm.default_role) && editForm.default_role !== selectedVolunteer.default_role;
+
+    if (isNewAdminRole) {
+      if (profile?.default_role !== 'Director') {
+        showMessage('Only Directors can assign administrative default roles.', 'error');
+        setSaving(false);
+        return;
+      }
+      finalAffiliation = 'admin'; // Automatically update affiliation
+    }
+    // ----------------------------------
+
+    const isProvider = finalAffiliation === 'provider'
+    const isIntern   = finalAffiliation === 'intern'
+    const isMission  = finalAffiliation === 'missionary'
+    const isStudent  = finalAffiliation === 'student'
+
     const updates = {
       full_name: editForm.full_name, phone: editForm.phone, affiliation: editForm.affiliation || null,
       credentials: editForm.credentials || null, languages: editForm.languages, role: editForm.role,
@@ -1490,10 +1550,22 @@ export default function AdminPage() {
   async function handleCreateVolunteer(e) {
     e.preventDefault()
     setCreating(true)
-    const isProvider = newAffiliation === 'provider'
-    const isIntern   = newAffiliation === 'intern'
-    const isMission  = newAffiliation === 'missionary'
-    const isStudent  = newAffiliation === 'student'
+
+    let finalAffiliation = newAffiliation;
+    if (ADMIN_ROLES.includes(newDefaultRole)) {
+      if (profile?.default_role !== 'Director') {
+        showMessage('Only Directors can create volunteers with administrative default roles.', 'error');
+        setCreating(false);
+        return;
+      }
+      finalAffiliation = 'admin'; // Automatically update affiliation
+    }
+
+    const isProvider = finalAffiliation === 'provider'
+    const isIntern   = finalAffiliation === 'intern'
+    const isMission  = finalAffiliation === 'missionary'
+    const isStudent  = finalAffiliation === 'student'
+
     const { data, error } = await supabase.auth.signUp({ email: newEmail, password: newPassword })
     if (error) { showMessage(error.message, 'error'); setCreating(false); return }
     const profileData = {
