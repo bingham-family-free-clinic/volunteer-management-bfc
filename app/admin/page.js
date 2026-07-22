@@ -2061,7 +2061,7 @@ export default function AdminPage() {
                     { label: 'Role', value: selectedVolunteer.role },
                     { label: 'Default Position', value: selectedVolunteer.default_role },
                     { label: 'End Date', value: selectedVolunteer.end_date || null },
-                    { label: 'First Shift', value: loadingFirstShift ? 'Loading…' : (firstShiftDate ? formatDateMountain(firstShiftDate) : null) },
+                    { label: 'First Shift', value: loadingFirstShift ? 'Loading…' : (firstShiftDate ? new Date(firstShiftDate).toLocaleDateString('en-US', { timeZone: 'America/Denver', year: 'numeric', month: 'short', day: 'numeric' }) : null) },
                     ...(selectedVolunteer.affiliation === 'missionary' ? [{ label: 'SMA Name', value: selectedVolunteer.sma_name }, { label: 'SMA Contact', value: selectedVolunteer.sma_contact }] : []),
                     ...(selectedVolunteer.affiliation === 'intern' ? [{ label: 'Advisor Name', value: selectedVolunteer.advisor_name }, { label: 'Advisor Contact', value: selectedVolunteer.advisor_contact }, { label: 'School', value: selectedVolunteer.intern_school }, { label: 'Dept / Company', value: selectedVolunteer.intern_department }] : []),
                     ...(selectedVolunteer.affiliation === 'student' ? [{ label: 'School', value: selectedVolunteer.school }, { label: 'Major', value: selectedVolunteer.major }] : [])
