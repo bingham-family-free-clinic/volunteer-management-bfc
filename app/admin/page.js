@@ -615,6 +615,8 @@ export default function AdminPage() {
   const [loadingScheduledShifts, setLoadingScheduledShifts] = useState(false)
   const [volunteerTotalHours, setVolunteerTotalHours]   = useState(null)
   const [loadingVolHours, setLoadingVolHours]           = useState(false)
+  const [firstShiftDate, setFirstShiftDate]             = useState(null)
+  const [loadingFirstShift, setLoadingFirstShift]       = useState(false)
 
   // ── Create volunteer state ──────────────────────────────────────────────────
   const [newName, setNewName]               = useState(''); const [newEmail, setNewEmail]             = useState(''); const [newPassword, setNewPassword]         = useState('')
@@ -1035,6 +1037,20 @@ export default function AdminPage() {
     setLoadingVolHours(false)
   }
 
+  // First shift on record: earliest row in the shifts table for this volunteer
+  async function loadFirstShiftForVolunteer(volunteerId) {
+    setLoadingFirstShift(true)
+    const { data } = await supabase
+      .from('shifts')
+      .select('clock_in')
+      .eq('volunteer_id', volunteerId)
+      .order('clock_in', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    setFirstShiftDate(data?.clock_in || null)
+    setLoadingFirstShift(false)
+  }
+
   // ── Profile photo helpers ───────────────────────────────────────────────────
 
   // Compress image to ≤200 KB JPEG before upload to minimise storage/egress
@@ -1219,6 +1235,8 @@ export default function AdminPage() {
     setRecentShifts([]); setScheduledShifts([])
     setVolunteerTotalHours(null)
     loadVolunteerTotalHours(v.id)
+    setFirstShiftDate(null)
+    loadFirstShiftForVolunteer(v.id)
     setEndDateInput(v.end_date || '')
     // Lazy-load photo only when a profile is selected
     setProfilePhotoUrl(null)
@@ -2043,6 +2061,7 @@ export default function AdminPage() {
                     { label: 'Role', value: selectedVolunteer.role },
                     { label: 'Default Position', value: selectedVolunteer.default_role },
                     { label: 'End Date', value: selectedVolunteer.end_date || null },
+                    { label: 'First Shift', value: loadingFirstShift ? 'Loading…' : (firstShiftDate ? formatDateMountain(firstShiftDate) : null) },
                     ...(selectedVolunteer.affiliation === 'missionary' ? [{ label: 'SMA Name', value: selectedVolunteer.sma_name }, { label: 'SMA Contact', value: selectedVolunteer.sma_contact }] : []),
                     ...(selectedVolunteer.affiliation === 'intern' ? [{ label: 'Advisor Name', value: selectedVolunteer.advisor_name }, { label: 'Advisor Contact', value: selectedVolunteer.advisor_contact }, { label: 'School', value: selectedVolunteer.intern_school }, { label: 'Dept / Company', value: selectedVolunteer.intern_department }] : []),
                     ...(selectedVolunteer.affiliation === 'student' ? [{ label: 'School', value: selectedVolunteer.school }, { label: 'Major', value: selectedVolunteer.major }] : [])
