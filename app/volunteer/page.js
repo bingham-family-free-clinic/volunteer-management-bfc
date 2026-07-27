@@ -13,7 +13,7 @@ import VolunteerTasks from '../../components/VolunteerTasks'
 import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
-import RoleTrainerEditor from '../../components/RoleTrainerEditor'
+import { RoleTrainerEditor } from '../../components/RoleTrainerEditor'
 import { canApproveWrittenTraining } from '../../lib/trainingHelpers'
 
 
