@@ -13,7 +13,8 @@ import VolunteerTasks from '../../components/VolunteerTasks'
 import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
-import { RoleTrainerEditor } from '../../components/RoleTrainerEditor'
+import RoleTrainerEditor from '../../components/RoleTrainerEditor'
+import RoleTrainingTab from '../../components/RoleTrainingTab'
 import { canApproveWrittenTraining } from '../../lib/trainingHelpers'
 
 
@@ -575,6 +576,12 @@ function VolunteerPageInner() {
   // like CMI / Role Trainer), needed for canApproveWrittenTraining() to gate
   // the Role Trainer Editor tab below.
   const [myTrainingRoleStatus, setMyTrainingRoleStatus] = useState(null)
+  // Step 9: this volunteer's own in-progress training_tracks rows (excludes
+  // stage === 'active'), used to render one dynamic "{Role} Training" tab per
+  // row — same conditional-tab pattern already used for the Weekly Training
+  // tab below. Kept in sync via handleTrainingTrackUpdated() whenever
+  // RoleTrainingTab advances a track's stage.
+  const [myTrainingTracks, setMyTrainingTracks] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab]         = useState('clock')
 
@@ -741,6 +748,14 @@ function VolunteerPageInner() {
       .eq('volunteer_id', user.id)
       .maybeSingle()
       .then(({ data }) => setMyTrainingRoleStatus(data || null))
+
+    supabase
+      .from('training_tracks')
+      .select('*')
+      .eq('volunteer_id', user.id)
+      .neq('stage', 'active')
+      .order('created_at', { ascending: true })
+      .then(({ data }) => setMyTrainingTracks(data || []))
 
     if (profileData?.affiliation === 'provider') {
       setCredForm({
@@ -921,6 +936,22 @@ function VolunteerPageInner() {
     if (newTab === 'internreport') {
       // Intern report only needs schedule (already fetched in critical path)
     }
+  }
+
+  // Step 9: RoleTrainingTab calls this after successfully marking written
+  // training complete (which advances training_tracks.stage). Replaces the
+  // updated row in place; if a track ever comes back as 'active' (not
+  // expected from this component today, since that transition is the Step 8
+  // vouch action, not anything volunteer-facing) it's dropped from the list
+  // and the tab bar falls back to 'account' rather than pointing at a tab key
+  // that no longer exists.
+  function handleTrainingTrackUpdated(updatedTrack) {
+    setMyTrainingTracks(prev =>
+      updatedTrack.stage === 'active'
+        ? prev.filter(t => t.id !== updatedTrack.id)
+        : prev.map(t => (t.id === updatedTrack.id ? updatedTrack : t))
+    )
+    if (updatedTrack.stage === 'active') setTab('account')
   }
 
   // ── Clock helpers ─────────────────────────────────────────────────────────
@@ -1178,6 +1209,7 @@ function VolunteerPageInner() {
     ...(isIntern ? [['internreport', 'Report Hours']] : []),
     ...(profile?.team ? [['tasks', 'Tasks']] : []),
     ['account', 'Account'],
+    ...myTrainingTracks.map(t => [`training-track-${t.id}`, `${t.role} Training`]),
     ...(trainingAvailable ? [['training', 'Training']] : []),
     ...(canEditRoleTraining ? [['role-trainer-editor', 'Role Trainer Editor']] : []),
     ...(surveyOpen ? [['feedback', 'Feedback']] : []),
@@ -1823,6 +1855,23 @@ function VolunteerPageInner() {
           <RoleTrainerEditor supabase={supabase} profile={profile} />
         )}
 
+        {/* ── ROLE TRAINING TABS (Step 9) ─────────────────────────────────────
+            One dynamic tab per in-progress training_tracks row belonging to
+            this volunteer — written training content + mark-complete, then
+            (once past written training) the Step 7 shift-booking component
+            for both shadow shifts. */}
+        {myTrainingTracks.map(t => (
+          tab === `training-track-${t.id}` && (
+            <RoleTrainingTab
+              key={t.id}
+              supabase={supabase}
+              profile={profile}
+              track={t}
+              onTrackUpdated={handleTrainingTrackUpdated}
+            />
+          )
+        ))}
+
         {/* ── FEEDBACK TAB ─────────────────────────────────────────────────
             Fully anonymous — no userId is passed in, since we no longer
             track who completes the survey. */}
@@ -1836,6 +1885,27 @@ function VolunteerPageInner() {
         {/* ── ACCOUNT TAB ─────────────────────────────────────────────────── */}
         {tab === 'account' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+            {/* Active Roles (Step 9) — read-only, sourced from
+                volunteer_role_status.active_roles (myTrainingRoleStatus,
+                fetched in the critical-path init alongside profile). */}
+            <div style={S.card}>
+              <h2 style={{ fontWeight: 600, marginBottom: '0.4rem' }}>Active Roles</h2>
+              <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                Roles you're currently trained and authorized for.
+              </p>
+              {(myTrainingRoleStatus?.active_roles || []).length === 0 ? (
+                <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No active roles yet.</p>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {myTrainingRoleStatus.active_roles.map(r => (
+                    <span key={r} style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem', borderRadius: '100px', fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Hours summary */}
             <div style={{ ...S.card, borderColor: 'var(--accent)', background: 'rgba(2,65,107,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
