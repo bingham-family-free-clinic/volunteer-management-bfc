@@ -764,6 +764,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     credentials: '',
     license_exp: '', bls_exp: '', dea_exp: '', ftca_exp: '', tb_exp: '',
     default_role: '',
+    training_role: '',
     preferred_slots: [],
     preferred_roles: [],
   }
@@ -1455,13 +1456,29 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     // Data Model ("waitlist (existing)") and Step 8 (vouch + completion
     // side-effects) for the new trigger point.
 
+    // Role Training Pipeline (Step 5): a brand-new volunteer's first
+    // training_tracks row is created automatically right here, for the role
+    // chosen in onboarding Step 2 ("Initial Training Role"), rather than
+    // requiring a separate manual trigger afterward.
+    const { data: trackData, error: trackErr } = await supabase.from('training_tracks').insert({
+      volunteer_id: uid,
+      role: onboardForm.training_role,
+      is_new_volunteer_track: true,
+      requested_by: profile.id,
+    }).select().single()
+    if (trackErr) msg(`Profile created but starting role training failed: ${trackErr.message}`, 'error')
+
     const { error: appErr } = await supabase.from('volunteer_applications')
       .update({ stage: 'completed', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
       .eq('id', selected.id)
     if (appErr) msg(`Profile created but application stage update failed: ${appErr.message}`, 'error')
 
     await audit('created_volunteer', 'volunteer', uid, selected.full_name, 'from pipeline')
-    if (!appErr) msg(`Profile created for ${selected.full_name}`)
+    if (!trackErr) {
+      await audit('triggered_training', 'training_track', trackData?.id, selected.full_name, `role: ${onboardForm.training_role} (new volunteer track, auto-created on account creation)`)
+    }
+    if (!appErr && !trackErr) msg(`Profile created for ${selected.full_name} — training started for ${onboardForm.training_role}`)
+    else if (!appErr) msg(`Profile created for ${selected.full_name}`)
     if (onVolunteerCreated) onVolunteerCreated()
 
     setSelected(null)
@@ -1487,6 +1504,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setOnboardForm({
       affiliation:   a.onboard_affiliation   || '',
       default_role:  a.onboard_default_role  || '',
+      training_role: a.onboard_training_role || '',
       preferred_slots: a.onboard_preferred_slots || [],
       preferred_roles: a.onboard_preferred_roles || [],
       sma_name:          affiliData.sma_name          || '',
@@ -1716,7 +1734,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     if (a === 'intern')  return !!(onboardForm.intern_school && onboardForm.intern_department && onboardForm.advisor_name && onboardForm.advisor_contact)
     return true
   }
-  const step2Valid    = !!onboardForm.default_role
+  const step2Valid    = !!onboardForm.default_role && !!onboardForm.training_role
   const step3Valid    = onboardForm.preferred_slots.length > 0 && onboardForm.preferred_roles.length > 0
   const allStepsValid = step1Valid() && step2Valid && step3Valid && docsComplete
 
@@ -1726,6 +1744,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       { label: 'Email',    value: selected?.email },
       { label: 'Affil.',   value: onboardForm.affiliation },
       { label: 'Position', value: onboardForm.default_role },
+      { label: 'Training Role', value: onboardForm.training_role },
     ]
     if (onboardForm.preferred_slots.length > 0)
       base.push({ label: 'Slots', value: `${onboardForm.preferred_slots.length} selected` })
@@ -2399,7 +2418,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>What is their affiliation?</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.6rem' }}>
-                  {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, default_role: f.default_role, preferred_slots: f.preferred_slots, preferred_roles: f.preferred_roles }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
+                  {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, default_role: f.default_role, training_role: f.training_role, preferred_slots: f.preferred_slots, preferred_roles: f.preferred_roles }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
                 </div>
                 {onboardForm.affiliation && <AffiliationExtras />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -2415,9 +2434,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.6rem' }}>
                   {ROLES.map(role => { const active = onboardForm.default_role === role; return <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>{role}</button> })}
                 </div>
+
+                <div>
+                  <label style={labelStyle}>Initial Training Role</label>
+                  <select value={onboardForm.training_role} onChange={e => setOnboardForm(f => ({ ...f, training_role: e.target.value }))} style={inputStyle}>
+                    <option value="">— Select role —</option>
+                    {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.4rem' }}>
+                    Role training will start for this role automatically once the account is created.
+                  </p>
+                </div>
+
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                   <button onClick={() => setOnboardStep(1)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null }); setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
+                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null, onboard_training_role: onboardForm.training_role || null }); setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
@@ -2512,14 +2543,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       {profileSummary().map(item => <div key={item.label} style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.78rem', color: 'var(--muted)' }}><span style={{ color: 'var(--text)', fontWeight: 500 }}>{item.label}: </span>{item.value}</div>)}
                       <div style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: C.blue + '10', border: `1px solid ${C.blue}35`, fontSize: '0.78rem' }}><span style={{ color: 'var(--muted)', fontWeight: 500 }}>Password: </span><span style={{ fontFamily: 'DM Mono, monospace', color: C.blue, fontWeight: 600 }}>BFC2025!</span></div>
                     </div>
-                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Waitlist placement now happens after role training is completed, not on account creation.</p>
+                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Role training for <strong>{onboardForm.training_role || '—'}</strong> will start automatically on creation. Waitlist placement happens once that training is completed, not now.</p>
                   </div>
                 )}
 
                 {!allStepsValid && (
                   <p style={{ fontSize: '0.82rem', color: C.warn, fontWeight: 500 }}>
                     {!step1Valid() && 'Affiliation details required. '}
-                    {!step2Valid && 'Default position required. '}
+                    {!step2Valid && 'Default position and initial training role required. '}
                     {!step3Valid && 'At least one available shift and one role required. '}
                   </p>
                 )}
