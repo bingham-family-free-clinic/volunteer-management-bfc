@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { ROLES, TRAINING_STAGE_LABELS } from '../lib/constants'
 import { formatDateTime } from '../lib/timeUtils'
+import { canTriggerTraining } from '../lib/trainingHelpers'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Mirrors the order of the `training_stage` Postgres enum (migration 001).
@@ -26,9 +27,10 @@ const STAGE_COLORS = {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-// Step 4 — read-only. No mutations here; this step only proves the data model
-// (training_tracks joined to profiles) renders correctly. Trigger/approve/vouch
-// actions and the RBAC-widening of the tab's own visibility come in Steps 5, 6, 8.
+// Step 4 — read-only list + filters (done).
+// Step 5 — adds the "Trigger Training" action below (gated by canTriggerTraining()).
+// Approve/vouch actions and the RBAC-widening of the tab's own visibility come
+// in Steps 6 and 8.
 export default function RoleTrainingDashboard({ supabase, profile }) {
   const [tracks, setTracks]         = useState([])
   const [loading, setLoading]       = useState(true)
@@ -36,7 +38,50 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
   const [roleFilter, setRoleFilter]   = useState('all')
   const [stageFilter, setStageFilter] = useState('all')
 
+  // ── Trigger Training action (Step 5) ──────────────────────────────────────
+  const [myRoleStatus, setMyRoleStatus]     = useState(null)   // current admin's own volunteer_role_status row, for canTriggerTraining()
+  const [volunteers, setVolunteers]         = useState([])
+  const [volunteerQuery, setVolunteerQuery] = useState('')
+  const [pickedVolunteer, setPickedVolunteer] = useState(null)
+  const [triggerRole, setTriggerRole]       = useState('')
+  const [isNewVolunteerTrack, setIsNewVolunteerTrack] = useState(false)
+  const [triggering, setTriggering]         = useState(false)
+  const [toast, setToast]                   = useState(null)
+
   useEffect(() => { loadTracks() }, [])
+  useEffect(() => { loadMyRoleStatus() }, [])
+  useEffect(() => { loadVolunteers() }, [])
+
+  function msg(text, type = 'success') { setToast({ text, type }); setTimeout(() => setToast(null), 3500) }
+
+  async function audit(action, target_type, target_id, target_name, details) {
+    try {
+      await supabase.from('audit_logs').insert({
+        admin_id: profile.id, action, target_type,
+        target_id:   target_id   ? String(target_id) : null,
+        target_name: target_name || null,
+        details:     details     || null,
+      })
+    } catch (e) { console.error('audit failed:', e) }
+  }
+
+  async function loadMyRoleStatus() {
+    const { data } = await supabase
+      .from('volunteer_role_status')
+      .select('*')
+      .eq('volunteer_id', profile.id)
+      .maybeSingle()
+    setMyRoleStatus(data || null)
+  }
+
+  async function loadVolunteers() {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, default_role')
+      .eq('role', 'volunteer')
+      .order('full_name')
+    setVolunteers(data || [])
+  }
 
   async function loadTracks() {
     setLoading(true)
@@ -60,6 +105,61 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
     if (stageFilter !== 'all' && t.stage !== stageFilter) return false
     return true
   })
+
+  const canTrigger = canTriggerTraining(profile, myRoleStatus)
+
+  const matchingVolunteers = volunteerQuery.trim().length === 0
+    ? []
+    : volunteers.filter(v => {
+        const q = volunteerQuery.trim().toLowerCase()
+        return v.full_name?.toLowerCase().includes(q) || v.email?.toLowerCase().includes(q)
+      }).slice(0, 8)
+
+  async function handleTrigger() {
+    if (!pickedVolunteer || !triggerRole) return
+
+    const existing = tracks.find(t =>
+      t.volunteer_id === pickedVolunteer.id && t.role === triggerRole && t.stage !== 'active'
+    )
+    if (existing) {
+      msg(`${pickedVolunteer.full_name} already has an in-progress ${triggerRole} training track.`, 'error')
+      return
+    }
+
+    setTriggering(true)
+    const { data, error } = await supabase
+      .from('training_tracks')
+      .insert({
+        volunteer_id: pickedVolunteer.id,
+        role: triggerRole,
+        is_new_volunteer_track: isNewVolunteerTrack,
+        requested_by: profile.id,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      msg(`Failed to start training: ${error.message}`, 'error')
+      setTriggering(false)
+      return
+    }
+
+    await audit(
+      'triggered_training',
+      'training_track',
+      data.id,
+      pickedVolunteer.full_name,
+      `role: ${triggerRole}${isNewVolunteerTrack ? ' (new volunteer track)' : ''}`
+    )
+
+    msg(`Training started for ${pickedVolunteer.full_name} — ${triggerRole}`)
+    setPickedVolunteer(null)
+    setVolunteerQuery('')
+    setTriggerRole('')
+    setIsNewVolunteerTrack(false)
+    setTriggering(false)
+    loadTracks()
+  }
 
   // ── Stable style objects ──────────────────────────────────────────────────
   const selectStyle = { padding: '0.6rem 0.85rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.85rem', outline: 'none', fontFamily: 'DM Sans, sans-serif' }
@@ -93,6 +193,66 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
           {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
         </select>
       </div>
+
+      {toast && (
+        <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', background: toast.type === 'error' ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)', border: `1px solid ${toast.type === 'error' ? 'rgba(239,68,68,0.35)' : 'rgba(34,197,94,0.35)'}` }}>
+          <p style={{ fontSize: '0.85rem', fontWeight: 500, color: toast.type === 'error' ? '#ef4444' : '#22c55e' }}>{toast.text}</p>
+        </div>
+      )}
+
+      {canTrigger && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <p style={{ fontWeight: 600, fontFamily: 'DM Sans, sans-serif', margin: 0 }}>Trigger Training</p>
+
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <div style={{ position: 'relative', flex: '1 1 220px', minWidth: '220px' }}>
+              <input
+                type="text"
+                placeholder="Search volunteer by name or email…"
+                value={pickedVolunteer ? pickedVolunteer.full_name : volunteerQuery}
+                onChange={e => { setPickedVolunteer(null); setVolunteerQuery(e.target.value) }}
+                style={{ ...selectStyle, width: '100%' }}
+              />
+              {!pickedVolunteer && matchingVolunteers.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '0.25rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', zIndex: 10, overflow: 'hidden' }}>
+                  {matchingVolunteers.map(v => (
+                    <button
+                      key={v.id}
+                      onClick={() => { setPickedVolunteer(v); setVolunteerQuery('') }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '0.55rem 0.85rem', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem', color: 'var(--text)' }}
+                    >
+                      {v.full_name} <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>{v.email}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <select value={triggerRole} onChange={e => setTriggerRole(e.target.value)} style={selectStyle}>
+              <option value="">— Select role —</option>
+              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: 'var(--text)', fontFamily: 'DM Sans, sans-serif', padding: '0.6rem 0' }}>
+              <input type="checkbox" checked={isNewVolunteerTrack} onChange={e => setIsNewVolunteerTrack(e.target.checked)} />
+              New volunteer (first role)
+            </label>
+
+            <button
+              onClick={handleTrigger}
+              disabled={!pickedVolunteer || !triggerRole || triggering}
+              style={{
+                padding: '0.6rem 1.1rem', borderRadius: '8px', border: 'none', fontWeight: 600, fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem',
+                cursor: (!pickedVolunteer || !triggerRole || triggering) ? 'not-allowed' : 'pointer',
+                background: (!pickedVolunteer || !triggerRole || triggering) ? 'var(--border)' : 'var(--accent)',
+                color: (!pickedVolunteer || !triggerRole || triggering) ? 'var(--muted)' : '#fff',
+              }}
+            >
+              {triggering ? 'Starting…' : 'Trigger Training'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         {stagePill('all', 'All', tracks.length, stageFilter === 'all', () => setStageFilter('all'))}
