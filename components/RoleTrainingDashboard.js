@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { ROLES, TRAINING_STAGE_LABELS } from '../lib/constants'
 import { formatDateTime } from '../lib/timeUtils'
-import { canTriggerTraining } from '../lib/trainingHelpers'
+import { canTriggerTraining, canApproveWrittenTraining } from '../lib/trainingHelpers'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Mirrors the order of the `training_stage` Postgres enum (migration 001).
@@ -47,6 +47,9 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
   const [isNewVolunteerTrack, setIsNewVolunteerTrack] = useState(false)
   const [triggering, setTriggering]         = useState(false)
   const [toast, setToast]                   = useState(null)
+
+  // ── Written Training Approval queue (Step 6) ──────────────────────────────
+  const [approvingId, setApprovingId]       = useState(null)   // training_track id currently being approved
 
   useEffect(() => { loadTracks() }, [])
   useEffect(() => { loadMyRoleStatus() }, [])
@@ -107,6 +110,9 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
   })
 
   const canTrigger = canTriggerTraining(profile, myRoleStatus)
+  const canApproveWritten = canApproveWrittenTraining(profile, myRoleStatus)
+
+  const pendingWrittenApproval = tracks.filter(t => t.stage === 'pending_written_approval')
 
   const matchingVolunteers = volunteerQuery.trim().length === 0
     ? []
@@ -158,6 +164,36 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
     setTriggerRole('')
     setIsNewVolunteerTrack(false)
     setTriggering(false)
+    loadTracks()
+  }
+
+  async function handleApproveWritten(track) {
+    setApprovingId(track.id)
+    const { error } = await supabase
+      .from('training_tracks')
+      .update({
+        written_training_approved_by: profile.id,
+        written_training_approved_at: new Date().toISOString(),
+        stage: 'shift_1_pending',
+      })
+      .eq('id', track.id)
+
+    if (error) {
+      msg(`Failed to approve: ${error.message}`, 'error')
+      setApprovingId(null)
+      return
+    }
+
+    await audit(
+      'approved_written_training',
+      'training_track',
+      track.id,
+      track.volunteer?.full_name,
+      `role: ${track.role}`
+    )
+
+    msg(`Written training approved for ${track.volunteer?.full_name || 'volunteer'} — ${track.role}`)
+    setApprovingId(null)
     loadTracks()
   }
 
@@ -251,6 +287,48 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
               {triggering ? 'Starting…' : 'Trigger Training'}
             </button>
           </div>
+        </div>
+      )}
+
+      {canApproveWritten && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <p style={{ fontWeight: 600, fontFamily: 'DM Sans, sans-serif', margin: 0 }}>Written Training Approvals</p>
+
+          {pendingWrittenApproval.length === 0 ? (
+            <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>No one is waiting on written-training approval right now.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              {pendingWrittenApproval.map(t => (
+                <div key={t.id} style={{ ...card, background: 'var(--bg)' }}>
+                  <div style={{ minWidth: '160px', flex: '1 1 200px' }}>
+                    <p style={{ fontWeight: 600, fontFamily: 'DM Sans, sans-serif', color: 'var(--text)' }}>
+                      {t.volunteer?.full_name || 'Unknown volunteer'}
+                    </p>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{t.volunteer?.email}</p>
+                  </div>
+
+                  <div style={{ minWidth: '120px' }}>
+                    <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Role</p>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text)', fontWeight: 500 }}>{t.role}</p>
+                  </div>
+
+                  <button
+                    onClick={() => handleApproveWritten(t)}
+                    disabled={approvingId === t.id}
+                    style={{
+                      marginLeft: 'auto', padding: '0.5rem 1rem', borderRadius: '8px', border: 'none', fontWeight: 600,
+                      fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem',
+                      cursor: approvingId === t.id ? 'not-allowed' : 'pointer',
+                      background: approvingId === t.id ? 'var(--border)' : 'var(--accent)',
+                      color: approvingId === t.id ? 'var(--muted)' : '#fff',
+                    }}
+                  >
+                    {approvingId === t.id ? 'Approving…' : 'Approve'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

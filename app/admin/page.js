@@ -15,6 +15,7 @@ import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import RoleTrainingDashboard from '../../components/RoleTrainingDashboard'
+import { canApproveTraining, canTriggerTraining, canApproveWrittenTraining } from '../../lib/trainingHelpers'
 
 export const dynamic = 'force-dynamic'
 
@@ -565,6 +566,10 @@ function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitc
 export default function AdminPage() {
   const [profile, setProfile] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
+  // Step 6: current admin's own volunteer_role_status row (training_privileges
+  // like CMI / Role Trainer), needed to widen the Role Training tab's
+  // visibility beyond hasAdminAccess() — see tabItems below.
+  const [myTrainingRoleStatus, setMyTrainingRoleStatus] = useState(null)
 
   const [volunteers, setVolunteers]     = useState([])
   const [activeShifts, setActiveShifts] = useState([])
@@ -775,12 +780,30 @@ export default function AdminPage() {
     tabItems.splice(volIdx === -1 ? tabItems.length : volIdx + 1, 0, ['languages', 'Languages'])
   }
 
-  // Role Training Pipeline (Step 4): visible to anyone who already passed
-  // hasAdminAccess() to reach this page — no additional per-role gating yet.
-  // Step 6 widens this tab's visibility further (to include people with only
-  // a training privilege, no general admin access) and narrows the actions
-  // inside it by RBAC; this step is read-only and open to every admin view.
-  tabItems.push(['role-training', 'Role Training'])
+  // Role Training Pipeline (Step 6): visibility widened beyond hasAdminAccess()
+  // to also include anyone who holds a training-approval/trigger role or
+  // privilege, per the Data Model section, so a person whose default_role or
+  // training_privileges only grant training access (not general admin access)
+  // still sees the tab.
+  //
+  // KNOWN GAP (flagged, not fixed here — explicitly deferred): this check only
+  // ever runs for users who already have profiles.role === 'admin' AND already
+  // passed hasAdminAccess() to get past the accessDenied screen above. Anyone
+  // whose profiles.role is 'volunteer' — which is every account Pipeline.js's
+  // handleCreateProfile() creates, including Clinical Care Volunteers — is
+  // redirected to /volunteer before this code ever runs, and anyone who is
+  // role === 'admin' but fails hasAdminAccess() is stopped by the accessDenied
+  // screen before tabItems is built. So in practice this OR still only ever
+  // widens access for existing admins who'd already see the tab anyway. A
+  // volunteer-role person holding only CMI / Role Trainer privileges cannot
+  // reach this tab through admin_page.js at all today — see RoleTrainerEditor
+  // (wired into volunteer_page.js instead, for exactly this reason).
+  const canSeeRoleTraining =
+    hasAdminAccess(profile) ||
+    canApproveTraining(profile, myTrainingRoleStatus) ||
+    canTriggerTraining(profile, myTrainingRoleStatus) ||
+    canApproveWrittenTraining(profile, myTrainingRoleStatus)
+  if (canSeeRoleTraining) tabItems.push(['role-training', 'Role Training'])
 
   // ── Desktop header groupings — derived from tabItems, so they automatically
   // respect whatever this role does/doesn't have access to. ──────────────────
@@ -1170,6 +1193,12 @@ export default function AdminPage() {
       }
       setProfile(p)
       if (p?.default_role === 'Credentialing') setTab('providers')
+      const { data: roleStatus } = await supabase
+        .from('volunteer_role_status')
+        .select('*')
+        .eq('volunteer_id', p.id)
+        .maybeSingle()
+      setMyTrainingRoleStatus(roleStatus || null)
       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
       setLoading(false)
     }

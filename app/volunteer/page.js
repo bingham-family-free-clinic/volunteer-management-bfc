@@ -13,6 +13,8 @@ import VolunteerTasks from '../../components/VolunteerTasks'
 import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
+import RoleTrainerEditor from '../../components/RoleTrainerEditor'
+import { canApproveWrittenTraining } from '../../lib/trainingHelpers'
 
 
 export const dynamic = 'force-dynamic'
@@ -569,6 +571,10 @@ function VolunteerPageInner() {
   // ── Core auth/profile state (loaded immediately) ─────────────────────────
   const [user, setUser]       = useState(null)
   const [profile, setProfile] = useState(null)
+  // Step 6: this volunteer's own volunteer_role_status row (training_privileges
+  // like CMI / Role Trainer), needed for canApproveWrittenTraining() to gate
+  // the Role Trainer Editor tab below.
+  const [myTrainingRoleStatus, setMyTrainingRoleStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab]         = useState('clock')
 
@@ -728,6 +734,13 @@ function VolunteerPageInner() {
       .eq('id', user.id)
       .single()
     setProfile(profileData)
+
+    supabase
+      .from('volunteer_role_status')
+      .select('*')
+      .eq('volunteer_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => setMyTrainingRoleStatus(data || null))
 
     if (profileData?.affiliation === 'provider') {
       setCredForm({
@@ -1150,6 +1163,13 @@ function VolunteerPageInner() {
     ? (!calloutDate || !calloutShift || !calloutRole || !calloutReason.trim())
     : (!calloutStartDate || !calloutEndDate || !calloutReason.trim())
 
+  // Step 6: only visible to volunteers holding a written-training-approval
+  // role/privilege (CS/CMI, per canApproveWrittenTraining()). Lives here
+  // rather than in admin_page.js so that privilege-only volunteers (whose
+  // profiles.role is 'volunteer', not 'admin') can actually reach it — see
+  // the flagged gap on the admin-side Role Training tab widening.
+  const canEditRoleTraining = canApproveWrittenTraining(profile, myTrainingRoleStatus)
+
   const TABS = [
     ['clock', 'Clock'],
     ['schedule', 'Schedule'],
@@ -1159,6 +1179,7 @@ function VolunteerPageInner() {
     ...(profile?.team ? [['tasks', 'Tasks']] : []),
     ['account', 'Account'],
     ...(trainingAvailable ? [['training', 'Training']] : []),
+    ...(canEditRoleTraining ? [['role-trainer-editor', 'Role Trainer Editor']] : []),
     ...(surveyOpen ? [['feedback', 'Feedback']] : []),
   ]
 
@@ -1792,6 +1813,14 @@ function VolunteerPageInner() {
               setTab('clock')
             }}
           />
+        )}
+
+        {/* ── ROLE TRAINER EDITOR TAB (Step 6) ───────────────────────────────
+            Gated by canEditRoleTraining above (canApproveWrittenTraining()),
+            not just tab visibility — belt-and-suspenders in case a badge/link
+            elsewhere in the app ever pointed straight at this tab key. */}
+        {tab === 'role-trainer-editor' && canEditRoleTraining && (
+          <RoleTrainerEditor supabase={supabase} profile={profile} />
         )}
 
         {/* ── FEEDBACK TAB ─────────────────────────────────────────────────
