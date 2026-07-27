@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { ROLES, TRAINING_STAGE_LABELS } from '../lib/constants'
 import { formatDateTime } from '../lib/timeUtils'
-import { canTriggerTraining, canApproveWrittenTraining } from '../lib/trainingHelpers'
+import { canTriggerTraining, canApproveWrittenTraining, canApproveTraining } from '../lib/trainingHelpers'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Mirrors the order of the `training_stage` Postgres enum (migration 001).
@@ -29,8 +29,8 @@ const STAGE_COLORS = {
 // ─── Component ────────────────────────────────────────────────────────────────
 // Step 4 — read-only list + filters (done).
 // Step 5 — adds the "Trigger Training" action below (gated by canTriggerTraining()).
-// Approve/vouch actions and the RBAC-widening of the tab's own visibility come
-// in Steps 6 and 8.
+// Step 6 — adds the Written Training Approvals queue (gated by canApproveWrittenTraining()).
+// Step 8 — adds the Vouch action + completion side-effects (gated by canApproveTraining()).
 export default function RoleTrainingDashboard({ supabase, profile }) {
   const [tracks, setTracks]         = useState([])
   const [loading, setLoading]       = useState(true)
@@ -39,7 +39,7 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
   const [stageFilter, setStageFilter] = useState('all')
 
   // ── Trigger Training action (Step 5) ──────────────────────────────────────
-  const [myRoleStatus, setMyRoleStatus]     = useState(null)   // current admin's own volunteer_role_status row, for canTriggerTraining()
+  const [myRoleStatus, setMyRoleStatus]     = useState(null)   // current admin's own volunteer_role_status row, for canTriggerTraining()/canApproveTraining()/canApproveWrittenTraining()
   const [volunteers, setVolunteers]         = useState([])
   const [volunteerQuery, setVolunteerQuery] = useState('')
   const [pickedVolunteer, setPickedVolunteer] = useState(null)
@@ -50,6 +50,9 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
 
   // ── Written Training Approval queue (Step 6) ──────────────────────────────
   const [approvingId, setApprovingId]       = useState(null)   // training_track id currently being approved
+
+  // ── Vouch queue + completion side-effects (Step 8) ────────────────────────
+  const [vouchingId, setVouchingId]         = useState(null)   // training_track id currently being vouched
 
   useEffect(() => { loadTracks() }, [])
   useEffect(() => { loadMyRoleStatus() }, [])
@@ -111,8 +114,10 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
 
   const canTrigger = canTriggerTraining(profile, myRoleStatus)
   const canApproveWritten = canApproveWrittenTraining(profile, myRoleStatus)
+  const canVouch = canApproveTraining(profile, myRoleStatus)
 
   const pendingWrittenApproval = tracks.filter(t => t.stage === 'pending_written_approval')
+  const pendingVouch = tracks.filter(t => t.stage === 'pending_vouch')
 
   const matchingVolunteers = volunteerQuery.trim().length === 0
     ? []
@@ -194,6 +199,160 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
 
     msg(`Written training approved for ${track.volunteer?.full_name || 'volunteer'} — ${track.role}`)
     setApprovingId(null)
+    loadTracks()
+  }
+
+  // ── Vouch action + completion side-effects (Step 8) ───────────────────────
+  // No client-side transaction, so these run as a best-effort sequence: the
+  // two steps that define the actual state transition (stamping the shift-2
+  // row, advancing training_tracks.stage) are treated as hard failures that
+  // stop here; everything after that (active_roles, waitlist, audit log,
+  // completion email) is a side-effect of a transition that already
+  // succeeded, so a failure there is surfaced as a warning rather than
+  // rolled back — same "the important thing happened, a follow-up step
+  // didn't" pattern Pipeline.js already uses for stage-move-but-email-failed.
+  async function handleVouch(track) {
+    setVouchingId(track.id)
+    const warnings = []
+
+    const { data: shift2, error: shift2Err } = await supabase
+      .from('role_training_shifts')
+      .select('*')
+      .eq('training_track_id', track.id)
+      .eq('shift_number', 2)
+      .maybeSingle()
+
+    if (shift2Err || !shift2) {
+      msg(`Can't vouch — no completed Shift 2 found for ${track.volunteer?.full_name || 'this volunteer'}.`, 'error')
+      setVouchingId(null)
+      return
+    }
+
+    const { error: vouchErr } = await supabase
+      .from('role_training_shifts')
+      .update({ vouched_by: profile.id, vouched_at: new Date().toISOString() })
+      .eq('id', shift2.id)
+
+    if (vouchErr) {
+      msg(`Failed to vouch: ${vouchErr.message}`, 'error')
+      setVouchingId(null)
+      return
+    }
+
+    const { error: stageErr } = await supabase
+      .from('training_tracks')
+      .update({ stage: 'active' })
+      .eq('id', track.id)
+
+    if (stageErr) {
+      // Shift 2 is already stamped as vouched at this point — flagging as a
+      // known gap rather than attempting a manual rollback of the shift
+      // update, since there's no transaction wrapping the two calls.
+      msg(`Vouched, but failed to activate the track: ${stageErr.message}. Please check this track manually.`, 'error')
+      setVouchingId(null)
+      loadTracks()
+      return
+    }
+
+    // 1) Append role into volunteer_role_status.active_roles (upsert if missing)
+    const { data: roleStatus, error: roleStatusLoadErr } = await supabase
+      .from('volunteer_role_status')
+      .select('*')
+      .eq('volunteer_id', track.volunteer_id)
+      .maybeSingle()
+
+    if (roleStatusLoadErr) {
+      warnings.push(`active_roles lookup failed: ${roleStatusLoadErr.message}`)
+    } else if (!roleStatus) {
+      const { error } = await supabase
+        .from('volunteer_role_status')
+        .insert({ volunteer_id: track.volunteer_id, active_roles: [track.role] })
+      if (error) warnings.push(`active_roles insert failed: ${error.message}`)
+    } else {
+      const nextRoles = roleStatus.active_roles.includes(track.role)
+        ? roleStatus.active_roles
+        : [...roleStatus.active_roles, track.role]
+      const { error } = await supabase
+        .from('volunteer_role_status')
+        .update({ active_roles: nextRoles, updated_at: new Date().toISOString() })
+        .eq('id', roleStatus.id)
+      if (error) warnings.push(`active_roles update failed: ${error.message}`)
+    }
+
+    // 2) Upsert the waitlist row (insert or append preferred_roles) — the
+    // trigger point this table moved to when Step 3 removed the old insert
+    // out of Pipeline.js's handleCreateProfile().
+    const { data: wlRow, error: wlLoadErr } = await supabase
+      .from('waitlist')
+      .select('*')
+      .eq('volunteer_id', track.volunteer_id)
+      .maybeSingle()
+
+    if (wlLoadErr) {
+      warnings.push(`waitlist lookup failed: ${wlLoadErr.message}`)
+    } else if (!wlRow) {
+      const { error } = await supabase
+        .from('waitlist')
+        .insert({
+          volunteer_id: track.volunteer_id,
+          preferred_roles: [track.role],
+          source: 'role_training_completed',
+          added_by: profile.id,
+        })
+      if (error) warnings.push(`waitlist insert failed: ${error.message}`)
+    } else {
+      const nextPreferred = (wlRow.preferred_roles || []).includes(track.role)
+        ? wlRow.preferred_roles
+        : [...(wlRow.preferred_roles || []), track.role]
+      const { error } = await supabase
+        .from('waitlist')
+        .update({ preferred_roles: nextPreferred })
+        .eq('id', wlRow.id)
+      if (error) warnings.push(`waitlist update failed: ${error.message}`)
+    }
+
+    // 3) Audit log
+    await audit(
+      'vouched_training',
+      'training_track',
+      track.id,
+      track.volunteer?.full_name,
+      `role: ${track.role}`
+    )
+
+    // 4) Completion email. Reuses the same `send-stage-email` edge function
+    // Pipeline.js already calls for applicant-stage emails, generalized to a
+    // new `stage` key — per the Data Model / Step 10 note, extend the
+    // existing template system rather than build a second one. NOTE: Step 10
+    // is what actually creates the `email_templates` row for
+    // `training_completed_waitlisted`; until that row exists, this call is
+    // expected to no-op or fail server-side depending on how the edge
+    // function handles an unknown stage — treated as non-fatal here exactly
+    // like Pipeline.js's own "stage moved, but email failed" handling, since
+    // the training track has already gone active regardless of the email.
+    try {
+      const { error: emailErr } = await supabase.functions.invoke('send-stage-email', {
+        body: {
+          applicantEmail: track.volunteer?.email,
+          applicantName:  track.volunteer?.full_name,
+          stage:          'training_completed_waitlisted',
+          senderName:     profile?.full_name || 'BFC Volunteer Team',
+        },
+      })
+      if (emailErr) warnings.push(`completion email failed: ${emailErr.message}`)
+    } catch (e) {
+      warnings.push(`completion email failed: ${e.message}`)
+    }
+
+    msg(
+      warnings.length === 0
+        ? `${track.volunteer?.full_name || 'Volunteer'} is now active in ${track.role}.`
+        : `${track.volunteer?.full_name || 'Volunteer'} is now active in ${track.role}, but some follow-up steps had issues — check console.`,
+      warnings.length === 0 ? 'success' : 'error'
+    )
+    if (warnings.length) warnings.forEach(w => console.error('Vouch side-effect issue:', w))
+
+    setVouchingId(null)
     loadTracks()
   }
 
@@ -324,6 +483,48 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
                     }}
                   >
                     {approvingId === t.id ? 'Approving…' : 'Approve'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {canVouch && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <p style={{ fontWeight: 600, fontFamily: 'DM Sans, sans-serif', margin: 0 }}>Vouch Queue</p>
+
+          {pendingVouch.length === 0 ? (
+            <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>No one is waiting on a vouch right now.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              {pendingVouch.map(t => (
+                <div key={t.id} style={{ ...card, background: 'var(--bg)' }}>
+                  <div style={{ minWidth: '160px', flex: '1 1 200px' }}>
+                    <p style={{ fontWeight: 600, fontFamily: 'DM Sans, sans-serif', color: 'var(--text)' }}>
+                      {t.volunteer?.full_name || 'Unknown volunteer'}
+                    </p>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{t.volunteer?.email}</p>
+                  </div>
+
+                  <div style={{ minWidth: '120px' }}>
+                    <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Role</p>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text)', fontWeight: 500 }}>{t.role}</p>
+                  </div>
+
+                  <button
+                    onClick={() => handleVouch(t)}
+                    disabled={vouchingId === t.id}
+                    style={{
+                      marginLeft: 'auto', padding: '0.5rem 1rem', borderRadius: '8px', border: 'none', fontWeight: 600,
+                      fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem',
+                      cursor: vouchingId === t.id ? 'not-allowed' : 'pointer',
+                      background: vouchingId === t.id ? 'var(--border)' : 'var(--accent)',
+                      color: vouchingId === t.id ? 'var(--muted)' : '#fff',
+                    }}
+                  >
+                    {vouchingId === t.id ? 'Vouching…' : 'Vouch'}
                   </button>
                 </div>
               ))}
