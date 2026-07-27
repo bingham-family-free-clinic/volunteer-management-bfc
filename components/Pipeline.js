@@ -1449,22 +1449,19 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     })
     if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
 
-    const { error: waitlistErr } = await supabase.from('waitlist').insert({
-      volunteer_id:    uid,
-      preferred_slots: affiliData.preferred_slots ?? [],
-      preferred_roles: affiliData.preferred_roles ?? [],
-      source:          'pipeline',
-      added_by:        profile.id,
-    })
-    if (waitlistErr) msg(`Profile created but waitlist insert failed: ${waitlistErr.message}`, 'error')
+    // NOTE (Role Training Pipeline, Step 3): the waitlist insert that used to
+    // happen here was removed — waitlist membership now comes from completing
+    // role training instead of straight out of onboarding. See CLAUDE.md
+    // Data Model ("waitlist (existing)") and Step 8 (vouch + completion
+    // side-effects) for the new trigger point.
 
     const { error: appErr } = await supabase.from('volunteer_applications')
       .update({ stage: 'completed', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
       .eq('id', selected.id)
     if (appErr) msg(`Profile created but application stage update failed: ${appErr.message}`, 'error')
 
-    await audit('created_volunteer', 'volunteer', uid, selected.full_name, 'from pipeline → added to waitlist')
-    if (!waitlistErr && !appErr) msg(`Profile created for ${selected.full_name} — added to waitlist`)
+    await audit('created_volunteer', 'volunteer', uid, selected.full_name, 'from pipeline')
+    if (!appErr) msg(`Profile created for ${selected.full_name}`)
     if (onVolunteerCreated) onVolunteerCreated()
 
     setSelected(null)
@@ -2515,7 +2512,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       {profileSummary().map(item => <div key={item.label} style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.78rem', color: 'var(--muted)' }}><span style={{ color: 'var(--text)', fontWeight: 500 }}>{item.label}: </span>{item.value}</div>)}
                       <div style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: C.blue + '10', border: `1px solid ${C.blue}35`, fontSize: '0.78rem' }}><span style={{ color: 'var(--muted)', fontWeight: 500 }}>Password: </span><span style={{ fontFamily: 'DM Mono, monospace', color: C.blue, fontWeight: 600 }}>BFC2025!</span></div>
                     </div>
-                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Will be automatically added to the waitlist on creation.</p>
+                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Waitlist placement now happens after role training is completed, not on account creation.</p>
                   </div>
                 )}
 
