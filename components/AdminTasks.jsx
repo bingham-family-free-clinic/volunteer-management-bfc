@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { getMountainNow } from '../lib/timeUtils'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const TEAMS = [
@@ -51,11 +52,20 @@ const S = {
   },
 }
 
+function daysUntilDue(dateStr) {
+  if (!dateStr) return null
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dueLocal = new Date(y, m - 1, d)
+  const mtnNow = getMountainNow()
+  const todayLocal = new Date(mtnNow.getFullYear(), mtnNow.getMonth(), mtnNow.getDate())
+  return (dueLocal - todayLocal) / 86400000
+}
+
 function formatDue(dateStr) {
   if (!dateStr) return null
-  const d = new Date(dateStr + 'T12:00:00')
-  const diff = (d - new Date()) / 86400000
-  const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const label = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const diff = daysUntilDue(dateStr)
   if (diff < 0)  return { label, color: '#ef4444', tag: 'OVERDUE' }
   if (diff < 3)  return { label, color: '#f97316', tag: null }
   if (diff < 7)  return { label, color: '#eab308', tag: null }
@@ -526,13 +536,11 @@ export default function AdminTasks({ currentUserId, volunteers: externalVoluntee
   }
 
   // Filter logic
-  const now = new Date()
   const filtered = tasks.filter(task => {
     if (filterTeam && task.team !== filterTeam) return false
     if (filterDue) {
       if (!task.due_date) return filterDue === '' // no due date only shows when no filter
-      const d = new Date(task.due_date + 'T12:00:00')
-      const diff = (d - now) / 86400000
+      const diff = daysUntilDue(task.due_date)
       if (filterDue === 'overdue' && diff >= 0) return false
       if (filterDue === 'week'    && (diff < 0 || diff > 7)) return false
       if (filterDue === 'month'   && (diff < 0 || diff > 30)) return false
@@ -550,7 +558,7 @@ export default function AdminTasks({ currentUserId, volunteers: externalVoluntee
   const allBlocked  = tasks.filter(t => t.status === 'blocked').length
   const allOverdue  = tasks.filter(t => {
     if (t.status === 'closed' || t.status === 'inactive' || !t.due_date) return false
-    return new Date(t.due_date + 'T12:00:00') < now
+    return daysUntilDue(t.due_date) < 0
   }).length
 
   return (
