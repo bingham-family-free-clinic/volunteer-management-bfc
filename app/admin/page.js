@@ -14,6 +14,7 @@ import Live, { computeExpectedNotClockedIn } from '../../components/Live'
 import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
+import RoleTrainingDashboard from '../../components/RoleTrainingDashboard'
 
 export const dynamic = 'force-dynamic'
 
@@ -773,6 +774,13 @@ export default function AdminPage() {
     const volIdx = tabItems.findIndex(([key]) => key === 'volunteers')
     tabItems.splice(volIdx === -1 ? tabItems.length : volIdx + 1, 0, ['languages', 'Languages'])
   }
+
+  // Role Training Pipeline (Step 4): visible to anyone who already passed
+  // hasAdminAccess() to reach this page — no additional per-role gating yet.
+  // Step 6 widens this tab's visibility further (to include people with only
+  // a training privilege, no general admin access) and narrows the actions
+  // inside it by RBAC; this step is read-only and open to every admin view.
+  tabItems.push(['role-training', 'Role Training'])
 
   // ── Desktop header groupings — derived from tabItems, so they automatically
   // respect whatever this role does/doesn't have access to. ──────────────────
@@ -2553,6 +2561,7 @@ export default function AdminPage() {
         {tab === 'providers' && <Providers supabase={supabase} />}
         {tab === 'data'      && <DataDashboard supabase={supabase} />}
         {tab === 'training'  && <WeeklyTraining supabase={supabase} profile={profile} />}
+        {tab === 'role-training' && <RoleTrainingDashboard supabase={supabase} profile={profile} />}
         {tab === 'languages' && canSeeLanguageCoverage && (
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
         )}
