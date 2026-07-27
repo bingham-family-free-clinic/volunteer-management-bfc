@@ -46,13 +46,36 @@ const STAGE_COLORS = {
   rejected:              C.danger,
 }
 
-const EMAIL_STAGES = ['interview', 'onboarding', 'onboarding_missionary', 'rejected']
+const EMAIL_STAGES = [
+  'interview', 'onboarding', 'onboarding_missionary', 'rejected',
+  // Role Training Pipeline (Step 10) — not applicant-pipeline stages, but
+  // added here so they ride the exact same email_templates table / upsert /
+  // EmailTemplatesTab editor as everything else, per the plan's "extend the
+  // existing template system with new keys rather than building a second
+  // one."
+  'training_welcome', 'training_instructions', 'training_completed_waitlisted',
+]
 
 const TEMPLATE_LABELS = {
   interview:             'Interview Invitation',
   onboarding:            'Onboarding Welcome',
   onboarding_missionary: 'Onboarding — Missionary',
   rejected:              'Rejection Notice',
+  training_welcome:              'Role Training — Welcome',
+  training_instructions:         'Role Training — Instructions',
+  training_completed_waitlisted: 'Role Training — Completed / Waitlisted',
+}
+
+// The three new Step 10 stages aren't applicant-pipeline stage moves, so they
+// have no entry in STAGE_LABELS — this separate map drives the "sent
+// automatically when ___" sentence in EmailTemplatesTab's preview pane for
+// just these three, instead of the applicant-stage-move wording.
+const TRAINING_EMAIL_STAGES = ['training_welcome', 'training_instructions', 'training_completed_waitlisted']
+
+const TRAINING_EMAIL_TRIGGER_LABELS = {
+  training_welcome:              "a brand-new volunteer's account is created and their first role-training track starts automatically",
+  training_instructions:         'an existing volunteer is started on an additional role-training track',
+  training_completed_waitlisted: 'a volunteer finishes role training and is vouched into an active role',
 }
 
 const AFFILIATION_OPTIONS = [
@@ -277,16 +300,19 @@ function EmailTemplatesTab({
   // Preview: replace placeholders with sample values
   const senderPreview   = profile?.full_name || 'Your Name'
   const schedulingPreview = 'https://yourapp.com/schedule/sample-token-1234'
+  const rolePreview = 'Front Desk'
   const previewSubject = (draft.subject || '')
     .replace(/\{\{name\}\}/g, 'Jane Doe')
     .replace(/\{\{email\}\}/g, 'jane@example.com')
     .replace(/\{\{sender_name\}\}/g, senderPreview)
     .replace(/\{\{scheduling_link\}\}/g, schedulingPreview)
+    .replace(/\{\{role\}\}/g, rolePreview)
   const previewBody    = (draft.body    || '')
     .replace(/\{\{name\}\}/g, 'Jane Doe')
     .replace(/\{\{email\}\}/g, 'jane@example.com')
     .replace(/\{\{sender_name\}\}/g, senderPreview)
     .replace(/\{\{scheduling_link\}\}/g, schedulingPreview)
+    .replace(/\{\{role\}\}/g, rolePreview)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -338,6 +364,7 @@ function EmailTemplatesTab({
             <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
               Use {'{{name}}'}, {'{{email}}'}, {'{{sender_name}}'}
               {activeTemplate === 'interview' && <>, {'{{scheduling_link}}'}</>}
+              {TRAINING_EMAIL_STAGES.includes(activeTemplate) && <>, {'{{role}}'}</>}
             </span>
           </div>
 
@@ -405,7 +432,11 @@ function EmailTemplatesTab({
           </div>
 
           <p style={{ fontSize: '0.75rem', color: 'var(--muted)', lineHeight: 1.5 }}>
-            This email is sent automatically when an applicant is moved to <strong>{STAGE_LABELS[activeTemplate]}</strong>.
+            {TRAINING_EMAIL_STAGES.includes(activeTemplate) ? (
+              <>This email is sent automatically when {TRAINING_EMAIL_TRIGGER_LABELS[activeTemplate]}.</>
+            ) : (
+              <>This email is sent automatically when an applicant is moved to <strong>{STAGE_LABELS[activeTemplate]}</strong>.</>
+            )}
           </p>
         </div>
       </div>
@@ -1467,6 +1498,30 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       requested_by: profile.id,
     }).select().single()
     if (trackErr) msg(`Profile created but starting role training failed: ${trackErr.message}`, 'error')
+
+    // Role Training Pipeline (Step 10): fires the "training_welcome" template
+    // once the track above is created successfully. Non-fatal — the account
+    // and training track already exist regardless of whether this send
+    // succeeds, same "the important thing happened, a follow-up step didn't"
+    // pattern already used for Step 8's vouch-completion email. Not surfaced
+    // as its own toast (see CLAUDE.md Step 10 notes on why) — logged to the
+    // console only, same as every other quiet non-fatal side-effect failure.
+    if (!trackErr) {
+      try {
+        const { error: trainingEmailErr } = await supabase.functions.invoke('send-stage-email', {
+          body: {
+            applicantEmail: selected.email,
+            applicantName:  selected.full_name,
+            stage:          'training_welcome',
+            role:           onboardForm.training_role,
+            senderName:     profile?.full_name || 'BFC Volunteer Team',
+          },
+        })
+        if (trainingEmailErr) console.error('training_welcome email failed:', trainingEmailErr)
+      } catch (e) {
+        console.error('training_welcome email exception:', e)
+      }
+    }
 
     const { error: appErr } = await supabase.from('volunteer_applications')
       .update({ stage: 'completed', volunteer_id: uid, stage_updated_at: new Date().toISOString() })

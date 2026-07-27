@@ -163,6 +163,30 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
       `role: ${triggerRole}${isNewVolunteerTrack ? ' (new volunteer track)' : ''}`
     )
 
+    // Role Training Pipeline (Step 10): keyed off is_new_volunteer_track
+    // rather than "which UI created the row" — this panel can also create a
+    // brand-new volunteer's first-role track (via the "New volunteer (first
+    // role)" checkbox above) when Pipeline.js's automatic onboarding
+    // creation wasn't the path used, and that case should get the welcome
+    // email too, same as if it had come through onboarding. Non-fatal,
+    // logged to the console only — same treatment as Pipeline.js's
+    // training_welcome send in handleCreateProfile().
+    try {
+      const trainingStage = isNewVolunteerTrack ? 'training_welcome' : 'training_instructions'
+      const { error: trainingEmailErr } = await supabase.functions.invoke('send-stage-email', {
+        body: {
+          applicantEmail: pickedVolunteer.email,
+          applicantName:  pickedVolunteer.full_name,
+          stage:          trainingStage,
+          role:           triggerRole,
+          senderName:     profile?.full_name || 'BFC Volunteer Team',
+        },
+      })
+      if (trainingEmailErr) console.error(`${trainingStage} email failed:`, trainingEmailErr)
+    } catch (e) {
+      console.error('training email exception:', e)
+    }
+
     msg(`Training started for ${pickedVolunteer.full_name} — ${triggerRole}`)
     setPickedVolunteer(null)
     setVolunteerQuery('')
@@ -323,19 +347,20 @@ export default function RoleTrainingDashboard({ supabase, profile }) {
     // 4) Completion email. Reuses the same `send-stage-email` edge function
     // Pipeline.js already calls for applicant-stage emails, generalized to a
     // new `stage` key — per the Data Model / Step 10 note, extend the
-    // existing template system rather than build a second one. NOTE: Step 10
-    // is what actually creates the `email_templates` row for
-    // `training_completed_waitlisted`; until that row exists, this call is
-    // expected to no-op or fail server-side depending on how the edge
-    // function handles an unknown stage — treated as non-fatal here exactly
-    // like Pipeline.js's own "stage moved, but email failed" handling, since
-    // the training track has already gone active regardless of the email.
+    // existing template system rather than build a second one. Step 10 has
+    // now added the `training_completed_waitlisted` template key/labels to
+    // Pipeline.js's EmailTemplatesTab and an `email_templates` row can be
+    // saved for it there — this call is treated as non-fatal here exactly
+    // like Pipeline.js's own "stage moved, but email failed" handling either
+    // way, since the training track has already gone active regardless of
+    // the email.
     try {
       const { error: emailErr } = await supabase.functions.invoke('send-stage-email', {
         body: {
           applicantEmail: track.volunteer?.email,
           applicantName:  track.volunteer?.full_name,
           stage:          'training_completed_waitlisted',
+          role:           track.role,
           senderName:     profile?.full_name || 'BFC Volunteer Team',
         },
       })
