@@ -505,7 +505,6 @@ export default function CSPage() {
         {/* Header */}
         {isMobile ? (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label="Open menu"
@@ -515,6 +514,7 @@ export default function CSPage() {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
+            <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
           </div>
         ) : (
           <DesktopHeader
