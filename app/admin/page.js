@@ -739,6 +739,16 @@ export default function AdminPage() {
   const [uploadingPhoto, setUploadingPhoto]           = useState(false)
   const photoInputRef = useRef(null)
 
+  // ── Training privileges state (volunteer_role_status.training_privileges) ──
+  // Edited as part of the same edit-form/Save Changes flow as the rest of the
+  // profile (see editForm.training_privileges below and handleSaveEdit) even
+  // though it physically lives in a different table. `CMI` is the only
+  // privilege exposed in the dropdown today — the underlying column is an
+  // array so more privileges (e.g. "Role Trainer") can be layered on later
+  // without a schema change.
+  const [selectedVolunteerRoleStatus, setSelectedVolunteerRoleStatus] = useState(null)
+  const [loadingRoleStatus, setLoadingRoleStatus]           = useState(false)
+
   // ── Stable style objects ────────────────────────────────────────────────────
   const card        = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
   const inputStyle  = { width: '100%', padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.95rem', outline: 'none', fontFamily: 'DM Sans, sans-serif' }
@@ -1103,6 +1113,28 @@ export default function AdminPage() {
     setLoadingFirstShift(false)
   }
 
+  // ── Training privileges helpers (volunteer_role_status.training_privileges) ─
+  // Fetched lazily on profile open, same pattern as first-shift/photo above.
+  // Seeds editForm.training_privileges so it travels through the normal
+  // Edit / Save Changes flow alongside the rest of the profile fields.
+  async function loadTrainingPrivileges(volunteerId) {
+    setLoadingRoleStatus(true)
+    const { data } = await supabase
+      .from('volunteer_role_status')
+      .select('*')
+      .eq('volunteer_id', volunteerId)
+      .maybeSingle()
+    setSelectedVolunteerRoleStatus(data || null)
+    // Dropdown reflects the single privilege currently supported (CMI). If
+    // the row somehow already holds something else (e.g. seeded directly in
+    // the DB, or a privilege added later outside this UI), leave the field
+    // blank rather than guessing — the "Current" line under the dropdown
+    // still shows the raw value either way.
+    const privileges = data?.training_privileges || []
+    setEditForm(prev => ({ ...prev, training_privileges: privileges.includes('CMI') ? 'CMI' : '' }))
+    setLoadingRoleStatus(false)
+  }
+
   // ── Profile photo helpers ───────────────────────────────────────────────────
 
   // Compress image to ≤200 KB JPEG before upload to minimise storage/egress
@@ -1285,7 +1317,7 @@ export default function AdminPage() {
       license_exp: v.license_exp||'', bls_exp: v.bls_exp||'',
       dea_exp: v.dea_exp||'', ftca_exp: v.ftca_exp||'', tb_exp: v.tb_exp||'',
       end_date: v.end_date || '', status_reason: v.status_reason || '',
-      team: v.team || '',
+      team: v.team || '', training_privileges: '',
     })
     setStatusForm({ status: v.status || 'active', status_reason: v.status_reason || '' })
     setEditing(false)
@@ -1299,6 +1331,10 @@ export default function AdminPage() {
     // Lazy-load photo only when a profile is selected
     setProfilePhotoUrl(null)
     loadProfilePhoto(v.avatar_url || null)
+    // Lazy-load training privileges only when a profile is selected
+    setSelectedVolunteerRoleStatus(null)
+    setTrainingPrivilegeDraft('')
+    loadTrainingPrivileges(v.id)
   }
 
   function handleToggleRecentShifts(volunteerId) {
@@ -1733,6 +1769,29 @@ export default function AdminPage() {
       return
     }
 
+    // Training privileges live in a separate table (volunteer_role_status),
+    // so this is a second write rather than part of the `updates` object
+    // above. Only 'CMI' is a selectable option today, so the array written
+    // is either ['CMI'] or empty.
+    const nextTrainingPrivileges = editForm.training_privileges ? [editForm.training_privileges] : []
+    const { error: roleStatusError } = await supabase
+      .from('volunteer_role_status')
+      .upsert({
+        volunteer_id: selectedVolunteer.id,
+        training_privileges: nextTrainingPrivileges,
+      }, { onConflict: 'volunteer_id' })
+
+    if (roleStatusError) {
+      // Profile fields already saved successfully above — surface this as
+      // its own error rather than rolling back, so the admin knows exactly
+      // what didn't stick.
+      showMessage(`Profile saved, but training privileges failed to update: ${roleStatusError.message}`, 'error')
+      setSaving(false)
+      return
+    }
+
+    setSelectedVolunteerRoleStatus(prev => ({ ...(prev || {}), volunteer_id: selectedVolunteer.id, training_privileges: nextTrainingPrivileges }))
+
     showMessage('Profile updated!', 'success')
 
     await audit(
@@ -2120,6 +2179,7 @@ export default function AdminPage() {
                     { label: 'Default Position', value: selectedVolunteer.default_role },
                     { label: 'End Date', value: selectedVolunteer.end_date || null },
                     { label: 'First Shift', value: loadingFirstShift ? 'Loading…' : (firstShiftDate ? new Date(firstShiftDate).toLocaleDateString('en-US', { timeZone: 'America/Denver', year: 'numeric', month: 'short', day: 'numeric' }) : null) },
+                    { label: 'Training Privileges', value: loadingRoleStatus ? 'Loading…' : ((selectedVolunteerRoleStatus?.training_privileges || []).join(', ') || null) },
                     ...(selectedVolunteer.affiliation === 'missionary' ? [{ label: 'SMA Name', value: selectedVolunteer.sma_name }, { label: 'SMA Contact', value: selectedVolunteer.sma_contact }] : []),
                     ...(selectedVolunteer.affiliation === 'intern' ? [{ label: 'Advisor Name', value: selectedVolunteer.advisor_name }, { label: 'Advisor Contact', value: selectedVolunteer.advisor_contact }, { label: 'School', value: selectedVolunteer.intern_school }, { label: 'Dept / Company', value: selectedVolunteer.intern_department }] : []),
                     ...(selectedVolunteer.affiliation === 'student' ? [{ label: 'School', value: selectedVolunteer.school }, { label: 'Major', value: selectedVolunteer.major }] : [])
@@ -2228,6 +2288,17 @@ export default function AdminPage() {
                     </div>
                   )}
                   <div><label style={labelStyle}>Default Position</label><select value={editForm.default_role} onChange={e => setEditForm({...editForm, default_role: e.target.value})} style={inputStyle}><option value="">— None —</option>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+                  <div>
+                    <label style={labelStyle}>Training Privileges</label>
+                    {loadingRoleStatus ? (
+                      <p style={{ padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', fontSize: '0.95rem' }}>Loading…</p>
+                    ) : (
+                      <select value={editForm.training_privileges || ''} onChange={e => setEditForm({...editForm, training_privileges: e.target.value})} style={inputStyle}>
+                        <option value="">— None —</option>
+                        <option value="CMI">CMI</option>
+                      </select>
+                    )}
+                  </div>
                   <div>
                     <label style={labelStyle}>End Date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(auto-deactivates on this date)</span></label>
                     <input type="date" value={editForm.end_date || ''} onChange={e => setEditForm({ ...editForm, end_date: e.target.value })} style={inputStyle} />
