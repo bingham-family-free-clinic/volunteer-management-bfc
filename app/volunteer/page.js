@@ -590,6 +590,7 @@ function VolunteerPageInner() {
   const [calloutMode, setCalloutMode]           = useState('single')
   const [calloutStartDate, setCalloutStartDate] = useState('')
   const [calloutEndDate, setCalloutEndDate]     = useState('')
+  const [calloutSubmitting, setCalloutSubmitting] = useState(false)
   const [openShifts, setOpenShifts]             = useState([])
   const [myCoverRequests, setMyCoverRequests]   = useState([])
   const [requestingCoverId, setRequestingCoverId] = useState(null)
@@ -963,39 +964,47 @@ function VolunteerPageInner() {
 
   async function handleCallout(e) {
     e.preventDefault()
-    const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
-    if (calloutMode === 'single') {
-      const derivedDay = calloutDate ? dayNames[new Date(calloutDate + 'T12:00:00').getDay()] : null
-      const { error } = await supabase.from('callouts').insert({
-        volunteer_id: user.id, callout_date: calloutDate, day_of_week: derivedDay,
-        shift_time: calloutShift || null, reason: calloutReason, role: calloutRole || null,
-      })
-      if (error) showToast(error.message, 'error')
-      else { showToast('Call-out submitted!', 'success'); setCalloutDate(''); setCalloutShift(''); setCalloutReason(''); setCalloutRole('') }
-      return
-    }
-    if (!calloutStartDate || !calloutEndDate) return
-    const start = new Date(calloutStartDate + 'T12:00:00')
-    const end   = new Date(calloutEndDate   + 'T12:00:00')
-    const rows  = []
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dayName = dayNames[d.getDay()]
-      if (dayName === 'sunday' || dayName === 'saturday') continue
-      const dateStr = d.toLocaleDateString('en-CA')
-      const matchingShifts = schedule.filter(s => s.day_of_week === dayName)
-      if (matchingShifts.length === 0) continue
-      const seen = new Set()
-      for (const s of matchingShifts) {
-        const key = `${dateStr}|${s.shift_time}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        rows.push({ volunteer_id: user.id, callout_date: dateStr, day_of_week: dayName, shift_time: s.shift_time, reason: calloutReason || null, role: s.role || null })
+    // Guard against duplicate submissions (e.g. a double-click on the submit
+    // button firing this handler twice before the first request resolves).
+    if (calloutSubmitting) return
+    setCalloutSubmitting(true)
+    try {
+      const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
+      if (calloutMode === 'single') {
+        const derivedDay = calloutDate ? dayNames[new Date(calloutDate + 'T12:00:00').getDay()] : null
+        const { error } = await supabase.from('callouts').insert({
+          volunteer_id: user.id, callout_date: calloutDate, day_of_week: derivedDay,
+          shift_time: calloutShift || null, reason: calloutReason, role: calloutRole || null,
+        })
+        if (error) showToast(error.message, 'error')
+        else { showToast('Call-out submitted!', 'success'); setCalloutDate(''); setCalloutShift(''); setCalloutReason(''); setCalloutRole('') }
+        return
       }
+      if (!calloutStartDate || !calloutEndDate) return
+      const start = new Date(calloutStartDate + 'T12:00:00')
+      const end   = new Date(calloutEndDate   + 'T12:00:00')
+      const rows  = []
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayName = dayNames[d.getDay()]
+        if (dayName === 'sunday' || dayName === 'saturday') continue
+        const dateStr = d.toLocaleDateString('en-CA')
+        const matchingShifts = schedule.filter(s => s.day_of_week === dayName)
+        if (matchingShifts.length === 0) continue
+        const seen = new Set()
+        for (const s of matchingShifts) {
+          const key = `${dateStr}|${s.shift_time}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          rows.push({ volunteer_id: user.id, callout_date: dateStr, day_of_week: dayName, shift_time: s.shift_time, reason: calloutReason || null, role: s.role || null })
+        }
+      }
+      if (rows.length === 0) { showToast('No scheduled shifts found in that date range.', 'error'); return }
+      const { error } = await supabase.from('callouts').insert(rows)
+      if (error) showToast(error.message, 'error')
+      else { showToast(`${rows.length} call-out${rows.length !== 1 ? 's' : ''} submitted!`, 'success'); setCalloutStartDate(''); setCalloutEndDate(''); setCalloutReason('') }
+    } finally {
+      setCalloutSubmitting(false)
     }
-    if (rows.length === 0) { showToast('No scheduled shifts found in that date range.', 'error'); return }
-    const { error } = await supabase.from('callouts').insert(rows)
-    if (error) showToast(error.message, 'error')
-    else { showToast(`${rows.length} call-out${rows.length !== 1 ? 's' : ''} submitted!`, 'success'); setCalloutStartDate(''); setCalloutEndDate(''); setCalloutReason('') }
   }
 
   async function handleRequestCover(calloutId) {
@@ -1692,7 +1701,7 @@ function VolunteerPageInner() {
                   <p style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.5 }}>A call-out will be submitted for each of your scheduled shifts within this range. Weekends are skipped automatically.</p>
                 </>}
                 <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." required style={{ ...S.input, resize: 'vertical' }} /></div>
-                <button type="submit" disabled={calloutSubmitDisabled} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: calloutSubmitDisabled ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: calloutSubmitDisabled ? 0.5 : 1 }}>Submit Call-Out</button>
+                <button type="submit" disabled={calloutSubmitDisabled || calloutSubmitting} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: (calloutSubmitDisabled || calloutSubmitting) ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: (calloutSubmitDisabled || calloutSubmitting) ? 0.5 : 1 }}>{calloutSubmitting ? 'Submitting…' : 'Submit Call-Out'}</button>
               </form>
             </div>
 

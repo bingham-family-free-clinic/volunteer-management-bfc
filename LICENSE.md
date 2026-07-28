@@ -2,9 +2,9 @@ Copyright (c) 2026 Joshua Kent
 
 All rights reserved.
 
-## License Grant
+The Software is provided "as is," without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, and noninfringement.
 
-The software in this repository is the original work of Joshua Kent.
+## License Grant
 
 Bingham Family Free Clinic is hereby granted a perpetual, irrevocable, royalty-free license to use, run, operate, maintain, modify, and improve this software for internal organizational purposes.
 
@@ -12,8 +12,8 @@ This license includes the right for Bingham Family Free Clinic to allow employee
 
 ## Data and Content
 
-All clinic data, records, branding, and operational content remain the property of Bingham Family Free Clinic.
+Bingham Family Free Clinic is solely responsible for all data entered into, stored by, exported from, or processed by the Software, including compliance with applicable privacy, employment, and record-retention requirements.
 
-## Attribution
+## Limitation of Liability 
 
-The software was originally developed by Joshua Kent for Bingham Family Free Clinic.
+To the fullest extent permitted by applicable law, Developers shall not be liable for any claims, damages, losses, or liabilities arising out of or related to the use, operation, maintenance, modification, or administration of the Software.

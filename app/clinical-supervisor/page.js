@@ -8,6 +8,8 @@ import { getMountainNow } from '../../lib/timeUtils'
 import ProviderScheduleView from '../../components/ProviderScheduleView'
 import Live from '../../components/Live'
 
+const CALLOUTS_LIMIT = 60
+
 const MAIN_TABS = [
   ['live', 'Live'],
   ['schedule', 'Schedule'],
@@ -307,29 +309,44 @@ export default function CSPage() {
     setLoading(false)
   }
 
+  async function loadCallouts() {
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+    const cols = 'id,volunteer_id,callout_date,day_of_week,shift_time,role,reason,status,is_read,covered_by,submitted_at,volunteer:profiles!callouts_volunteer_id_fkey(full_name)'
+
+    const [{ data: pendingData }, { data: approvedData }] = await Promise.all([
+      supabase.from('callouts').select(cols)
+        .gte('callout_date', todayStr)
+        .or('status.eq.pending,status.is.null')
+        .order('callout_date', { ascending: true })
+        .limit(CALLOUTS_LIMIT),
+      supabase.from('callouts').select(cols)
+        .gte('callout_date', todayStr)
+        .eq('status', 'approved')
+        .order('callout_date', { ascending: true })
+        .limit(CALLOUTS_LIMIT),
+    ])
+
+    const pending  = (pendingData  || [])
+    const approved = (approvedData || []).filter(a => !pending.some(p => p.id === a.id))
+    const merged   = [...pending, ...approved].slice(0, CALLOUTS_LIMIT)
+
+    setCallouts(merged.map(c => ({ ...c, profiles: c.volunteer, status: c.status ?? (c.is_read ? 'approved' : 'pending') })))
+  }
+
   async function loadData(userId) {
-    const [shiftsRes, schedRes, volsRes, calloutsRes, mySchedRes] = await Promise.all([
+    const [shiftsRes, schedRes, volsRes, mySchedRes] = await Promise.all([
       supabase.from('shifts').select('id, volunteer_id, clock_in, profiles(id, full_name)').is('clock_out', null),
       supabase.from('schedule').select('*, profiles(id, full_name)').order('role'),
       supabase.from('profiles').select('id, full_name, phone, languages, role, default_role, affiliation, email, status'),
-      supabase.from('callouts')
-        .select('*, volunteer:profiles!callouts_volunteer_id_fkey(full_name)')
-        .order('submitted_at', { ascending: false })
-        .limit(100),
       supabase.from('schedule').select('*').eq('volunteer_id', userId),
     ])
 
     setActiveShifts(shiftsRes.data || [])
     setSchedule(schedRes.data || [])
     setVolunteers(volsRes.data || [])
-
-    const normalised = (calloutsRes.data || []).map(c => ({
-      ...c,
-      profiles: c.volunteer,
-      status: c.status ?? (c.is_read ? 'approved' : 'pending'),
-    }))
-    setCallouts(normalised)
     setMySchedule(mySchedRes.data || [])
+
+    await loadCallouts()
   }
 
   // ── Derived state ──────────────────────────────────────────
@@ -488,7 +505,6 @@ export default function CSPage() {
         {/* Header */}
         {isMobile ? (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label="Open menu"
@@ -498,6 +514,7 @@ export default function CSPage() {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
+            <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
           </div>
         ) : (
           <DesktopHeader

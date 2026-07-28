@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { getMountainNow } from '../lib/timeUtils'
 
 const STATUS_META = {
   open:     { label: 'Open',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
@@ -39,12 +40,26 @@ const S = {
   },
 }
 
+// due_date is a plain calendar date (e.g. "2026-07-30"), not a UTC instant —
+// it has no time-of-day to convert, so it must NOT be run through
+// asUTC/formatDateMountain (that would treat it as UTC-midnight and shift
+// it back a day once converted to Mountain Time). Instead we anchor "today"
+// to Mountain Time via getMountainNow(), so every volunteer sees the same
+// due/overdue status regardless of their own browser's timezone.
+function daysUntilDue(dateStr) {
+  if (!dateStr) return null
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dueLocal = new Date(y, m - 1, d)
+  const mtnNow = getMountainNow()
+  const todayLocal = new Date(mtnNow.getFullYear(), mtnNow.getMonth(), mtnNow.getDate())
+  return (dueLocal - todayLocal) / 86400000
+}
+
 function formatDue(dateStr) {
   if (!dateStr) return null
-  const d = new Date(dateStr + 'T12:00:00')
-  const now = new Date()
-  const diff = (d - now) / 86400000
-  const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const label = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const diff = daysUntilDue(dateStr)
   if (diff < 0)  return { label, color: '#ef4444' }
   if (diff < 3)  return { label, color: '#f97316' }
   if (diff < 7)  return { label, color: '#eab308' }
