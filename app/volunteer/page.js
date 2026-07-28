@@ -13,7 +13,6 @@ import VolunteerTasks from '../../components/VolunteerTasks'
 import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
-import RoleTrainerEditor, { canEditRoleTrainerContent } from '../../components/RoleTrainerEditor'
 import RoleTrainingTab from '../../components/RoleTrainingTab'
 
 
@@ -1195,16 +1194,6 @@ function VolunteerPageInner() {
     ? (!calloutDate || !calloutShift || !calloutRole || !calloutReason.trim())
     : (!calloutStartDate || !calloutEndDate || !calloutReason.trim())
 
-  // Restricted to the Director, Administrative Assistants, and Executive
-  // Assistants only — see canEditRoleTrainerContent() in RoleTrainerEditor.js.
-  // Written-training-approval privilege holders (CS/CMI) no longer get this
-  // tab just by holding that privilege; editing training *content* and
-  // *approving* a volunteer's completed written training are separate
-  // permissions now. Kept here (in addition to admin_page.js) so that anyone
-  // in one of these three roles whose profiles.role happens to be
-  // 'volunteer' rather than 'admin' can still reach it.
-  const canEditRoleTraining = canEditRoleTrainerContent(profile)
-
   const TABS = [
     ['clock', 'Clock'],
     ['schedule', 'Schedule'],
@@ -1215,7 +1204,6 @@ function VolunteerPageInner() {
     ['account', 'Account'],
     ...myTrainingTracks.map(t => [`training-track-${t.id}`, `${t.role} Training`]),
     ...(trainingAvailable ? [['training', 'Training']] : []),
-    ...(canEditRoleTraining ? [['role-trainer-editor', 'Role Trainer Editor']] : []),
     ...(surveyOpen ? [['feedback', 'Feedback']] : []),
   ]
 
@@ -1849,16 +1837,6 @@ function VolunteerPageInner() {
               setTab('clock')
             }}
           />
-        )}
-
-        {/* ── ROLE TRAINER EDITOR TAB (Step 6) ───────────────────────────────
-            Gated by canEditRoleTraining above (canEditRoleTrainerContent() —
-            Director / Administrative Assistant / Executive Assistant only),
-            not just tab visibility — belt-and-suspenders in case a badge/link
-            elsewhere in the app ever pointed straight at this tab key. The
-            component itself also re-checks this on render. */}
-        {tab === 'role-trainer-editor' && canEditRoleTraining && (
-          <RoleTrainerEditor supabase={supabase} profile={profile} />
         )}
 
         {/* ── ROLE TRAINING TABS (Step 9) ─────────────────────────────────────
