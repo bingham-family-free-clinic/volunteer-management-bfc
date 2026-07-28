@@ -15,6 +15,7 @@ import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import RoleTrainingDashboard from '../../components/RoleTrainingDashboard'
+import RoleTrainerEditor, { canEditRoleTrainerContent } from '../../components/RoleTrainerEditor'
 import { canApproveTraining, canTriggerTraining, canApproveWrittenTraining } from '../../lib/trainingHelpers'
 
 export const dynamic = 'force-dynamic'
@@ -717,6 +718,14 @@ export default function AdminPage() {
   // of which tabItems branch they fall into below.
   const canSeeLanguageCoverage = isOfficeManager || isDirector || isAdminAssistant
 
+  // Role Trainer Editor (written-training content): restricted to the
+  // Director, Administrative Assistants, and Executive Assistants — see
+  // canEditRoleTrainerContent() in RoleTrainerEditor.js. Deliberately
+  // separate from canSeeRoleTraining below, which governs the "Role
+  // Training" pipeline dashboard (trigger/approve/vouch) and is a broader,
+  // unrelated permission.
+  const canEditRoleTraining = canEditRoleTrainerContent(profile)
+
   // Lab Director's data scope — everyone else gets null (no restriction).
   const labVolunteerIds = isLabDirector ? getLabVolunteerIds(volunteers, schedule) : null
   const visibleVolunteers   = labVolunteerIds ? volunteers.filter(v => labVolunteerIds.has(v.id))      : volunteers
@@ -796,14 +805,26 @@ export default function AdminPage() {
   // screen before tabItems is built. So in practice this OR still only ever
   // widens access for existing admins who'd already see the tab anyway. A
   // volunteer-role person holding only CMI / Role Trainer privileges cannot
-  // reach this tab through admin_page.js at all today — see RoleTrainerEditor
-  // (wired into volunteer_page.js instead, for exactly this reason).
+  // reach this tab through admin_page.js at all today. (Note: this is about
+  // the "Role Training" pipeline dashboard below, not the separate Role
+  // Trainer Editor tab — that one's gated independently by
+  // canEditRoleTraining, further down, and is now wired into both this page
+  // and volunteer_page.js.)
   const canSeeRoleTraining =
     hasAdminAccess(profile) ||
     canApproveTraining(profile, myTrainingRoleStatus) ||
     canTriggerTraining(profile, myTrainingRoleStatus) ||
     canApproveWrittenTraining(profile, myTrainingRoleStatus)
   if (canSeeRoleTraining) tabItems.push(['role-training', 'Role Training'])
+
+  // Role Trainer Editor: written-training content, restricted to the
+  // Director, Administrative Assistants, and Executive Assistants. This is
+  // the same component/permission used on the volunteer-side tab (see
+  // volunteer_page.js) — added here too so these three roles, who normally
+  // land on admin_page.js rather than volunteer_page.js, can actually reach
+  // it without needing to hold a separate written-training-approval
+  // privilege.
+  if (canEditRoleTraining) tabItems.push(['role-trainer-editor', 'Role Trainer Editor'])
 
   // ── Desktop header groupings — derived from tabItems, so they automatically
   // respect whatever this role does/doesn't have access to. ──────────────────
@@ -2591,6 +2612,17 @@ export default function AdminPage() {
         {tab === 'data'      && <DataDashboard supabase={supabase} />}
         {tab === 'training'  && <WeeklyTraining supabase={supabase} profile={profile} />}
         {tab === 'role-training' && <RoleTrainingDashboard supabase={supabase} profile={profile} />}
+
+        {/* ── ROLE TRAINER EDITOR TAB ─────────────────────────────────────────
+            Written-training content editor, restricted to the Director,
+            Administrative Assistants, and Executive Assistants via
+            canEditRoleTraining (canEditRoleTrainerContent()) above — not
+            just tab visibility, belt-and-suspenders in case a badge/link
+            elsewhere ever points straight at this tab key. The component
+            itself also re-checks this on render. */}
+        {tab === 'role-trainer-editor' && canEditRoleTraining && (
+          <RoleTrainerEditor supabase={supabase} profile={profile} />
+        )}
         {tab === 'languages' && canSeeLanguageCoverage && (
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
         )}

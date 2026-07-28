@@ -2,18 +2,53 @@
 import { useState, useEffect } from 'react'
 import { ROLES } from '../lib/constants'
 
+// ─── Who may edit written-training content ─────────────────────────────────
+// Restricted to Administrative Assistants, Executive Assistants, and the
+// Director. This is deliberately its own, narrower check — separate from
+// canApproveWrittenTraining() in lib/trainingHelpers.js, which governs who
+// can *sign off* on a volunteer's completed written training (Clinical
+// Supervisors / CMIs, per the training-privileges model) and is unrelated to
+// who may edit the underlying training *content*. Exported so any page that
+// renders this component (admin_page.js, volunteer_page.js) can gate the tab
+// itself with the same rule, rather than duplicating the role list.
+//
+// NOTE: lib/constants.js and lib/trainingHelpers.js weren't provided as
+// files in this session, so this list lives here rather than as a proper
+// shared constant (e.g. TRAINING_CONTENT_EDITOR_ROLES). If those files are
+// available, consider moving ROLE_TRAINER_EDITOR_ROLES there and having both
+// pages import it from one place instead.
+export const ROLE_TRAINER_EDITOR_ROLES = ['Director', 'Administrative Assistant', 'Executive Assistant']
+
+export function canEditRoleTrainerContent(profile) {
+  return ROLE_TRAINER_EDITOR_ROLES.includes(profile?.default_role)
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 // Step 6 — CRUD for `role_written_trainings`: one row per role, holding the
 // editable written-training `content` and the `requires_written_approval`
 // toggle that drives whether a track sits in `pending_written_approval` after
 // written training or skips straight to `shift_1_pending`.
 //
-// Wired into volunteer_page.js as its own tab (`role-trainer-editor`), gated
-// by canApproveWrittenTraining() at the tab-visibility level — not into
-// admin_page.js — so that a volunteer holding only the CMI / Role Trainer
-// training privilege (profiles.role === 'volunteer') can actually reach it.
-// See the note on the admin-side Role Training tab widening for why.
+// Reachable from both admin_page.js and volunteer_page.js, each gating the
+// tab itself via canEditRoleTrainerContent() above. The in-component guard
+// below is belt-and-suspenders in case a badge/link elsewhere in the app
+// ever points straight at this tab key, or the component gets rendered
+// unconditionally by mistake.
 export default function RoleTrainerEditor({ supabase, profile }) {
+  if (!canEditRoleTrainerContent(profile)) {
+    return (
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.25rem' }}>
+        <p style={{ fontSize: '0.9rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif', margin: 0 }}>Access restricted</p>
+        <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
+          Only Administrative Assistants, Executive Assistants, and the Director can edit role written trainings.
+        </p>
+      </div>
+    )
+  }
+  return <RoleTrainerEditorInner supabase={supabase} profile={profile} />
+}
+
+function RoleTrainerEditorInner({ supabase, profile }) {
   const [trainings, setTrainings]     = useState({})   // role -> row from role_written_trainings
   const [drafts, setDrafts]           = useState({})   // role -> in-progress edits
   const [activeRole, setActiveRole]   = useState(ROLES[0] || '')
@@ -52,6 +87,10 @@ export default function RoleTrainerEditor({ supabase, profile }) {
   }
 
   async function handleSave() {
+    if (!canEditRoleTrainerContent(profile)) {
+      msg('Only Administrative Assistants, Executive Assistants, and the Director can save changes.', 'error')
+      return
+    }
     setSaving(true)
     const { data, error } = await supabase
       .from('role_written_trainings')

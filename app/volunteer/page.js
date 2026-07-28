@@ -13,9 +13,8 @@ import VolunteerTasks from '../../components/VolunteerTasks'
 import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
-import RoleTrainerEditor from '../../components/RoleTrainerEditor'
+import RoleTrainerEditor, { canEditRoleTrainerContent } from '../../components/RoleTrainerEditor'
 import RoleTrainingTab from '../../components/RoleTrainingTab'
-import { canApproveWrittenTraining } from '../../lib/trainingHelpers'
 
 
 export const dynamic = 'force-dynamic'
@@ -573,8 +572,10 @@ function VolunteerPageInner() {
   const [user, setUser]       = useState(null)
   const [profile, setProfile] = useState(null)
   // Step 6: this volunteer's own volunteer_role_status row (training_privileges
-  // like CMI / Role Trainer), needed for canApproveWrittenTraining() to gate
-  // the Role Trainer Editor tab below.
+  // like CMI / Role Trainer). No longer used to gate the Role Trainer Editor
+  // tab (that's now restricted to Director/Admin Assistant/Exec Assistant via
+  // canEditRoleTrainerContent(), independent of training privileges) — still
+  // used for the read-only "Active Roles" block on the Account tab below.
   const [myTrainingRoleStatus, setMyTrainingRoleStatus] = useState(null)
   // Step 9: this volunteer's own in-progress training_tracks rows (excludes
   // stage === 'active'), used to render one dynamic "{Role} Training" tab per
@@ -1194,12 +1195,15 @@ function VolunteerPageInner() {
     ? (!calloutDate || !calloutShift || !calloutRole || !calloutReason.trim())
     : (!calloutStartDate || !calloutEndDate || !calloutReason.trim())
 
-  // Step 6: only visible to volunteers holding a written-training-approval
-  // role/privilege (CS/CMI, per canApproveWrittenTraining()). Lives here
-  // rather than in admin_page.js so that privilege-only volunteers (whose
-  // profiles.role is 'volunteer', not 'admin') can actually reach it — see
-  // the flagged gap on the admin-side Role Training tab widening.
-  const canEditRoleTraining = canApproveWrittenTraining(profile, myTrainingRoleStatus)
+  // Restricted to the Director, Administrative Assistants, and Executive
+  // Assistants only — see canEditRoleTrainerContent() in RoleTrainerEditor.js.
+  // Written-training-approval privilege holders (CS/CMI) no longer get this
+  // tab just by holding that privilege; editing training *content* and
+  // *approving* a volunteer's completed written training are separate
+  // permissions now. Kept here (in addition to admin_page.js) so that anyone
+  // in one of these three roles whose profiles.role happens to be
+  // 'volunteer' rather than 'admin' can still reach it.
+  const canEditRoleTraining = canEditRoleTrainerContent(profile)
 
   const TABS = [
     ['clock', 'Clock'],
@@ -1848,9 +1852,11 @@ function VolunteerPageInner() {
         )}
 
         {/* ── ROLE TRAINER EDITOR TAB (Step 6) ───────────────────────────────
-            Gated by canEditRoleTraining above (canApproveWrittenTraining()),
+            Gated by canEditRoleTraining above (canEditRoleTrainerContent() —
+            Director / Administrative Assistant / Executive Assistant only),
             not just tab visibility — belt-and-suspenders in case a badge/link
-            elsewhere in the app ever pointed straight at this tab key. */}
+            elsewhere in the app ever pointed straight at this tab key. The
+            component itself also re-checks this on render. */}
         {tab === 'role-trainer-editor' && canEditRoleTraining && (
           <RoleTrainerEditor supabase={supabase} profile={profile} />
         )}
