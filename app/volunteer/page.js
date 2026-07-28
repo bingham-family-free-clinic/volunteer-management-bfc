@@ -14,6 +14,7 @@ import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
 import RoleTrainingTab from '../../components/RoleTrainingTab'
+import TrainingApprovals, { canSeeTrainingApprovals } from '../../components/TrainingApprovals'
 
 
 export const dynamic = 'force-dynamic'
@@ -1194,6 +1195,14 @@ function VolunteerPageInner() {
     ? (!calloutDate || !calloutShift || !calloutRole || !calloutReason.trim())
     : (!calloutStartDate || !calloutEndDate || !calloutReason.trim())
 
+  // Training Approvals (written-training approval / shadow-shift vouching /
+  // final approval): a standalone component shared with admin_page.js.
+  // Visibility here is restricted to Clinical Supervisors and CMI-privileged
+  // volunteers — see PAGE_VISIBILITY in TrainingApprovals.js. Who can act on
+  // any given trainee's role (separate from just seeing the tab) is
+  // controlled by TRAINING_ROLE_APPROVAL_MATRIX at the top of that file.
+  const canSeeTrainingApprovalsTab = canSeeTrainingApprovals(profile, myTrainingRoleStatus, 'volunteer')
+
   const TABS = [
     ['clock', 'Clock'],
     ['schedule', 'Schedule'],
@@ -1201,6 +1210,7 @@ function VolunteerPageInner() {
     ['messages', 'Messages'],
     ...(isIntern ? [['internreport', 'Report Hours']] : []),
     ...(profile?.team ? [['tasks', 'Tasks']] : []),
+    ...(canSeeTrainingApprovalsTab ? [['training-approvals', 'Training Approvals']] : []),
     ['account', 'Account'],
     ...myTrainingTracks.map(t => [`training-track-${t.id}`, `${t.role} Training`]),
     ...(trainingAvailable ? [['training', 'Training']] : []),
@@ -1855,6 +1865,19 @@ function VolunteerPageInner() {
             />
           )
         ))}
+
+        {/* ── TRAINING APPROVALS TAB ───────────────────────────────────────────
+            Approve written trainings, vouch shadow shifts, and give final
+            approval — restricted to Clinical Supervisors / CMI. Gated a
+            second time inside the component itself. */}
+        {tab === 'training-approvals' && canSeeTrainingApprovalsTab && (
+          <TrainingApprovals
+            supabase={supabase}
+            profile={profile}
+            roleStatus={myTrainingRoleStatus}
+            pageContext="volunteer"
+          />
+        )}
 
         {/* ── FEEDBACK TAB ─────────────────────────────────────────────────
             Fully anonymous — no userId is passed in, since we no longer

@@ -16,6 +16,7 @@ import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import RoleTrainingDashboard from '../../components/RoleTrainingDashboard'
 import RoleTrainerEditor, { canEditRoleTrainerContent } from '../../components/RoleTrainerEditor'
+import TrainingApprovals, { canSeeTrainingApprovals } from '../../components/TrainingApprovals'
 import { canApproveTraining, canTriggerTraining, canApproveWrittenTraining } from '../../lib/trainingHelpers'
 
 export const dynamic = 'force-dynamic'
@@ -726,6 +727,14 @@ export default function AdminPage() {
   // unrelated permission.
   const canEditRoleTraining = canEditRoleTrainerContent(profile)
 
+  // Training Approvals (written-training approval / shadow-shift vouching /
+  // final approval): a standalone component shared with volunteer_page.js.
+  // Visibility here is restricted to AA, EA, Director, Office Manager, and
+  // Lab Director — see PAGE_VISIBILITY in TrainingApprovals.js. Who can act
+  // on any given trainee's role (separate from just seeing the tab) is
+  // controlled by TRAINING_ROLE_APPROVAL_MATRIX at the top of that file.
+  const canSeeTrainingApprovalsTab = canSeeTrainingApprovals(profile, myTrainingRoleStatus, 'admin')
+
   // Lab Director's data scope — everyone else gets null (no restriction).
   const labVolunteerIds = isLabDirector ? getLabVolunteerIds(volunteers, schedule) : null
   const visibleVolunteers   = labVolunteerIds ? volunteers.filter(v => labVolunteerIds.has(v.id))      : volunteers
@@ -835,6 +844,9 @@ export default function AdminPage() {
   // it without needing to hold a separate written-training-approval
   // privilege.
   if (canEditRoleTraining) tabItems.push(['role-trainer-editor', 'Role Trainer Editor'])
+
+  // Training Approvals tab — see canSeeTrainingApprovalsTab above.
+  if (canSeeTrainingApprovalsTab) tabItems.push(['training-approvals', 'Training Approvals'])
 
   // ── Desktop header groupings — derived from tabItems, so they automatically
   // respect whatever this role does/doesn't have access to. ──────────────────
@@ -2693,6 +2705,18 @@ export default function AdminPage() {
             itself also re-checks this on render. */}
         {tab === 'role-trainer-editor' && canEditRoleTraining && (
           <RoleTrainerEditor supabase={supabase} profile={profile} />
+        )}
+        {/* ── TRAINING APPROVALS TAB ───────────────────────────────────────────
+            Approve written trainings, vouch shadow shifts, and give final
+            approval. Gated a second time inside the component itself
+            (belt-and-suspenders, same pattern as Role Trainer Editor above). */}
+        {tab === 'training-approvals' && canSeeTrainingApprovalsTab && (
+          <TrainingApprovals
+            supabase={supabase}
+            profile={profile}
+            roleStatus={myTrainingRoleStatus}
+            pageContext="admin"
+          />
         )}
         {tab === 'languages' && canSeeLanguageCoverage && (
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
