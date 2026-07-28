@@ -445,13 +445,11 @@ function CalendarTab({
 
   async function load() {
     setLoading(true)
-    const nowISO = new Date().toISOString()
     const [{ data: appts, error: apptErr }, { data: blocks, error: blockErr }] = await Promise.all([
       supabase
         .from('interview_appointments')
         .select('id, applicant_id, scheduled_at, status, source, volunteer_applications ( full_name, email )')
         .eq('status', 'booked')
-        .gte('scheduled_at', nowISO)
         .order('scheduled_at', { ascending: true }),
       supabase
         .from('interview_blocked_times')
@@ -540,15 +538,24 @@ function CalendarTab({
   }
 
   // Group appointments by local calendar day for display
-  const appointmentDays = (() => {
+  function groupByDay(list) {
     const byDay = new Map()
-    for (const a of appointments) {
+    for (const a of list) {
       const key = formatSlotDayLabel(a.scheduled_at)
       if (!byDay.has(key)) byDay.set(key, [])
       byDay.get(key).push(a)
     }
     return Array.from(byDay.entries())
-  })()
+  }
+
+  const now = new Date()
+  const upcomingAppointments = appointments.filter(a => new Date(a.scheduled_at) >= now)
+  const lapsedAppointments   = appointments
+    .filter(a => new Date(a.scheduled_at) < now)
+    .sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)) // most recently lapsed first
+
+  const upcomingDays = groupByDay(upcomingAppointments)
+  const lapsedDays   = groupByDay(lapsedAppointments)
 
   const interviewApplicants = (applicants || []).filter(a => a.stage === 'interview')
 
@@ -560,11 +567,11 @@ function CalendarTab({
         <p style={secLabel}>Upcoming Interviews <span style={{ opacity: 0.7 }}>({TIMEZONE_LABEL})</span></p>
         {loading ? (
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading...</p>
-        ) : appointmentDays.length === 0 ? (
+        ) : upcomingDays.length === 0 ? (
           <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No interviews booked yet.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {appointmentDays.map(([day, appts]) => (
+            {upcomingDays.map(([day, appts]) => (
               <div key={day}>
                 <p style={{ fontSize: '0.78rem', fontWeight: 700, color: C.blue, marginBottom: '0.5rem' }}>{day}</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -576,6 +583,46 @@ function CalendarTab({
                           <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{a.volunteer_applications?.full_name ?? '—'}</p>
                           <p style={{ fontSize: '0.76rem', color: 'var(--muted)' }}>{a.volunteer_applications?.email}</p>
                         </div>
+                        <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: (a.source === 'self' ? C.light : C.muted) + '18', color: a.source === 'self' ? C.light : 'var(--muted)', border: `1px solid ${a.source === 'self' ? C.light : 'var(--muted)'}44`, fontWeight: 600 }}>
+                          {a.source === 'self' ? 'self-booked' : 'admin'}
+                        </span>
+                      </div>
+                      <button onClick={() => cancelAppointment(a)} disabled={cancellingId === a.id} style={ghostBtn()}>
+                        {cancellingId === a.id ? 'Cancelling...' : 'Cancel'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Lapsed interviews (scheduled time has passed but appointment is still "booked") ── */}
+      <div style={card}>
+        <p style={secLabel}>Lapsed Interviews <span style={{ opacity: 0.7 }}>({TIMEZONE_LABEL})</span></p>
+        {loading ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading...</p>
+        ) : lapsedDays.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No lapsed interviews.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {lapsedDays.map(([day, appts]) => (
+              <div key={day}>
+                <p style={{ fontSize: '0.78rem', fontWeight: 700, color: C.danger, marginBottom: '0.5rem' }}>{day}</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {appts.map(a => (
+                    <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0.9rem', borderRadius: '8px', border: `1px solid ${C.danger}33`, background: C.danger + '08' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.85rem', fontWeight: 600, color: C.danger, minWidth: 84 }}>{formatSlotTime(a.scheduled_at)}</span>
+                        <div>
+                          <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{a.volunteer_applications?.full_name ?? '—'}</p>
+                          <p style={{ fontSize: '0.76rem', color: 'var(--muted)' }}>{a.volunteer_applications?.email}</p>
+                        </div>
+                        <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.danger + '18', color: C.danger, border: `1px solid ${C.danger}44`, fontWeight: 600 }}>
+                          lapsed
+                        </span>
                         <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: (a.source === 'self' ? C.light : C.muted) + '18', color: a.source === 'self' ? C.light : 'var(--muted)', border: `1px solid ${a.source === 'self' ? C.light : 'var(--muted)'}44`, fontWeight: 600 }}>
                           {a.source === 'self' ? 'self-booked' : 'admin'}
                         </span>
