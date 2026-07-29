@@ -168,7 +168,7 @@ function ViewCountBadge({ message, broadcastReadCounts }) {
   )
 }
 
-function MobileSidebar({ open, onClose, navItems, activeTab, onSelectTab, showSwitchView, onSwitchView, onSignOut }) {
+function MobileSidebar({ open, onClose, navItems, activeTab, onSelectTab, switchViewItems = [], onSignOut }) {
   function handleItemClick(action) {
     action()
     onClose()
@@ -224,9 +224,10 @@ function MobileSidebar({ open, onClose, navItems, activeTab, onSelectTab, showSw
           ✕
         </button>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {showSwitchView && (
+          {switchViewItems.map(({ key, label, onClick }) => (
             <button
-              onClick={() => handleItemClick(onSwitchView)}
+              key={key}
+              onClick={() => handleItemClick(onClick)}
               style={{
                 width: '100%',
                 textAlign: 'left',
@@ -241,9 +242,9 @@ function MobileSidebar({ open, onClose, navItems, activeTab, onSelectTab, showSw
                 fontFamily: 'DM Sans, sans-serif',
               }}
             >
-              Switch View
+              {label}
             </button>
-          )}
+          ))}
 
           {navItems.map(({ key, label, badge }) => (
             <button
@@ -419,7 +420,7 @@ function dropdownItemStyle(active) {
   }
 }
 
-function DesktopHeader({ activeTab, onSelectTab, otherItems, otherOpen, onToggleOther, onCloseOther, showSwitchView, onSwitchView, onSignOut, unreadCount }) {
+function DesktopHeader({ activeTab, onSelectTab, otherItems, otherOpen, onToggleOther, onCloseOther, switchViewItems = [], onSignOut, unreadCount }) {
   const mainTabs = [
     { key: 'clock', label: 'Home' },
     { key: 'schedule', label: 'Schedule' },
@@ -488,11 +489,11 @@ function DesktopHeader({ activeTab, onSelectTab, otherItems, otherOpen, onToggle
                 minWidth: '210px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
               }}>
-                {showSwitchView && (
-                  <button onClick={() => { onCloseOther(); onSwitchView() }} style={dropdownItemStyle(false)}>
-                    Switch View
+                {switchViewItems.map(({ key, label, onClick }) => (
+                  <button key={key} onClick={() => { onCloseOther(); onClick() }} style={dropdownItemStyle(false)}>
+                    {label}
                   </button>
-                )}
+                ))}
 
                 {otherItems.map(({ key, label, badge }) => (
                   <button
@@ -1203,38 +1204,21 @@ function VolunteerPageInner() {
     return ordered.map(([key, label]) => ({ key, label, badge: tabBadge(key) }))
   })()
 
-  const canSwitchView =
-    profile?.role === 'admin' ||
-    profile?.default_role === 'Clinical Supervisor' ||
-    profile?.default_role === 'Office Manager'
-    {/* profile?.default_role === 'OSSM' */}
-
-  function handleSwitchView() {
-    // Admins take priority even if they also hold a Clinical Supervisor /
-    // Office Manager / OSSM default_role — check admin first.
-    if (profile?.role === 'admin') {
-      if (window.location.pathname.includes('admin')) {
-        window.location.href = '/volunteer'
-      } else {
-        window.location.href = '/admin'
-      }
-      return
-    }
-    if (
-      profile?.default_role === 'Clinical Supervisor' ||
-      profile?.default_role === 'Office Manager'
-    ) {
-      window.location.href = '/clinical-supervisor'
-      return
-    }
-
-    {/*
-    if (profile?.default_role === 'OSSM') {
-      window.location.href = '/ossm'
-      return
-    }
-    */}
-  }
+  // Each entry is a destination the volunteer page can switch to. Most
+  // people match at most one of the admin / clinical / OSSM cases, but an
+  // admin whose default_role is also 'OSSM' should see buttons for BOTH
+  // the admin page and the OSSM page, so this builds a list rather than
+  // picking a single destination.
+  const switchViewItems = [
+    ...(profile?.role === 'admin'
+      ? [{ key: 'admin', label: 'Switch View', onClick: () => { window.location.href = '/admin' } }]
+      : profile?.default_role === 'Clinical Supervisor' || profile?.default_role === 'Office Manager'
+      ? [{ key: 'clinical-supervisor', label: 'Switch View', onClick: () => { window.location.href = '/clinical-supervisor' } }]
+      : []),
+    ...(profile?.default_role === 'OSSM'
+      ? [{ key: 'ossm', label: 'OSSM View', onClick: () => { window.location.href = '/ossm' } }]
+      : []),
+  ]
 
   if (loading) return (
     <div style={{
@@ -1333,8 +1317,7 @@ function VolunteerPageInner() {
             otherOpen={otherMenuOpen}
             onToggleOther={() => setOtherMenuOpen(o => !o)}
             onCloseOther={() => setOtherMenuOpen(false)}
-            showSwitchView={canSwitchView}
-            onSwitchView={handleSwitchView}
+            switchViewItems={switchViewItems}
             onSignOut={handleSignOut}
             unreadCount={unreadCount}
           />
@@ -1942,8 +1925,7 @@ function VolunteerPageInner() {
           navItems={sidebarNavItems}
           activeTab={tab}
           onSelectTab={handleTabChange}
-          showSwitchView={canSwitchView}
-          onSwitchView={handleSwitchView}
+          switchViewItems={switchViewItems}
           onSignOut={handleSignOut}
         />
 
