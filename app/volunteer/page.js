@@ -1988,11 +1988,6 @@ function VolunteerPageInner() {
                 cursor: 'default',
               }}
             >
-              <img
-                src="/logo2.png"
-                alt=""
-                style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '12px', marginBottom: '1rem' }}
-              />
               <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
                 Developed by
               </p>
