@@ -44,6 +44,12 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
+function formatShiftDate(dateStr) {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr + 'T12:00:00')
+  return `${MONTH_NAMES[d.getMonth()].slice(0, 3)} ${d.getDate()}, ${d.getFullYear()}`
+}
+
 const ATTENDANCE_STATUS_STYLE = {
   present: { label: 'Present', color: 'var(--accent)' },
   late:    { label: 'Late',    color: '#f59e0b' },
@@ -242,7 +248,7 @@ function AttendanceSummary({ records, loading }) {
                   padding: '0.55rem 0.85rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)',
                 }}>
                   <div>
-                    <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{formatDate ? formatDate(r.shift_date) : r.shift_date}</p>
+                    <p style={{ fontWeight: 500, fontSize: '0.88rem' }}>{formatShiftDate(r.shift_date)}</p>
                     <p style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
                       {r.shift_time || '—'}{r.role ? ` · ${r.role}` : ''}
                       {r.status === 'late' && r.late_minutes ? ` · ${r.late_minutes}m late` : ''}
