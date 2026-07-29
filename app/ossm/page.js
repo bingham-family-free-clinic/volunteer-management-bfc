@@ -44,6 +44,11 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
+// formatDate() (from timeUtils) is built for full timestamps and applies a
+// timezone conversion — when given a plain date-only string like
+// attendance_records.shift_date ("2024-01-15"), that conversion can roll the
+// date back a day. Parsing at noon local time sidesteps that entirely, same
+// trick used by weekOfMonthOccurrence above.
 function formatShiftDate(dateStr) {
   if (!dateStr) return '—'
   const d = new Date(dateStr + 'T12:00:00')
@@ -685,7 +690,7 @@ function MissionarySchedule({ volunteerId }) {
                 </div>
                 {(e.start_date || e.end_date) && (
                   <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-                    {e.start_date ? formatDate(e.start_date) : '—'} → {e.end_date ? formatDate(e.end_date) : 'ongoing'}
+                    {e.start_date ? formatShiftDate(e.start_date) : '—'} → {e.end_date ? formatShiftDate(e.end_date) : 'ongoing'}
                   </span>
                 )}
               </div>
