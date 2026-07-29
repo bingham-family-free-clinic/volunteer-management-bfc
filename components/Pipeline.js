@@ -423,7 +423,7 @@ function EmailTemplatesTab({
 function CalendarTab({
   supabase, profile, applicants,
   card, inputStyle, labelStyle, secLabel,
-  solidBtn, ghostBtn, outlineBtn, msg,
+  solidBtn, ghostBtn, outlineBtn, msg, audit,
 }) {
   const [appointments,   setAppointments]   = useState([])
   const [blocked,        setBlocked]        = useState([])
@@ -465,9 +465,31 @@ function CalendarTab({
 
   async function cancelAppointment(appt) {
     setCancellingId(appt.id)
-    const { error } = await supabase.from('interview_appointments').update({ status: 'cancelled' }).eq('id', appt.id)
-    if (error) msg(`Failed to cancel: ${error.message}`, 'error')
-    else { msg('Interview cancelled'); await load() }
+
+    const { error } = await supabase.from('interview_appointments').delete().eq('id', appt.id)
+    if (error) {
+      msg(`Failed to cancel: ${error.message}`, 'error')
+      setCancellingId(null)
+      return
+    }
+
+    // Clear the applicant's cached scheduled time so the Pipeline tab no
+    // longer shows or gates on an interview that no longer exists.
+    const { error: applicantError } = await supabase.from('volunteer_applications')
+      .update({ interview_scheduled_at: null })
+      .eq('id', appt.applicant_id)
+    if (applicantError) console.error('failed to clear interview_scheduled_at:', applicantError)
+
+    await audit(
+      'interview_appointment_cancelled',
+      'applicant',
+      appt.applicant_id,
+      appt.volunteer_applications?.full_name,
+      `interview scheduled for ${formatSlotFull(appt.scheduled_at)} was cancelled and removed`
+    )
+
+    msg('Interview cancelled')
+    await load()
     setCancellingId(null)
   }
 
@@ -2715,6 +2737,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           ghostBtn={ghostBtn}
           outlineBtn={outlineBtn}
           msg={msg}
+          audit={audit}
         />
       )}
 
