@@ -690,6 +690,24 @@ function VolunteerPageInner() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
+  // ── Hidden dev-credits view ───────────────────────────────────────────────
+  // Triple-tap the header logo (mobile only) to reveal a small "made by"
+  // screen. Purely cosmetic — no data, no auth, just a thank-you note.
+  const [showCredits, setShowCredits] = useState(false)
+  const logoTapCount = useRef(0)
+  const logoTapTimer = useRef(null)
+  const handleLogoTap = useCallback(() => {
+    if (!isMobile) return
+    logoTapCount.current += 1
+    if (logoTapTimer.current) clearTimeout(logoTapTimer.current)
+    if (logoTapCount.current >= 3) {
+      logoTapCount.current = 0
+      setShowCredits(true)
+      return
+    }
+    logoTapTimer.current = setTimeout(() => { logoTapCount.current = 0 }, 600)
+  }, [isMobile])
+
   // Catch anything that wouldn't otherwise show up in the console: async
   // errors, errors in event handlers, etc. Logged loudly so a blank/gray
   // page always leaves a trace.
@@ -1286,7 +1304,7 @@ function VolunteerPageInner() {
               <span style={{ width: '28px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
             </button>
             <button
-              onClick={() => handleTabChange('account')}
+              onClick={() => { handleTabChange('account'); handleLogoTap() }}
               aria-label="Account"
               style={{
                 background: 'none',
@@ -1938,6 +1956,61 @@ function VolunteerPageInner() {
         {toast && (
           <div style={{ position: 'fixed', bottom: isMobile ? '4.75rem' : '1.5rem', left: '50%', transform: 'translateX(-50%)', background: toast.type === 'success' ? 'var(--accent)' : 'var(--danger)', color: '#fff', padding: '0.75rem 1.5rem', borderRadius: '100px', fontWeight: 500, fontSize: '0.9rem', boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
             {toast.text}
+          </div>
+        )}
+
+        {/* Hidden dev credits — triple-tap the header logo on mobile to open */}
+        {showCredits && isMobile && (
+          <div
+            onClick={() => setShowCredits(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.85)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1100,
+              padding: '1.5rem',
+              cursor: 'pointer',
+            }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: '16px',
+                padding: '2rem 1.75rem',
+                maxWidth: '320px',
+                width: '100%',
+                textAlign: 'center',
+                cursor: 'default',
+              }}
+            >
+              <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
+                Developed by
+              </p>
+              <p style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text)', marginBottom: '1.5rem' }}>
+                Joshua Kent
+              </p>
+              <button
+                onClick={() => setShowCredits(false)}
+                style={{
+                  padding: '0.6rem 1.5rem',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         )}
 
