@@ -95,8 +95,8 @@ export default function RoleTrainingTab({ supabase, profile, track, onTrackUpdat
 
   if (loadError) {
     return (
-      <div style={{ padding: '0.85rem 1rem', borderRadius: '10px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)' }}>
-        <p style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: 500 }}>Failed to load: {loadError}</p>
+      <div style={{ padding: '0.85rem 1rem', borderRadius: '10px', background: 'rgba(2,65,107,0.06)', border: '1px solid rgba(2,65,107,0.3)' }}>
+        <p style={{ fontSize: '0.85rem', color: '#02416b', fontWeight: 500 }}>Failed to load: {loadError}</p>
       </div>
     )
   }
@@ -114,7 +114,7 @@ export default function RoleTrainingTab({ supabase, profile, track, onTrackUpdat
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h2 style={{ fontWeight: 600, fontFamily: 'DM Sans, sans-serif', margin: 0 }}>{track.role} Training</h2>
         {toast && (
-          <span style={{ fontSize: '0.78rem', fontWeight: 500, color: toast.type === 'error' ? '#ef4444' : '#22c55e' }}>{toast.text}</span>
+          <span style={{ fontSize: '0.78rem', fontWeight: 500, color: toast.type === 'error' ? '#92a6b9' : '#02416b' }}>{toast.text}</span>
         )}
       </div>
 
@@ -140,7 +140,7 @@ export default function RoleTrainingTab({ supabase, profile, track, onTrackUpdat
               alignSelf: 'flex-start', padding: '0.6rem 1.1rem', borderRadius: '8px', border: 'none', fontWeight: 600,
               fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem',
               cursor: completing ? 'not-allowed' : 'pointer',
-              background: completing ? 'var(--border)' : 'var(--accent)',
+              background: completing ? 'var(--border)' : '#02416b',
               color: completing ? 'var(--muted)' : '#fff',
             }}
           >
@@ -149,11 +149,11 @@ export default function RoleTrainingTab({ supabase, profile, track, onTrackUpdat
         )}
 
         {isPendingApproval && (
-          <span style={badge('#f59e0b18', '#f59e0b')}>Awaiting written-training approval</span>
+          <span style={badge('#92a6b918', '#92a6b9')}>Awaiting written-training approval</span>
         )}
 
         {isPastWritten && (
-          <span style={badge('#22c55e18', '#22c55e')}>
+          <span style={badge('#02416b18', '#02416b')}>
             Written training complete{track.written_training_approved_at ? ' & approved' : ''}
           </span>
         )}

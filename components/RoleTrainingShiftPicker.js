@@ -172,8 +172,8 @@ export default function RoleTrainingShiftPicker({ supabase, trainingTrack, shift
 
   if (loadError) {
     return (
-      <div style={{ padding: '0.85rem 1rem', borderRadius: '10px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)' }}>
-        <p style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: 500 }}>Failed to load: {loadError}</p>
+      <div style={{ padding: '0.85rem 1rem', borderRadius: '10px', background: 'rgba(2,65,107,0.06)', border: '1px solid rgba(2,65,107,0.3)' }}>
+        <p style={{ fontSize: '0.85rem', color: '#02416b', fontWeight: 500 }}>Failed to load: {loadError}</p>
       </div>
     )
   }
@@ -194,7 +194,7 @@ export default function RoleTrainingShiftPicker({ supabase, trainingTrack, shift
           {weekdayLabel(existingBooking.shift_date)} · {existingBooking.shift_time}
         </p>
         {existingBooking.completed_at && (
-          <span style={{ alignSelf: 'flex-start', fontSize: '0.72rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: '#22c55e18', color: '#22c55e', border: '1px solid #22c55e44' }}>
+          <span style={{ alignSelf: 'flex-start', fontSize: '0.72rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: '#02416b18', color: '#02416b', border: '1px solid #02416b44' }}>
             Completed
           </span>
         )}
@@ -207,13 +207,13 @@ export default function RoleTrainingShiftPicker({ supabase, trainingTrack, shift
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <p style={{ fontWeight: 600, fontFamily: 'DM Sans, sans-serif', margin: 0 }}>Book Shift {shiftNumber} — {trainingTrack?.role}</p>
         {toast && (
-          <span style={{ fontSize: '0.78rem', fontWeight: 500, color: toast.type === 'error' ? '#ef4444' : '#22c55e' }}>{toast.text}</span>
+          <span style={{ fontSize: '0.78rem', fontWeight: 500, color: toast.type === 'error' ? '#92a6b9' : '#02416b' }}>{toast.text}</span>
         )}
       </div>
 
       {occError && (
-        <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)' }}>
-          <p style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: 500 }}>Failed to load availability: {occError}</p>
+        <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', background: 'rgba(2,65,107,0.06)', border: '1px solid rgba(2,65,107,0.3)' }}>
+          <p style={{ fontSize: '0.85rem', color: '#02416b', fontWeight: 500 }}>Failed to load availability: {occError}</p>
         </div>
       )}
 
@@ -240,9 +240,9 @@ export default function RoleTrainingShiftPicker({ supabase, trainingTrack, shift
                     style={{
                       ...cellBase,
                       cursor: disabled ? 'not-allowed' : 'pointer',
-                      background: active ? 'var(--accent)18' : disabled ? 'var(--bg)' : 'var(--surface)',
-                      color: active ? 'var(--accent)' : disabled ? 'var(--muted)' : 'var(--text)',
-                      border: active ? '1px solid var(--accent)55' : '1px solid var(--border)',
+                      background: active ? '#02416b' : disabled ? 'var(--bg)' : 'var(--surface)',
+                      color: active ? '#ffffff' : disabled ? 'var(--muted)' : 'var(--text)',
+                      border: active ? '1px solid #02416b' : '1px solid var(--border)',
                       opacity: disabled ? 0.55 : 1,
                     }}
                   >
@@ -270,7 +270,7 @@ export default function RoleTrainingShiftPicker({ supabase, trainingTrack, shift
           style={{
             padding: '0.6rem 1.1rem', borderRadius: '8px', border: 'none', fontWeight: 600, fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem',
             cursor: (!selected || booking) ? 'not-allowed' : 'pointer',
-            background: (!selected || booking) ? 'var(--border)' : 'var(--accent)',
+            background: (!selected || booking) ? 'var(--border)' : '#02416b',
             color: (!selected || booking) ? 'var(--muted)' : '#fff',
           }}
         >
