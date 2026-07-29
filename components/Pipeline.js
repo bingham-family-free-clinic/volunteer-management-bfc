@@ -448,7 +448,7 @@ function CalendarTab({
     const [{ data: appts, error: apptErr }, { data: blocks, error: blockErr }] = await Promise.all([
       supabase
         .from('interview_appointments')
-        .select('id, applicant_id, scheduled_at, status, source, volunteer_applications ( full_name, email )')
+        .select('id, applicant_id, scheduled_at, status, source, volunteer_applications ( full_name, email, stage )')
         .eq('status', 'booked')
         .order('scheduled_at', { ascending: true }),
       supabase
@@ -571,8 +571,12 @@ function CalendarTab({
   }
 
   const now = new Date()
-  const upcomingAppointments = appointments.filter(a => new Date(a.scheduled_at) >= now)
-  const lapsedAppointments   = appointments
+  // Only surface appointments for applicants still in the interview stage —
+  // once an applicant moves on (onboarding, rejected, back to applied), their
+  // slot is hidden here even though the row itself is left alone in the DB.
+  const visibleAppointments = appointments.filter(a => a.volunteer_applications?.stage === 'interview')
+  const upcomingAppointments = visibleAppointments.filter(a => new Date(a.scheduled_at) >= now)
+  const lapsedAppointments   = visibleAppointments
     .filter(a => new Date(a.scheduled_at) < now)
     .sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)) // most recently lapsed first
 
