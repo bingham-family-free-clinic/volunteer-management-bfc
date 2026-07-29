@@ -31,6 +31,19 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
+const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+
+const WEEK_PATTERN_LABEL = {
+  every: 'Every week',
+  odd:   'Odd weeks',
+  even:  'Even weeks',
+}
+
+function capitalize(str) {
+  if (!str) return ''
+  return str.charAt(0).toUpperCase() + str.slice(1)
+}
+
 const ATTENDANCE_STATUS_STYLE = {
   present: { label: 'Present', color: 'var(--accent)' },
   late:    { label: 'Late',    color: '#f59e0b' },
@@ -611,6 +624,73 @@ function Last30DaysShifts({ volunteerId }) {
   )
 }
 
+function MissionarySchedule({ volunteerId }) {
+  const [loading, setLoading] = useState(false)
+  const [rows, setRows] = useState(null)
+
+  async function load() {
+    setLoading(true)
+    const data = await fetchAllRows('schedule', (q) =>
+      q.select('id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes')
+        .eq('volunteer_id', volunteerId)
+    )
+    setRows(data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [volunteerId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading || rows === null) {
+    return <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading schedule…</p>
+  }
+  if (rows.length === 0) {
+    return <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No recurring schedule on record.</p>
+  }
+
+  const days = DAY_ORDER
+    .filter(day => rows.some(r => r.day_of_week === day))
+    .map(day => ({
+      day,
+      entries: rows
+        .filter(r => r.day_of_week === day)
+        .sort((a, b) => SHIFT_TIMES.indexOf(a.shift_time) - SHIFT_TIMES.indexOf(b.shift_time)),
+    }))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+      {days.map(({ day, entries }) => (
+        <div key={day}>
+          <p style={{ fontSize: '0.78rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.4rem' }}>
+            {capitalize(day)}
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {entries.map(e => (
+              <div key={e.id} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem',
+                padding: '0.6rem 0.9rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent)' }}>{e.shift_time}</span>
+                  <span style={{ fontSize: '0.85rem' }}>{e.role || '—'}</span>
+                  {e.week_pattern && e.week_pattern !== 'every' && (
+                    <span style={{ fontSize: '0.72rem', color: '#60a5fa' }}>{WEEK_PATTERN_LABEL[e.week_pattern] || e.week_pattern}</span>
+                  )}
+                  {e.notes && <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontStyle: 'italic' }}>({e.notes})</span>}
+                </div>
+                {(e.start_date || e.end_date) && (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
+                    {e.start_date ? formatDate(e.start_date) : '—'} → {e.end_date ? formatDate(e.end_date) : 'ongoing'}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function MissionaryDetailView({ missionary, attendanceRecords, attendanceLoading, onBack }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -635,10 +715,13 @@ function MissionaryDetailView({ missionary, attendanceRecords, attendanceLoading
         </div>
       </div>
 
-      <div style={S.card}>
-        <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Volunteer Attendance Summary</h2>
+      <CollapsibleCard title="Schedule">
+        <MissionarySchedule volunteerId={missionary.id} />
+      </CollapsibleCard>
+
+      <CollapsibleCard title="Volunteer Attendance Summary">
         <AttendanceSummary records={attendanceRecords} loading={attendanceLoading} />
-      </div>
+      </CollapsibleCard>
 
       <CollapsibleCard title="Hours by Month">
         <MonthlyHoursBreakdown volunteerId={missionary.id} />
