@@ -423,7 +423,7 @@ function EmailTemplatesTab({
 function CalendarTab({
   supabase, profile, applicants,
   card, inputStyle, labelStyle, secLabel,
-  solidBtn, ghostBtn, outlineBtn, msg,
+  solidBtn, ghostBtn, outlineBtn, msg, audit,
 }) {
   const [appointments,   setAppointments]   = useState([])
   const [blocked,        setBlocked]        = useState([])
@@ -448,7 +448,7 @@ function CalendarTab({
     const [{ data: appts, error: apptErr }, { data: blocks, error: blockErr }] = await Promise.all([
       supabase
         .from('interview_appointments')
-        .select('id, applicant_id, scheduled_at, status, source, volunteer_applications ( full_name, email )')
+        .select('id, applicant_id, scheduled_at, status, source, volunteer_applications ( full_name, email, stage )')
         .eq('status', 'booked')
         .order('scheduled_at', { ascending: true }),
       supabase
@@ -465,9 +465,31 @@ function CalendarTab({
 
   async function cancelAppointment(appt) {
     setCancellingId(appt.id)
-    const { error } = await supabase.from('interview_appointments').update({ status: 'cancelled' }).eq('id', appt.id)
-    if (error) msg(`Failed to cancel: ${error.message}`, 'error')
-    else { msg('Interview cancelled'); await load() }
+
+    const { error } = await supabase.from('interview_appointments').delete().eq('id', appt.id)
+    if (error) {
+      msg(`Failed to cancel: ${error.message}`, 'error')
+      setCancellingId(null)
+      return
+    }
+
+    // Clear the applicant's cached scheduled time so the Pipeline tab no
+    // longer shows or gates on an interview that no longer exists.
+    const { error: applicantError } = await supabase.from('volunteer_applications')
+      .update({ interview_scheduled_at: null })
+      .eq('id', appt.applicant_id)
+    if (applicantError) console.error('failed to clear interview_scheduled_at:', applicantError)
+
+    await audit(
+      'interview_appointment_cancelled',
+      'applicant',
+      appt.applicant_id,
+      appt.volunteer_applications?.full_name,
+      `interview scheduled for ${formatSlotFull(appt.scheduled_at)} was cancelled and removed`
+    )
+
+    msg('Interview cancelled')
+    await load()
     setCancellingId(null)
   }
 
@@ -549,8 +571,12 @@ function CalendarTab({
   }
 
   const now = new Date()
-  const upcomingAppointments = appointments.filter(a => new Date(a.scheduled_at) >= now)
-  const lapsedAppointments   = appointments
+  // Only surface appointments for applicants still in the interview stage —
+  // once an applicant moves on (onboarding, rejected, back to applied), their
+  // slot is hidden here even though the row itself is left alone in the DB.
+  const visibleAppointments = appointments.filter(a => a.volunteer_applications?.stage === 'interview')
+  const upcomingAppointments = visibleAppointments.filter(a => new Date(a.scheduled_at) >= now)
+  const lapsedAppointments   = visibleAppointments
     .filter(a => new Date(a.scheduled_at) < now)
     .sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)) // most recently lapsed first
 
@@ -2715,6 +2741,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           ghostBtn={ghostBtn}
           outlineBtn={outlineBtn}
           msg={msg}
+          audit={audit}
         />
       )}
 
