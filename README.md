@@ -10,9 +10,9 @@ A full-stack volunteer management platform for **Bingham Family Free Clinic**, b
 
 ## Table of Contents
 
+- [Overview](#overview)
 - [Quick Start](#quick-start)
 - [Environment Variables](#environment-variables)
-- [Overview](#overview)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
@@ -32,10 +32,18 @@ A full-stack volunteer management platform for **Bingham Family Free Clinic**, b
 - [Messaging System](#messaging-system)
 - [Push Notifications & PWA](#push-notifications--pwa)
 - [API Routes](#api-routes)
-- [Supabase Dependencies](#supabase-dependencies)
+- [Backend Architecture](#backend-architecture)
 - [Conventions & Patterns](#conventions--patterns)
 
 ---
+
+---
+
+## Overview
+
+The BFC Volunteer Portal replaces manual spreadsheets and group-chat coordination for a free community health clinic. Volunteers clock in/out, submit callouts, request shift coverage, complete weekly training, and communicate with the team. Admins manage schedules, run the recruitment pipeline, review hours submissions, track provider credential expiration, publish weekly training content, and maintain an audit log. Clinical Supervisors get a focused view of their shifts with live attendance and language coverage. OSSM staff monitor missionary volunteers. Providers manage clinical availability through a dedicated portal.
+
+All authenticated pages are client-rendered (`'use client'`) and talk directly to Supabase from the browser, except for a small set of Next.js API routes that require service-role access or server-side push delivery.
 
 ## Quick Start
 
@@ -82,14 +90,6 @@ npm start      # Run production build locally
 | `VERCEL_ENV` | Server (automatic on Vercel) | Switches app icon between production (`logo3.png`) and non-production (`logo4.png`) |
 
 There is no `.env.example` file in the repository. Obtain values from the project maintainer or your Supabase/Vercel dashboard.
-
----
-
-## Overview
-
-The BFC Volunteer Portal replaces manual spreadsheets and group-chat coordination for a free community health clinic. Volunteers clock in/out, submit callouts, request shift coverage, complete weekly training, and communicate with the team. Admins manage schedules, run the recruitment pipeline, review hours submissions, track provider credential expiration, publish weekly training content, and maintain an audit log. Clinical Supervisors get a focused view of their shifts with live attendance and language coverage. OSSM staff monitor missionary volunteers. Providers manage clinical availability through a dedicated portal.
-
-All authenticated pages are client-rendered (`'use client'`) and talk directly to Supabase from the browser, except for a small set of Next.js API routes that require service-role access or server-side push delivery.
 
 ---
 
@@ -164,7 +164,6 @@ All authenticated pages are client-rendered (`'use client'`) and talk directly t
 │   ├── DataDashboard.jsx            # Charts / aggregate stats (admin Data tab)
 │   ├── LanguageCoverage.js          # Language coverage panel (admin)
 │   ├── Live.js                      # Shared live-shift panel (admin + CS)
-│   ├── LunchScheduler.jsx           # Schedule volunteer lunches
 │   ├── MessageCard.js               # Shared message bubble component
 │   ├── MessageTab.jsx               # Full messaging UI (volunteer + provider)
 │   ├── Pipeline.js                  # Volunteer recruitment pipeline (admin)
@@ -196,9 +195,6 @@ All authenticated pages are client-rendered (`'use client'`) and talk directly t
 ├── tailwind.config.js
 └── package.json
 ```
-
-> **Repository gaps:** `logo3.png` (production icon referenced in `app/layout.js`) is not present in `public/`. Database migrations and Edge Function source are not in this repo. The service worker handler lives at `public/sw.js/route.js`, which is a non-standard location for Next.js App Router route handlers (typically `app/sw.js/route.js`).
-
 ---
 
 ## Routing & Access Control
@@ -260,7 +256,7 @@ Additional admin capabilities tied to `default_role`:
 - **Role slot cap override:** Director, Administrative Assistant, Executive Assistant can exceed `ROLE_SUGGESTIONS` limits.
 - **Lab Director data scope:** Volunteers with `default_role` in `{Lab, Lab Director}` or anyone scheduled for a `Lab` shift.
 
-Admin access also requires `hasAdminAccess()`: `affiliation = 'provider'` **or** `default_role` in `{Lab Director, Director, Information Systems, Provider, Administrative Assistant, Executive Assistant, OSSM, Office Manager, Human Resources, Credentialing}`.
+Admin access also requires `hasAdminAccess()`: `affiliation = 'provider'` **or** `default_role` in `{Lab Director, Director, Information Systems, Provider, Administrative Assistant, Executive Assistant, OSSM, Office Manager, Human Resources, Credentialing}`. This is a safeguard to assure that individuals if individuals are admin, that they are assigned the correct default_role.
 
 ---
 
@@ -279,13 +275,12 @@ Located at `app/volunteer/page.js`. Tabs load lazily — data for a tab is fetch
 | Report Hours | `affiliation = 'intern'` |
 | Tasks | `profile.team` is set |
 | Training | Unacknowledged weekly training exists for the volunteer's roles |
-| Feedback | Biannual survey week (first full Mon–Sun of January or July) and not yet submitted |
+| Feedback | Biannual survey week (first full Mon–Sun of April or October) and not yet submitted |
 
 **Clock tab** *(loaded on init)*
 
 - One-tap clock in / clock out
 - Resolves scheduled role for the current shift window; falls back to `default_role`
-- View assigned lunch when applicable
 
 **Schedule tab**
 
@@ -321,11 +316,11 @@ Located at `app/volunteer/page.js`. Tabs load lazily — data for a tab is fetch
 
 **Feedback tab**
 
-- Likert-scale and open-ended biannual survey
+- Biannual survey, visible for two weeks of the year.
 
 **Account tab**
 
-- Total hours, shift history, provider credential cards (provider affiliation), off-system hours submission, push toggle, password change
+- Total hours, shift history, provider credential cards (provider affiliation), push notification toggle, password change
 
 ---
 
@@ -367,7 +362,7 @@ Located at `app/admin/page.js`. Uses a `loadedTabs` ref to prevent re-fetching o
 
 ### Clinical Supervisor View
 
-Located at `app/clinical-supervisor/page.js`. Scoped to shifts the CS user is personally scheduled for.
+Located at `app/clinical-supervisor/page.js`. Scoped to shifts the CS user is personally scheduled for. Individual must have default_role = 'Clinical Supervisor'.
 
 **Live tab** — Expected-not-clocked-in (`Live.js`), active shifts, today's callouts, birthday highlight.
 
@@ -587,39 +582,9 @@ The app registers as a Progressive Web App with Apple web-app meta tags in `app/
 
 ---
 
-## Supabase Dependencies
+## Backend Architecture
 
-The following are referenced in code but **not included in this repository**. A new developer needs access to an already-provisioned Supabase project.
-
-### Edge Functions
-
-| Function | Called from |
-|---|---|
-| `create-volunteer` | `components/Pipeline.js` — creates Auth user during onboarding |
-| `send-stage-email` | `components/Pipeline.js` — pipeline stage transition emails |
-| `schedule-interview` | `app/schedule/[token]/page.js`, admin Calendar tab |
-
-### Postgres tables
-
-`profiles`, `schedule`, `shifts`, `callouts`, `shift_cover_requests`, `lunch_assignments`, `messages`, `message_reads`, `push_subscriptions`, `hours_submissions`, `audit_logs`, `waitlist`, `volunteer_applications`, `onboarding_checklists`, `email_templates`, `interview_appointments`, `interview_blocked_times`, `provider_shifts`, `provider_recurring_schedule`, `provider_callouts`, `weekly_trainings`, `weekly_training_acknowledgments`, `volunteer_feedback`, `tasks`, `attendance_records`
-
-Schema definitions, migrations, and RLS policies are not documented in this repo.
-
-### Storage buckets
-
-| Bucket | Purpose |
-|---|---|
-| `avatars` | Profile photos |
-| `resumes` | Applicant resumes |
-| `message-images` | Message attachments |
-| `onboarding-assets` | Welcome packet PDF |
-| `onboarding-background-checks` | Onboarding documents |
-| `onboarding-ids` | Onboarding documents |
-| `onboarding-immunizations` | Onboarding documents |
-| `onboarding-tb-tests` | Onboarding documents |
-| `onboarding-licenses` | Onboarding documents |
-| `onboarding-confidentiality` | Generated confidentiality PDFs |
-| `onboarding-parking-passes` | Generated parking pass PDFs |
+All backend architecture is contained in a private repository. Acccess may be granted upon request.
 
 ---
 
@@ -633,10 +598,6 @@ Schema definitions, migrations, and RLS policies are not documented in this repo
 
 **Mobile layout** — Pages detect mobile via user agent and viewport width (~428px), rendering bottom nav or sidebar patterns accordingly.
 
-**No test suite** — There are no automated tests in this repository.
-
-**No lint/format config** — No ESLint or Prettier configuration files are present.
-
 ---
 
-*Last updated to reflect the codebase as of July 2026.*
+*Last updated to reflect the codebase as of July 31, 2026.*
