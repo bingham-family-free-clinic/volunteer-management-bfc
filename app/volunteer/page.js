@@ -1974,8 +1974,7 @@ function VolunteerPageInner() {
                 Developed by
               </p>
               <p style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text)', marginBottom: '1.5rem' }}>
-                Joshua Kent
-                Michael Scott
+                Joshua Kent <br /> Michael Scott
               </p>
               <button
                 onClick={() => setShowCredits(false)}
