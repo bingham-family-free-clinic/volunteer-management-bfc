@@ -56,6 +56,10 @@ const ADMIN_ROLES = [
   'Office Manager', 'Human Resources', 'Credentialing'
 ]
 
+// If a volunteer is scheduled to these roles, their default role will be updated to match. (not including admins)
+const VOLUNTEER_UPDATE_DEFAULT_ROLES = [
+  'Clinical Supervisor'
+]
 
 function hasAdminAccess(p) {
   return p?.affiliation === 'provider' || ADMIN_ACCESS_DEFAULT_ROLES.includes(p?.default_role)
@@ -1412,7 +1416,7 @@ export default function AdminPage() {
     // --- DIRECTOR RBAC CHECK ---
     let needsProfileUpdate = false;
 
-    if (ADMIN_ROLES.includes(addingRole)) {
+    if (ADMIN_ROLES.includes(addingRole) || VOLUNTEER_UPDATE_DEFAULT_ROLES.includes(addingRole)) {
       if (vol?.default_role !== addingRole) {
         if (profile?.default_role !== 'Director') {
           showMessage(
@@ -1500,34 +1504,64 @@ export default function AdminPage() {
       return;
     }
 
-    // --- AUTOMATIC PROFILE UPDATE FOR ADMIN ROLES ---
+    // --- AUTOMATIC PROFILE UPDATE FOR ADMIN ROLES AND VOLUNTEER ROLES THAT CHANGE DEFAULT ROLE ---
     if (needsProfileUpdate) {
-      const { error: profileErr } = await supabase
-        .from('profiles')
-        .update({
-          default_role: addingRole,
-          role: 'admin',
-        })
-        .eq('id', addVolId);
+      if (ADMIN_ROLES.includes(addingRole)) {
+        const { error: profileErr } = await supabase
+          .from('profiles')
+          .update({
+            default_role: addingRole,
+            role: 'admin',
+          })
+          .eq('id', addVolId);
 
-      if (profileErr) {
-        console.error(profileErr);
-        showMessage(
-          `Volunteer was scheduled, but their profile could not be updated: ${profileErr.message}`,
-          'error'
-        );
-      } else {
-        setVolunteers(prev =>
-          prev.map(v =>
-            v.id === addVolId
-              ? {
-                  ...v,
-                  default_role: addingRole,
-                  role: 'admin',
-                }
-              : v
-          )
-        );
+        if (profileErr) {
+          console.error(profileErr);
+          showMessage(
+            `Volunteer was scheduled, but their profile could not be updated: ${profileErr.message}`,
+            'error'
+          );
+        } else {
+          setVolunteers(prev =>
+            prev.map(v =>
+              v.id === addVolId
+                ? {
+                    ...v,
+                    default_role: addingRole,
+                    role: 'admin',
+                  }
+                : v
+            )
+          );
+        }
+      } else if (VOLUNTEER_UPDATE_DEFAULT_ROLES.includes(addingRole)) {
+        const { error: profileErr } = await supabase
+          .from('profiles')
+          .update({
+            default_role: addingRole,
+            role: 'volunteer',
+          })
+          .eq('id', addVolId);
+
+        if (profileErr) {
+          console.error(profileErr);
+          showMessage(
+            `Volunteer was scheduled, but their profile could not be updated: ${profileErr.message}`,
+            'error'
+          );
+        } else {
+          setVolunteers(prev =>
+            prev.map(v =>
+              v.id === addVolId
+                ? {
+                    ...v,
+                    default_role: addingRole,
+                    role: 'volunteer',
+                  }
+                : v
+            )
+          );
+        }
       }
     }
 
@@ -1767,7 +1801,8 @@ export default function AdminPage() {
       if (filterDefaultRole !== 'all' && v.default_role !== filterDefaultRole) return false
       return true
     })
-    .sort((a, b) => { const ln = n => (n?.full_name?.split(' ').slice(-1)[0] || '').toLowerCase(); return ln(a).localeCompare(ln(b)) })
+    .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+
   // Volunteers tab display only — hides Providers from the browsable list without
   // affecting the volunteer/shift-assignment dropdowns elsewhere, which still use userList.
   // Credentialing gets a restricted view: only clinical care volunteers (affiliation
