@@ -1323,16 +1323,6 @@ function VolunteerPageInner() {
           />
         )}
 
-        {/* Status banner */}
-        {!isMobile && !activeShift && (
-          <div style={{ ...S.card, marginBottom: '1.5rem', borderColor: activeShift ? 'var(--accent)' : 'var(--border)', background: activeShift ? 'rgba(74,222,128,0.05)' : 'var(--surface)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: activeShift ? 'var(--accent)' : 'var(--muted)', boxShadow: activeShift ? '0 0 8px var(--accent)' : 'none' }} />
-              <span style={{ fontWeight: 500 }}>Not clocked in</span>
-            </div>
-          </div>
-        )}
-
         {/* Weekly training banner — shown every week until acknowledged */}
         {trainingAvailable && !trainingAcknowledged && (
           <div
