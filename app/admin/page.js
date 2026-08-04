@@ -1767,7 +1767,8 @@ export default function AdminPage() {
       if (filterDefaultRole !== 'all' && v.default_role !== filterDefaultRole) return false
       return true
     })
-    .sort((a, b) => { const ln = n => (n?.full_name?.split(' ').slice(-1)[0] || '').toLowerCase(); return ln(a).localeCompare(ln(b)) })
+    .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+
   // Volunteers tab display only — hides Providers from the browsable list without
   // affecting the volunteer/shift-assignment dropdowns elsewhere, which still use userList.
   // Credentialing gets a restricted view: only clinical care volunteers (affiliation
