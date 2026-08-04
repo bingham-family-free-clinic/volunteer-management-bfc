@@ -743,10 +743,12 @@ function VolunteerPageInner() {
 
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('id, full_name, role, default_role, affiliation, team, license_exp, bls_exp, dea_exp, tb_exp')
+      .select('id, full_name, role, default_role, affiliation, team, license_exp, bls_exp, dea_exp, tb_exp, created_at')
       .eq('id', user.id)
       .single()
     setProfile(profileData)
+
+    const joinedAt = profileData?.created_at ?? user.created_at ?? user.confirmed_at ?? null
 
     if (profileData?.affiliation === 'provider') {
       setCredForm({
@@ -757,12 +759,21 @@ function VolunteerPageInner() {
       })
     }
 
+
+    let messageQuery = supabase
+        .from('messages')
+        .select('id, sender_id, recipient_type, recipient_volunteer_id, parent_message_id, created_at')
+        .order('created_at', { ascending: false })
+        .limit(MSG_PAGE_SIZE * 2)
+
+
+    if (joinedAt) {
+        messageQuery = messageQuery.gte('created_at', joinedAt)
+    }
+
     // Seed the unread message count badge immediately on load
-    const { data: allMsgs } = await supabase
-      .from('messages')
-      .select('id, sender_id, recipient_type, recipient_volunteer_id, parent_message_id')
-      .order('created_at', { ascending: false })
-      .limit(MSG_PAGE_SIZE * 2)
+    const { data: allMsgs } = await messageQuery
+
     const { data: reads } = await supabase
       .from('message_reads')
       .select('message_id')
