@@ -1707,6 +1707,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   function AffiliationExtras() {
+
+    useEffect(() => {
+      console.log("Mounted");
+      return () => console.log("Unmounted");
+    }, []);
+
     const a = onboardForm.affiliation
     if (a === 'missionary') return (
       <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
