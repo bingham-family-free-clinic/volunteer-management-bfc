@@ -788,7 +788,24 @@ function CalendarTab({
 
 // Textbox inputs for extra fields that only appear for certain affiliation types (missionary, student, intern, provider).
 
-function AffiliationExtras() {
+function CredentialInput({ fieldKey, label, value, onChange, allowNA, labelStyle, inputStyle }) {
+  const mode = value === 'N/A' ? 'na' : value === 'expired' ? 'expired' : 'date'
+  return (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+        <select value={mode} onChange={e => { const m = e.target.value; onChange(m === 'na' ? 'N/A' : m === 'expired' ? 'expired' : '') }} style={{ ...inputStyle, fontSize: '0.82rem', padding: '0.45rem 0.65rem' }}>
+          <option value="date">Set date</option>
+          {allowNA && <option value="na">N/A</option>}
+          <option value="expired">Mark expired</option>
+        </select>
+        {mode === 'date' && <input type="date" value={value && value !== 'N/A' && value !== 'expired' ? value : ''} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, fontSize: '0.82rem', padding: '0.45rem 0.65rem' }} />}
+      </div>
+    </div>
+  )
+}
+
+function AffiliationExtras({ onboardForm, setOnboardForm, labelStyle, inputStyle, secLabel }) {
   const a = onboardForm.affiliation
   if (a === 'missionary') return (
     <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
@@ -840,7 +857,7 @@ function AffiliationExtras() {
       <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
         <p style={{ ...secLabel, color: C.muted, marginBottom: '0.85rem' }}>Credential Expiration Dates <span style={{ color: 'var(--muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.75rem' }}>
-          {PROVIDER_CRED_FIELDS.map(f => <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={onboardForm[f.key] || ''} onChange={val => setOnboardForm(p => ({ ...p, [f.key]: val }))} allowNA={!!f.allowNA} />)}
+          {PROVIDER_CRED_FIELDS.map(f => <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={onboardForm[f.key] || ''} onChange={val => setOnboardForm(p => ({ ...p, [f.key]: val }))} allowNA={!!f.allowNA} labelStyle={labelStyle} inputStyle={inputStyle} />)}
         </div>
       </div>
     </div>
@@ -1751,23 +1768,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       : <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600 }}>✓ saved</span>
   }
 
-  function CredentialInput({ fieldKey, label, value, onChange, allowNA }) {
-    const mode = value === 'N/A' ? 'na' : value === 'expired' ? 'expired' : 'date'
-    return (
-      <div>
-        <label style={labelStyle}>{label}</label>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          <select value={mode} onChange={e => { const m = e.target.value; onChange(m === 'na' ? 'N/A' : m === 'expired' ? 'expired' : '') }} style={{ ...inputStyle, fontSize: '0.82rem', padding: '0.45rem 0.65rem' }}>
-            <option value="date">Set date</option>
-            {allowNA && <option value="na">N/A</option>}
-            <option value="expired">Mark expired</option>
-          </select>
-          {mode === 'date' && <input type="date" value={value && value !== 'N/A' && value !== 'expired' ? value : ''} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, fontSize: '0.82rem', padding: '0.45rem 0.65rem' }} />}
-        </div>
-      </div>
-    )
-  }
-
   function FileRow({ item, applicantId }) {
     const ref = useRef(null)
     const has       = !!(checklist[item.urlKey])
@@ -2479,7 +2479,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.6rem' }}>
                   {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, default_role: f.default_role, preferred_slots: f.preferred_slots, preferred_roles: f.preferred_roles }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
                 </div>
-                {onboardForm.affiliation && <AffiliationExtras />}
+                {onboardForm.affiliation && <AffiliationExtras onboardForm={onboardForm} setOnboardForm={setOnboardForm} labelStyle={labelStyle} inputStyle={inputStyle} secLabel={secLabel} />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() }); setOnboardStep(2) }} disabled={!s1} style={solidBtn(C.blue, !s1)}>Save &amp; Next</button>
                 </div>
