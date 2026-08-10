@@ -1007,9 +1007,20 @@ function OSSMPageInner() {
       .eq('status', 'active')
       .order('full_name')
 
+    const profiles = mData ?? []
+
+    const userProfile = profiles.find(m => m.id === session?.user.id)
+
+    const isOssm = userProfile?.default_role?.toLowerCase() === 'ossm'
+
+    if (!isOssm) {
+      window.location.replace("/volunteer")
+      return
+    }
+
     // OSSM staff should never show up in their own Missionaries tab, even if
     // their affiliation happens to also be 'missionary'.
-    const filtered = (mData || []).filter(m => (m.default_role || '').toLowerCase() !== 'ossm')
+    const filtered = profiles.filter(m => (m.default_role || '').toLowerCase() !== 'ossm')
     setMissionaries(filtered)
 
     setLoading(false)
