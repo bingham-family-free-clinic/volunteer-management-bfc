@@ -243,22 +243,22 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
   }
 
   async function getAttendancePercent(volunteerId) {
-  const { data: records, error } = await supabase
-    .from('attendance_records')
-    .select('status')
-    .eq('volunteer_id', volunteerId)
+    const { data: records, error } = await supabase
+      .from('attendance_records')
+      .select('status')
+      .eq('volunteer_id', volunteerId)
 
-  if (error) {
-    console.error('Error loading attendance:', error)
-    return 0
+    if (error) {
+      console.error('Error loading attendance:', error)
+      return 0
+    }
+
+    if (!records?.length) return 0
+
+    const attended = records.filter(r => r.status !== 'absent').length
+
+    return Math.round((attended / records.length) * 100)
   }
-
-  if (!records?.length) return 0
-
-  const attended = records.filter(r => r.status !== 'absent').length
-
-  return Math.round((attended / records.length) * 100)
-}
 
   async function loadSchedule() {
     const { data, error } = await supabase.from('schedule').select('*').order('role')
