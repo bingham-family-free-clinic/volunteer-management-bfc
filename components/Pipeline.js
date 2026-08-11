@@ -83,6 +83,7 @@ const CHECKLIST_ITEMS = [
 
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
 const NON_MISSIONARY_REQUIRED = ['background_check', 'id_check', 'immunization']
+const ROLES_SKIP_CHECKLIST = ['information_systems', 'communications']
 
 const TOTAL_STEPS = 4
 
@@ -1625,10 +1626,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   })()
   const stageCounts        = STAGES.reduce((acc, s) => { acc[s] = applicants.filter(a => a.stage === s).length; return acc }, {})
 
-  // ─── Non-missionary document validation ────────────────────────────────────
+  // ─── Non-missionary, Information Systems, and Communications document validation ────────────────────────────────────
 
   function getMissingRequiredDocs() {
-    if (onboardForm.affiliation === 'missionary') return []
+    if (onboardForm.affiliation === 'missionary' || ROLES_SKIP_CHECKLIST.includes(onboardForm.default_role)) return []
     return NON_MISSIONARY_REQUIRED.filter(key => {
       if (!checklist[key]) return true
       const item = CHECKLIST_ITEMS.find(i => i.key === key)
