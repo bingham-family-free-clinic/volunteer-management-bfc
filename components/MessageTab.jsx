@@ -958,8 +958,8 @@ export function MessageTab({
                         {msgRecipientVolId ? allUsers.find(u => u.id === msgRecipientVolId)?.full_name : 'Tap to select recipient…'}
                       </button>
                       {comboOpen && (
-                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
-                          <div style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', display: 'flex', flexDirection: 'column', height: '70%' }}>
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', paddingBottom: '19%' }}>
+                          <div style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', display: 'flex', flexDirection: 'column', height: '57%' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem 0.75rem', borderBottom: '1px solid var(--border)' }}>
                               <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Select recipient</span>
                               <button type="button" onClick={() => setComboOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '1.2rem' }}>✕</button>
