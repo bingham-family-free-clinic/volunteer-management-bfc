@@ -210,7 +210,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
   }, [waitlist, schedule])
 
   // ─── Loaders ───────────────────────────────────────────────────────────────
-
+  
   async function loadWaitlist() {
     setWaitlistLoading(true)
     setWaitlistError(null)
@@ -227,6 +227,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
         (data || []).map(async row => ({
           ...row,
           attendancePercent: await getAttendancePercent(row.profiles?.id)
+
         }))
       )
       withAttendance.sort((a, b) => {
@@ -237,6 +238,10 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
         }
         return 0
       })
+      console.log('Waitlist attendance:', withAttendance.map(entry => ({
+        name: entry.profiles?.full_name,
+        attendancePercent: entry.attendancePercent,
+      })))
       setWaitlist(withAttendance)
     }
     setWaitlistLoading(false)
@@ -256,8 +261,6 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
     if (!records?.length) return 0
 
     const attended = records.filter(r => r.status !== 'absent').length
-
-    console.log(volunteerId, attended, records.length, (attended / records.length) * 100);
 
     return Math.round((attended / records.length) * 100)
   }
