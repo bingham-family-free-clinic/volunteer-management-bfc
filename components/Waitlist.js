@@ -210,7 +210,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
   }, [waitlist, schedule])
 
   // ─── Loaders ───────────────────────────────────────────────────────────────
-
+  
   async function loadWaitlist() {
     setWaitlistLoading(true)
     setWaitlistError(null)
@@ -223,9 +223,42 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
       setWaitlistError(`Failed to load waitlist: ${error.message} (code: ${error.code})`)
       setWaitlist([])
     } else {
-      setWaitlist(data || [])
+      const withAttendance = await Promise.all(
+        (data || []).map(async row => ({
+          ...row,
+          attendancePercent: await getAttendancePercent(row.profiles?.id)
+
+        }))
+      )
+      withAttendance.sort((a, b) => {
+        const aQualified = a.attendancePercent >= 75
+        const bQualified = b.attendancePercent >= 75
+        if (aQualified !== bQualified) {
+          return bQualified - aQualified
+        }
+        return 0
+      })
+      setWaitlist(withAttendance)
     }
     setWaitlistLoading(false)
+  }
+
+  async function getAttendancePercent(volunteerId) {
+    const { data: records, error } = await supabase
+      .from('attendance_records')
+      .select('status')
+      .eq('volunteer_id', volunteerId)
+
+    if (error) {
+      console.error('Error loading attendance:', error)
+      return 0
+    }
+
+    if (!records?.length) return 0
+
+    const attended = records.filter(r => r.status !== 'absent').length
+
+    return Math.round((attended / records.length) * 100)
   }
 
   async function loadSchedule() {
@@ -482,7 +515,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
         <div>
           <h2 style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.2rem' }}>Slot Waitlist</h2>
           <p style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
-            {waitlist.length} volunteer{waitlist.length !== 1 ? 's' : ''} waiting · ordered by wait time
+            {waitlist.length} volunteer{waitlist.length !== 1 ? 's' : ''} waiting · ordered by wait time, volunteers with 75%+ attendance are prioritized
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
