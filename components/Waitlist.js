@@ -238,10 +238,6 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
         }
         return 0
       })
-      console.log('Waitlist attendance:', withAttendance.map(entry => ({
-        name: entry.profiles?.full_name,
-        attendancePercent: entry.attendancePercent,
-      })))
       setWaitlist(withAttendance)
     }
     setWaitlistLoading(false)
