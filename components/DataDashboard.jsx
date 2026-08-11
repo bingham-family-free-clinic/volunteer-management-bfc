@@ -15,7 +15,7 @@ const MONTHS = [
   { value: 9,  label: 'September' },{ value: 10, label: 'October' },
   { value: 11, label: 'November' }, { value: 12, label: 'December' },
 ]
-const TOP_COUNT_OPTIONS = [5, 10, 25, 50]
+const TOP_COUNT_OPTIONS = [5, 10, 25, 50, 200]
 
 // Records before this date are ignored for no-shows and late arrivals
 const ATTENDANCE_CUTOFF = '2026-03-29'
