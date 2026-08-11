@@ -1013,6 +1013,8 @@ function OSSMPageInner() {
 
     const isOssm = userProfile?.default_role?.toLowerCase() === 'ossm'
 
+    console.log(userProfile?.default_role?.toLowerCase())
+
     if (!isOssm) {
       window.location.replace("/volunteer")
       return
