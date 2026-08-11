@@ -257,6 +257,8 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
 
     const attended = records.filter(r => r.status !== 'absent').length
 
+    console.log(volunteerId, attended, records.length, (attended / records.length) * 100);
+
     return Math.round((attended / records.length) * 100)
   }
 
