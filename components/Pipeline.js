@@ -1631,8 +1631,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // ─── Non-missionary, Information Systems, and Communications document validation ────────────────────────────────────
 
+  function getRequiredChecks() {
+    return onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_ROLES_REQUIRED || DEFAULT_REQUIRED
+  }
+
   function getMissingRequiredDocs() {
-    const requiredChecks = onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_ROLES_REQUIRED || DEFAULT_REQUIRED
+    const requiredChecks = getRequiredChecks()
     return requiredChecks.filter(key => {
       if (!checklist[key]) return true
       const item = CHECKLIST_ITEMS.find(i => i.key === key)
@@ -1641,8 +1645,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     }).map(key => CHECKLIST_ITEMS.find(i => i.key === key)?.label ?? key)
   }
 
-  const missingRequiredDocs = getMissingRequiredDocs()
-  const docsComplete        = missingRequiredDocs.length === 0
+  const requiredChecks         = getRequiredChecks()
+  const missingRequiredDocs    = getMissingRequiredDocs()
+  const completedRequiredCount = requiredChecks.length - missingRequiredDocs.length
+  const docsComplete           = missingRequiredDocs.length === 0
 
   // ─── Shared styles ────────────────────────────────────────────────────────
 
@@ -2526,10 +2532,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Onboarding Checklist</p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{checklistCount} / {(() => {
-                      const requiredChecks = onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_ROLES_REQUIRED || DEFAULT_REQUIRED;
-                      return requiredChecks.length;
-                    })()} Required Complete</span>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{completedRequiredCount} / {requiredChecks.length} Required Complete</span>
                   </div>
                 </div>
 
