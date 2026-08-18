@@ -82,9 +82,11 @@ const CHECKLIST_ITEMS = [
 ]
 
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
-const NON_MISSIONARY_REQUIRED = ['background_check', 'id_check', 'immunization']
-const ROLES_SKIP_CHECKLIST = ['information_systems', 'communications']
-const NON_MEDIA_ROLES_REQUIRED = ['background_check']
+const NON_PATIENT_ROLES = ['information_systems', 'communications']
+
+const DEFAULT_REQUIRED = ['background_check', 'id_check', 'immunization', 'tb_test']
+const NON_PATIENT_REQUIRED = ['background_check', 'id_check']
+const MISSIONARY_REQUIRED = ['id_check']
 
 const TOTAL_STEPS = 4
 
@@ -1631,8 +1633,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   function getMissingRequiredDocs() {
     if (onboardForm.affiliation === 'missionary') return []
-    const requiredChecks = ROLES_SKIP_CHECKLIST.includes(onboardForm.default_role) && NON_MEDIA_ROLES_REQUIRED || NON_MISSIONARY_REQUIRED
-    return NON_MISSIONARY_REQUIRED.filter(key => {
+    const requiredChecks = onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_REQUIRED || DEFAULT_REQUIRED
+    return requiredChecks.filter(key => {
       if (!checklist[key]) return true
       const item = CHECKLIST_ITEMS.find(i => i.key === key)
       if (item?.urlKey && !checklist[item.urlKey]) return true
@@ -2289,7 +2291,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                             </div>
                             <span style={{ fontSize: '0.85rem', fontWeight: hasFile ? 600 : 400, color: hasFile ? 'var(--text)' : 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {item.label}
-                              {item.mandatory && <span style={{ color: C.warn, marginLeft: '0.2rem', fontWeight: 700 }}>*</span>}
                             </span>
                             {hasFile && <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600, flexShrink: 0 }}>Uploaded</span>}
                           </div>
@@ -2304,20 +2305,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       )
                     })}
                   </div>
-
-                  {(() => {
-                    const missing = FILE_CHECKLIST_ITEMS.filter(i => i.mandatory && !cl[i.urlKey])
-                    if (missing.length === 0) return (
-                      <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.85rem', borderRadius: '7px', background: C.blue + '10', border: `1px solid ${C.blue}33`, fontSize: '0.78rem', color: C.blue, fontWeight: 600 }}>
-                        ✓ All required documents uploaded
-                      </div>
-                    )
-                    return (
-                      <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.85rem', borderRadius: '7px', background: C.primary + '0a', border: `1px solid ${C.primary}33`, fontSize: '0.78rem', color: C.primary }}>
-                        Missing required: {missing.map(i => i.label).join(', ')}
-                      </div>
-                    )
-                  })()}
                 </div>
               )}
             </div>
@@ -2348,7 +2335,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     ].filter(f => f.value)
 
     const checklistCount    = CHECKLIST_ITEMS.filter(i => checklist[i.key]).length
-    const mandatoryComplete = CHECKLIST_ITEMS.filter(i => i.mandatory).every(i => checklist[i.key])
     const s1 = step1Valid()
 
     return (
@@ -2541,8 +2527,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Onboarding Checklist</p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{checklistCount} / {CHECKLIST_ITEMS.length}</span>
-                    {mandatoryComplete && <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', borderRadius: '100px', background: C.blue + '18', color: C.blue, border: `1px solid ${C.blue}44`, fontWeight: 600 }}>Required Complete</span>}
+                    <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{checklistCount} / {(() => {
+                      const requiredChecks = onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_REQUIRED || DEFAULT_REQUIRED;
+                      return requiredChecks.length;
+                    })()} Required Complete</span>
                   </div>
                 </div>
 
@@ -2552,14 +2540,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                     .map(item => {
                       const checked = checklist[item.key]
                       return (
-                        <div key={item.key} style={{ padding: '0.85rem 1rem', borderRadius: '10px', border: `1px solid ${checked ? C.blue + '55' : item.mandatory ? C.danger + '33' : 'var(--border)'}`, background: checked ? C.blue + '08' : item.mandatory ? C.danger + '04' : 'var(--bg)', transition: 'all 0.15s' }}>
+                        <div key={item.key} style={{ padding: '0.85rem 1rem', borderRadius: '10px', border: `1px solid ${checked ? C.blue + '55' : 'var(--border)'}`, background: checked ? C.blue + '08' : 'var(--bg)', transition: 'all 0.15s' }}>
                           <div onClick={() => !savingChecklist && toggleChecklistItem(applicant.id, item.key, !checked)} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', cursor: 'pointer' }}>
-                            <div style={{ width: 20, height: 20, borderRadius: '5px', flexShrink: 0, border: `2px solid ${checked ? C.blue : item.mandatory ? C.danger + '66' : 'var(--border)'}`, background: checked ? C.blue : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
+                            <div style={{ width: 20, height: 20, borderRadius: '5px', flexShrink: 0, border: `2px solid ${checked ? C.blue : 'var(--border)'}`, background: checked ? C.blue : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
                               {checked && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7L10 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                             </div>
                             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                               <span style={{ fontSize: '0.9rem', fontWeight: checked ? 600 : 400, color: checked ? 'var(--text)' : 'var(--muted)', transition: 'color 0.15s' }}>{item.label}</span>
-                              {item.mandatory && <span style={{ color: C.danger, fontWeight: 700, fontSize: '0.85rem', lineHeight: 1 }}>*</span>}
                             </div>
                             {checked && <span style={{ fontSize: '0.72rem', color: C.blue, fontWeight: 600, flexShrink: 0 }}>Complete</span>}
                           </div>
