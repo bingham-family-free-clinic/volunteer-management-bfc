@@ -604,7 +604,7 @@ export function MessageTab({
   })
 
   // Unread count across all inbox threads (for tab badge and parent notification)
-  const unreadThreadCount = readMessageIds ? filteredInboxThreads.filter(m => {
+  const unreadThreadCount = readMessageIds ? inboxThreads.filter(m => {
     const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
     const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
       r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
