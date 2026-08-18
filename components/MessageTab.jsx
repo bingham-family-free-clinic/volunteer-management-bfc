@@ -88,7 +88,7 @@ function ReplyThread({
     ? previewSource.body.replace(/\n/g, ' ')
     : '📎 Image'
   const previewSenderName = latestUnreadReply
-    ? (latestUnreadReply.sender?.full_name || 'Admin')
+    ? (latestUnreadReply.sender?.full_name || 'HR')
     : (senderLabel || message.sender?.full_name || 'Unknown')
 
   const isAdmin        = profile?.role === 'admin'
