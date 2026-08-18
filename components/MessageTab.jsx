@@ -932,7 +932,7 @@ export function MessageTab({
               <label style={S.label}>Send to</label>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 {[
-                  { value: 'admin',    label: 'Admin' },
+                  { value: 'admin',    label: 'HR' },
                   ...(isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
                   ...(isProvider && !isAdmin ? [{ value: 'providers', label: 'All Providers' }] : []),
                   ...(!isProvider && !isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
