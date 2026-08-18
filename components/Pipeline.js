@@ -85,7 +85,7 @@ const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
 const NON_PATIENT_ROLES = ['information_systems', 'communications']
 
 const DEFAULT_REQUIRED = ['background_check', 'id_check', 'immunization', 'tb_test']
-const NON_PATIENT_REQUIRED = ['background_check', 'id_check']
+const NON_PATIENT_ROLES_REQUIRED = ['background_check', 'id_check']
 const MISSIONARY_REQUIRED = ['id_check']
 
 const TOTAL_STEPS = 4
@@ -1632,8 +1632,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // ─── Non-missionary, Information Systems, and Communications document validation ────────────────────────────────────
 
   function getMissingRequiredDocs() {
-    if (onboardForm.affiliation === 'missionary') return []
-    const requiredChecks = onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_REQUIRED || DEFAULT_REQUIRED
+    const requiredChecks = onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_ROLES_REQUIRED || DEFAULT_REQUIRED
     return requiredChecks.filter(key => {
       if (!checklist[key]) return true
       const item = CHECKLIST_ITEMS.find(i => i.key === key)
@@ -2528,7 +2527,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Onboarding Checklist</p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                     <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{checklistCount} / {(() => {
-                      const requiredChecks = onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_REQUIRED || DEFAULT_REQUIRED;
+                      const requiredChecks = onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_ROLES_REQUIRED || DEFAULT_REQUIRED;
                       return requiredChecks.length;
                     })()} Required Complete</span>
                   </div>
