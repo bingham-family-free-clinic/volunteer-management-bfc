@@ -82,7 +82,7 @@ const CHECKLIST_ITEMS = [
 ]
 
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
-const NON_PATIENT_ROLES = ['information_systems', 'communications']
+const NON_PATIENT_ROLES = ['Information Systems', 'Communications']
 
 const DEFAULT_REQUIRED = ['background_check', 'id_check', 'immunization', 'tb_test']
 const NON_PATIENT_ROLES_REQUIRED = ['background_check', 'id_check']
@@ -2556,7 +2556,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   }
                 </div>
 
-                {onboardForm.affiliation && onboardForm.affiliation !== 'missionary' && missingRequiredDocs.length > 0 && (
+                {onboardForm.affiliation && missingRequiredDocs.length > 0 && (
                   <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', background: C.danger + '08', border: `1px solid ${C.danger}44`, fontSize: '0.83rem', color: C.danger, fontWeight: 500, lineHeight: 1.6 }}>
                     <span style={{ fontWeight: 700 }}>Cannot create profile yet.</span>{' '}
                     Missing: <span style={{ fontWeight: 700 }}>{missingRequiredDocs.join(', ')}</span>.
