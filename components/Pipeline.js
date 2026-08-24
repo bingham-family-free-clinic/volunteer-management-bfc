@@ -1554,17 +1554,35 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // ─── Select applicant ─────────────────────────────────────────────────────
 
-  function selectApplicant(a) {
-    setSelected(a)
+  async function selectApplicant(a) {
+    let applicant = a
+
+    // re-fetch the applicant row if it's in the interview stage, to ensure interview_scheduled_at is up to date
+    if (a.stage === 'interview') {
+      const { data, error } = await supabase
+        .from('volunteer_applications')
+        .select('*')
+        .eq('id', a.id)
+        .single()
+
+      if (error) {
+        console.error('failed to refresh applicant on select:', error)
+      } else if (data) {
+        applicant = data
+        setApplicants(prev => prev.map(app => app.id === data.id ? data : app))
+      }
+    }
+
+    setSelected(applicant)
     setOnboardStep(1)
     setChecklist(EMPTY_CHECKLIST)
 
-    const affiliData = a.onboard_affil_data || {}
+    const affiliData = applicant.onboard_affil_data || {}
     setOnboardForm({
-      affiliation:   a.onboard_affiliation   || '',
-      default_role:  a.onboard_default_role  || '',
-      preferred_slots: a.onboard_preferred_slots || [],
-      preferred_roles: a.onboard_preferred_roles || [],
+      affiliation:   applicant.onboard_affiliation   || '',
+      default_role:  applicant.onboard_default_role  || '',
+      preferred_slots: applicant.onboard_preferred_slots || [],
+      preferred_roles: applicant.onboard_preferred_roles || [],
       sma_name:          affiliData.sma_name          || '',
       sma_contact:       affiliData.sma_contact        || '',
       school:            affiliData.school             || '',
@@ -1581,7 +1599,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       tb_exp:            affiliData.tb_exp             || '',
     })
 
-    if (a.stage === 'onboarding') loadChecklist(a.id)
+    if (applicant.stage === 'onboarding') loadChecklist(applicant.id)
 
     // Reset photo state — photo will appear only once uploaded this session
     setApplicantPhotoUrl(null)
