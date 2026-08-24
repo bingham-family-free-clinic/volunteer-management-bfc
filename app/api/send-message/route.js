@@ -1,6 +1,7 @@
 import 'server-only'
 import webpush from 'web-push'
 import { createClient } from '@supabase/supabase-js'
+import { allowedToSeeHRMessagesRoles } from '../../../lib/messageUtils'
 
 // Service-role client — can read any row, bypasses RLS
 const supabaseAdmin = createClient(
@@ -80,10 +81,14 @@ export async function POST(req) {
     if (recipient_volunteer_id && recipient_volunteer_id !== user.id) {
       recipientUserIds = [recipient_volunteer_id]
     } else {
+      // Only notify admins whose default_role is allowed to see HR
+      // messages in their inbox — otherwise they'd get a push for a
+      // message they can't actually open.
       const { data } = await supabaseAdmin
         .from('profiles')
         .select('id')
         .eq('role', 'admin')
+        .in('default_role', allowedToSeeHRMessagesRoles)
         .neq('id', user.id)
       recipientUserIds = (data || []).map(p => p.id)
     }
