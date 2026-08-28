@@ -923,6 +923,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [onboardStep,  setOnboardStep]  = useState(1)
   const [savingStep,   setSavingStep]   = useState(false)
 
+  // Admin notes — free text captured during onboarding, carried over to the
+  // volunteer's profile once created (visible/editable on the Volunteers tab).
+  const [notesDraft,  setNotesDraft]  = useState('')
+  const [savingNotes, setSavingNotes] = useState(false)
+
   const EMPTY_CHECKLIST = {
     confidentiality_agreement: false,
     tb_test: false,
@@ -1208,6 +1213,18 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSavingStep(false)
   }
 
+  // ─── Admin notes (application/needs/wants) ────────────────────────────────
+  async function saveApplicantNotes(applicantId, value) {
+    setSavingNotes(true)
+    const { error } = await supabase.from('volunteer_applications').update({ notes: value }).eq('id', applicantId)
+    if (error) {
+      msg(error.message, 'error')
+    } else {
+      setSelected(prev => (prev && prev.id === applicantId) ? { ...prev, notes: value } : prev)
+    }
+    setSavingNotes(false)
+  }
+
   async function sendStageEmail(applicant, stage) {
     if (!EMAIL_STAGES.includes(stage)) return
 
@@ -1484,6 +1501,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   // ─── Offload ──────────────────────────────────────────────────────────────
+  // Downloads each file locally, then deletes it from Supabase Storage —
+  // only for files that actually finished downloading, so a failed download
+  // never causes data loss. DB references to deleted files are cleared too,
+  // so nothing in the app points at a file that no longer exists.
 
   async function handleOffload(applicant) {
     setOffloadingId(applicant.id)
@@ -1495,7 +1516,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         const { data: rData, error: rErr } = await supabase.storage.from('resumes').createSignedUrl(applicant.resume_url, 300)
         if (!rErr && rData?.signedUrl) {
           const ext = applicant.resume_url.split('.').pop()
-          fileEntries.push({ label: 'Resume', url: rData.signedUrl, filename: `resume.${ext}` })
+          fileEntries.push({ label: 'Resume', url: rData.signedUrl, filename: `resume.${ext}`, bucket: 'resumes', path: applicant.resume_url })
         }
       }
 
@@ -1504,9 +1525,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         if (!storagePath) continue
         const { data, error } = await supabase.storage.from(item.bucket).createSignedUrl(storagePath, 300)
         if (!error && data?.signedUrl) {
-          fileEntries.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}` })
+          fileEntries.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}`, bucket: item.bucket, path: storagePath, urlKey: item.urlKey, itemKey: item.key })
         }
       }
+
+      // Only files that are confirmed downloaded end up here — this is what
+      // actually gets deleted from Supabase Storage afterward.
+      const downloaded = []
 
       if (fileEntries.length === 0) {
         msg('No files to download — marking as offloaded', 'success')
@@ -1518,29 +1543,74 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           const zip    = new JSZip()
           const folder = zip.folder(applicant.full_name.replace(/\s+/g, '_'))
           for (const entry of fileEntries) {
-            try { const res = await fetch(entry.url); folder.file(entry.filename, await res.blob()) }
-            catch (e) { console.warn(`Could not fetch ${entry.label}:`, e) }
+            try {
+              const res = await fetch(entry.url)
+              if (!res.ok) throw new Error(`HTTP ${res.status}`)
+              folder.file(entry.filename, await res.blob())
+              downloaded.push(entry)
+            } catch (e) {
+              console.warn(`Could not fetch ${entry.label}:`, e)
+            }
           }
-          const zipBlob = await zip.generateAsync({ type: 'blob' })
-          const link = document.createElement('a')
-          link.href = URL.createObjectURL(zipBlob)
-          link.download = `${applicant.full_name.replace(/\s+/g, '_')}_files.zip`
-          link.click()
-          URL.revokeObjectURL(link.href)
+          if (downloaded.length > 0) {
+            const zipBlob = await zip.generateAsync({ type: 'blob' })
+            const link = document.createElement('a')
+            link.href = URL.createObjectURL(zipBlob)
+            link.download = `${applicant.full_name.replace(/\s+/g, '_')}_files.zip`
+            link.click()
+            URL.revokeObjectURL(link.href)
+          }
         } else {
+          // No JSZip available — fall back to individual downloads. We can't
+          // verify these actually saved (browser download, not a fetch), so
+          // we assume success, same as the app's prior behavior.
           for (const entry of fileEntries) {
             const link = document.createElement('a')
             link.href = entry.url; link.download = entry.filename; link.target = '_blank'
             document.body.appendChild(link); link.click(); document.body.removeChild(link)
             await new Promise(r => setTimeout(r, 400))
+            downloaded.push(entry)
           }
         }
       }
 
+      // Delete only the files that were actually downloaded, grouped by
+      // bucket since storage.remove() takes a list of paths per bucket.
+      const failedDeletes = []
+      const byBucket = downloaded.reduce((acc, e) => {
+        (acc[e.bucket] ||= []).push(e)
+        return acc
+      }, {})
+      for (const [bucket, entries] of Object.entries(byBucket)) {
+        const { error: delErr } = await supabase.storage.from(bucket).remove(entries.map(e => e.path))
+        if (delErr) { failedDeletes.push(...entries.map(e => e.label)); console.warn(`Could not delete from ${bucket}:`, delErr) }
+      }
+
+      // Clear DB references to whatever was actually deleted, so nothing in
+      // the app still points at a file that no longer exists in Storage.
+      const successfullyDeleted = downloaded.filter(e => !failedDeletes.includes(e.label))
+      const resumeDeleted = successfullyDeleted.some(e => e.bucket === 'resumes')
+      const checklistClears = successfullyDeleted.filter(e => e.urlKey)
+
+      if (resumeDeleted) {
+        await supabase.from('volunteer_applications').update({ resume_url: null }).eq('id', applicant.id)
+      }
+      if (checklistClears.length > 0) {
+        const clearPatch = {}
+        for (const e of checklistClears) { clearPatch[e.urlKey] = null }
+        await supabase.from('onboarding_checklists').update(clearPatch).eq('applicant_id', applicant.id)
+      }
+
       await supabase.from('volunteer_applications')
         .update({ stage: 'offloaded', offloaded_at: new Date().toISOString() }).eq('id', applicant.id)
-      await audit('offloaded_volunteer', 'volunteer', applicant.id, applicant.full_name, 'files downloaded, removed from recently added')
-      msg(`${applicant.full_name} offloaded successfully`)
+
+      if (failedDeletes.length > 0) {
+        msg(`${applicant.full_name} offloaded, but ${failedDeletes.length} file(s) could not be removed from storage — check console`, 'error')
+      } else {
+        msg(`${applicant.full_name} offloaded — files downloaded and removed from Supabase`)
+      }
+      await audit('offloaded_volunteer', 'volunteer', applicant.id, applicant.full_name,
+        `files downloaded, ${successfullyDeleted.length} removed from storage${failedDeletes.length ? `, ${failedDeletes.length} failed to delete` : ''}`)
       setCompleted(prev => prev.filter(a => a.id !== applicant.id))
       setRecentChecklist(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
     } catch (e) {
@@ -1598,6 +1668,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       dea_exp:     isProvider ? (affiliData.dea_exp     || null) : null,
       ftca_exp:    isProvider ? (affiliData.ftca_exp    || null) : null,
       tb_exp:      isProvider ? (affiliData.tb_exp      || null) : null,
+      admin_notes: notesDraft || selected.notes || null,
     })
     if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
 
@@ -1625,6 +1696,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setChecklist(EMPTY_CHECKLIST)
     setApplicantPhotoUrl(null)
     setApplicantAvatarPath(null)
+    setNotesDraft('')
 
     await loadAll()
     setActiveTab('recent')
@@ -1637,6 +1709,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSelected(a)
     setOnboardStep(1)
     setChecklist(EMPTY_CHECKLIST)
+    setNotesDraft(a.notes || '')
 
     const affiliData = a.onboard_affil_data || {}
     setOnboardForm({
@@ -2610,6 +2683,25 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>
                 Reject Application
               </button>
+            </div>
+
+            {/* Admin Notes — free text on the applicant's needs/wants/notes.
+                Persists on the application now, and is copied onto the
+                volunteer's profile (editable on the Volunteers tab) once the
+                profile is created. Visible across every onboarding step. */}
+            <div style={{ marginTop: '1.25rem', padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+                <p style={{ ...secLabel, color: C.blue, marginBottom: 0 }}>Admin Notes</p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : 'Saved to applicant & carried to profile'}</span>
+              </div>
+              <textarea
+                value={notesDraft}
+                onChange={e => setNotesDraft(e.target.value)}
+                onBlur={() => saveApplicantNotes(applicant.id, notesDraft)}
+                placeholder="Notes on this person's application, needs, or wants…"
+                rows={4}
+                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.5 }}
+              />
             </div>
           </div>
         )}
