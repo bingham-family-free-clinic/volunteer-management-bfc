@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { SHIFTS, ROLES, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS } from '../../lib/constants'
+import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
 import DataDashboard from '../../components/DataDashboard'
 import ClinicOpenings from '../../components/ClinicOpenings'
@@ -1442,7 +1442,7 @@ export default function AdminPage() {
       return sum + (entry.week_pattern === 'every' ? 1 : 0.5);
     }, 0);
 
-    const limit = ROLE_SUGGESTIONS[addingRole];
+    const limit = getRoleCapacity(scheduleDay, scheduleShift, addingRole);
 
     if (limit && effectiveCount >= limit && !canOverrideRoleLimits) {
       showMessage(`Limit reached for ${addingRole} (${limit})`, 'error');
@@ -1947,7 +1947,7 @@ export default function AdminPage() {
                   return (
                     <div key={role} style={{ ...card, padding: '1rem 1.25rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: entries.length > 0 || isOpen ? '0.75rem' : 0 }}>
-                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{role}{ROLE_SUGGESTIONS[role] ? ` — ${ROLE_SUGGESTIONS[role]}` : ''}</span>
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{role}{getRoleCapacity(scheduleDay, scheduleShift, role) ? ` — ${getRoleCapacity(scheduleDay, scheduleShift, role)}` : ''}</span>
                         <button onClick={() => { setAddingRole(isOpen ? null : role); setAddVolId('') }} style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOpen ? 'var(--surface)' : 'rgba(2,65,107,0.12)', color: isOpen ? 'var(--muted)' : 'var(--accent)', border: `1px solid ${isOpen ? 'var(--border)' : 'var(--accent)'}` }}>{isOpen ? 'Cancel' : '+ Assign'}</button>
                       </div>
                       {entries.length > 0 && (

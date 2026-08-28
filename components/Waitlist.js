@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { ROLES, SHIFTS, ROLE_SUGGESTIONS } from '../lib/constants'
+import { ROLES, SHIFTS, getRoleCapacity } from '../lib/constants'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ export function computeAvailableSlots(entry, currentSchedule) {
   for (const key of slotKeys) {
     const { day, shift } = parseSlotKey(key)
     for (const role of roles) {
-      const limit = ROLE_SUGGESTIONS[role]
+      const limit = getRoleCapacity(day, shift, role)
       if (limit === 0) continue
 
       if (limit !== undefined && limit !== null && limit > 0) {
@@ -309,7 +309,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
 
     // Fresh query at assignment time to prevent races
     const { data: freshSchedule } = await supabase.from('schedule').select('*')
-    const limit = ROLE_SUGGESTIONS[assignRole]
+    const limit = getRoleCapacity(day, shift, assignRole)
 
     if (limit !== undefined && limit !== null && limit > 0) {
       const activeEntries = (freshSchedule || []).filter(s =>
@@ -403,6 +403,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
     const uniqueKeys    = [...new Set(slots.map(s => s.key))]
     const rolesForSlot  = slots.filter(s => s.key === assignSlotKey)
     const availableRoles = rolesForSlot.length > 0 ? rolesForSlot.map(s => s.role) : ROLES
+    const { day: selDay, shift: selShift } = assignSlotKey ? parseSlotKey(assignSlotKey) : { day: null, shift: null }
 
     return (
       <div onClick={() => setAssignModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '1.5rem' }}>
@@ -462,7 +463,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
                 {ROLES.map(r => {
                   const inAvailable = availableRoles.includes(r)
                   const slotData    = rolesForSlot.find(s => s.role === r)
-                  const limit       = ROLE_SUGGESTIONS[r]
+                  const limit       = getRoleCapacity(selDay, selShift, r)
                   const isUnlimited = limit === undefined || limit === null
                   const dimmed      = !inAvailable && rolesForSlot.length > 0 && !isUnlimited
                   return (
@@ -486,7 +487,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
               <div style={{ padding: '0.7rem 0.95rem', borderRadius: '8px', background: C.green + '08', border: `1px solid ${C.green}44` }}>
                 <p style={{ fontSize: '0.82rem', color: C.green, fontWeight: 600 }}>
                   ✓ {ALL_SLOTS.find(s => s.key === assignSlotKey)?.label || assignSlotKey} — {assignRole}
-                  {(ROLE_SUGGESTIONS[assignRole] === undefined || ROLE_SUGGESTIONS[assignRole] === null) && (
+                  {(getRoleCapacity(selDay, selShift, assignRole) === undefined || getRoleCapacity(selDay, selShift, assignRole) === null) && (
                     <span style={{ marginLeft: '0.5rem', fontSize: '0.72rem', opacity: 0.7 }}>(unlimited role)</span>
                   )}
                 </p>
