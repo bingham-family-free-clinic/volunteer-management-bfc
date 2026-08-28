@@ -1517,16 +1517,25 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         if (!rErr && rData?.signedUrl) {
           const ext = applicant.resume_url.split('.').pop()
           fileEntries.push({ label: 'Resume', url: rData.signedUrl, filename: `resume.${ext}`, bucket: 'resumes', path: applicant.resume_url })
+        } else if (rErr) {
+          console.warn('Could not sign resume URL:', rErr.message)
         }
       }
 
+      const unavailable = []
       for (const item of FILE_CHECKLIST_ITEMS) {
         const storagePath = cl[item.urlKey]
         if (!storagePath) continue
         const { data, error } = await supabase.storage.from(item.bucket).createSignedUrl(storagePath, 300)
         if (!error && data?.signedUrl) {
           fileEntries.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}`, bucket: item.bucket, path: storagePath, urlKey: item.urlKey, itemKey: item.key })
+        } else {
+          unavailable.push(item.label)
+          console.warn(`Could not sign URL for ${item.label} (bucket: ${item.bucket}):`, error?.message)
         }
+      }
+      if (unavailable.length > 0) {
+        msg(`Skipped (couldn't access in Storage): ${unavailable.join(', ')} — check console`, 'error')
       }
 
       // Only files that are confirmed downloaded end up here — this is what
