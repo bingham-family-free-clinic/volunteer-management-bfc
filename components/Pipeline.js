@@ -923,6 +923,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [onboardStep,  setOnboardStep]  = useState(1)
   const [savingStep,   setSavingStep]   = useState(false)
 
+  // Admin notes — free text captured during onboarding, carried over to the
+  // volunteer's profile once created (visible/editable on the Volunteers tab).
+  const [notesDraft,  setNotesDraft]  = useState('')
+  const [savingNotes, setSavingNotes] = useState(false)
+
   const EMPTY_CHECKLIST = {
     confidentiality_agreement: false,
     tb_test: false,
@@ -1206,6 +1211,18 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSavingStep(true)
     await supabase.from('volunteer_applications').update(patch).eq('id', applicantId)
     setSavingStep(false)
+  }
+
+  // ─── Admin notes (application/needs/wants) ────────────────────────────────
+  async function saveApplicantNotes(applicantId, value) {
+    setSavingNotes(true)
+    const { error } = await supabase.from('volunteer_applications').update({ notes: value }).eq('id', applicantId)
+    if (error) {
+      msg(error.message, 'error')
+    } else {
+      setSelected(prev => (prev && prev.id === applicantId) ? { ...prev, notes: value } : prev)
+    }
+    setSavingNotes(false)
   }
 
   async function sendStageEmail(applicant, stage) {
@@ -1598,6 +1615,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       dea_exp:     isProvider ? (affiliData.dea_exp     || null) : null,
       ftca_exp:    isProvider ? (affiliData.ftca_exp    || null) : null,
       tb_exp:      isProvider ? (affiliData.tb_exp      || null) : null,
+      admin_notes: notesDraft || selected.notes || null,
     })
     if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
 
@@ -1625,6 +1643,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setChecklist(EMPTY_CHECKLIST)
     setApplicantPhotoUrl(null)
     setApplicantAvatarPath(null)
+    setNotesDraft('')
 
     await loadAll()
     setActiveTab('recent')
@@ -1637,6 +1656,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSelected(a)
     setOnboardStep(1)
     setChecklist(EMPTY_CHECKLIST)
+    setNotesDraft(a.notes || '')
 
     const affiliData = a.onboard_affil_data || {}
     setOnboardForm({
@@ -2470,6 +2490,25 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   {valid && onboardStep !== n ? `${label} ✓` : label}
                 </button>
               ))}
+            </div>
+
+            {/* Admin Notes — free text on the applicant's needs/wants/notes.
+                Persists on the application now, and is copied onto the
+                volunteer's profile (editable on the Volunteers tab) once the
+                profile is created. Visible across every onboarding step. */}
+            <div style={{ marginBottom: '1.25rem', padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+                <p style={{ ...secLabel, color: C.blue, marginBottom: 0 }}>Admin Notes</p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : 'Saved to applicant & carried to profile'}</span>
+              </div>
+              <textarea
+                value={notesDraft}
+                onChange={e => setNotesDraft(e.target.value)}
+                onBlur={() => saveApplicantNotes(applicant.id, notesDraft)}
+                placeholder="Notes on this person's application, needs, or wants…"
+                rows={4}
+                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.5 }}
+              />
             </div>
 
             {/* Step 1 */}

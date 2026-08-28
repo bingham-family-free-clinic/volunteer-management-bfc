@@ -604,6 +604,11 @@ export default function AdminPage() {
   const [changingStatus, setChangingStatus]             = useState(false)
   const [editForm, setEditForm]                         = useState({})
   const [saving, setSaving]                             = useState(false)
+  // Admin notes — free text on the volunteer's application/needs/wants,
+  // carried over from the onboarding pipeline. Always editable by anyone
+  // who can view this volunteer's profile, independent of the Edit toggle.
+  const [notesDraft, setNotesDraft]                     = useState('')
+  const [savingNotes, setSavingNotes]                   = useState(false)
   const [filterAffiliation, setFilterAffiliation]       = useState('all')
   const [filterSchool, setFilterSchool]                 = useState('all')
   const [filterRole, setFilterRole]                     = useState('all')
@@ -1233,6 +1238,7 @@ export default function AdminPage() {
       end_date: v.end_date || '', status_reason: v.status_reason || '',
       team: v.team || '',
     })
+    setNotesDraft(v.admin_notes || '')
     setStatusForm({ status: v.status || 'active', status_reason: v.status_reason || '' })
     setEditing(false)
     setShowRecentShifts(false); setShowScheduledShifts(false)
@@ -1632,6 +1638,31 @@ export default function AdminPage() {
     setVolunteers(prev => prev.map(v => v.id === volunteerId ? { ...v, ...patch } : v))
     setChangingStatus(false)
   }
+  // Admin notes are saved independently of the full profile Edit form, so
+  // anyone who can open a volunteer's profile can jot down or update notes
+  // without needing to enter Edit mode.
+  async function handleSaveNotes() {
+    if (!selectedVolunteer) return
+    setSavingNotes(true)
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ admin_notes: notesDraft || null })
+      .eq('id', selectedVolunteer.id)
+
+    if (error) {
+      showMessage(error.message, 'error')
+      setSavingNotes(false)
+      return
+    }
+
+    const fresh = { ...selectedVolunteer, admin_notes: notesDraft || null }
+    setSelectedVolunteer(fresh)
+    setVolunteers(prev => prev.map(v => (v.id === selectedVolunteer.id ? fresh : v)))
+    showMessage('Notes saved!', 'success')
+    setSavingNotes(false)
+  }
+
   async function handleSaveEdit() {
     setSaving(true)
 
@@ -2083,6 +2114,24 @@ export default function AdminPage() {
                 </div>
               </div>
               <button onClick={() => setEditing(!editing)} style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: editing ? 'var(--surface)' : 'var(--accent)', color: editing ? 'var(--muted)' : '#fff', border: editing ? '1px solid var(--border)' : 'none' }}>{editing ? 'Cancel' : 'Edit'}</button>
+            </div>
+
+            {/* Admin Notes — visible and editable by anyone who can view this
+                profile, independent of the Edit toggle above. Seeded from the
+                notes captured on the applicant during onboarding. */}
+            <div style={{ padding: '1rem 1.25rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Admin Notes</p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : ''}</span>
+              </div>
+              <textarea
+                value={notesDraft}
+                onChange={e => setNotesDraft(e.target.value)}
+                onBlur={() => { if (notesDraft !== (selectedVolunteer.admin_notes || '')) handleSaveNotes() }}
+                placeholder="Notes on this volunteer's application, needs, or wants…"
+                rows={4}
+                style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.9rem', outline: 'none', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.5 }}
+              />
             </div>
 
             {!editing ? (
