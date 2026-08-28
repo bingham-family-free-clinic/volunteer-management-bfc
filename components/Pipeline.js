@@ -2492,25 +2492,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               ))}
             </div>
 
-            {/* Admin Notes — free text on the applicant's needs/wants/notes.
-                Persists on the application now, and is copied onto the
-                volunteer's profile (editable on the Volunteers tab) once the
-                profile is created. Visible across every onboarding step. */}
-            <div style={{ marginBottom: '1.25rem', padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
-                <p style={{ ...secLabel, color: C.blue, marginBottom: 0 }}>Admin Notes</p>
-                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : 'Saved to applicant & carried to profile'}</span>
-              </div>
-              <textarea
-                value={notesDraft}
-                onChange={e => setNotesDraft(e.target.value)}
-                onBlur={() => saveApplicantNotes(applicant.id, notesDraft)}
-                placeholder="Notes on this person's application, needs, or wants…"
-                rows={4}
-                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.5 }}
-              />
-            </div>
-
             {/* Step 1 */}
             {onboardStep === 1 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -2649,6 +2630,25 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>
                 Reject Application
               </button>
+            </div>
+
+            {/* Admin Notes — free text on the applicant's needs/wants/notes.
+                Persists on the application now, and is copied onto the
+                volunteer's profile (editable on the Volunteers tab) once the
+                profile is created. Visible across every onboarding step. */}
+            <div style={{ marginTop: '1.25rem', padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+                <p style={{ ...secLabel, color: C.blue, marginBottom: 0 }}>Admin Notes</p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : 'Saved to applicant & carried to profile'}</span>
+              </div>
+              <textarea
+                value={notesDraft}
+                onChange={e => setNotesDraft(e.target.value)}
+                onBlur={() => saveApplicantNotes(applicant.id, notesDraft)}
+                placeholder="Notes on this person's application, needs, or wants…"
+                rows={4}
+                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.5 }}
+              />
             </div>
           </div>
         )}

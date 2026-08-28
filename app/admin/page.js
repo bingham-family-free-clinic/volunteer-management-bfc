@@ -2116,24 +2116,6 @@ export default function AdminPage() {
               <button onClick={() => setEditing(!editing)} style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: editing ? 'var(--surface)' : 'var(--accent)', color: editing ? 'var(--muted)' : '#fff', border: editing ? '1px solid var(--border)' : 'none' }}>{editing ? 'Cancel' : 'Edit'}</button>
             </div>
 
-            {/* Admin Notes — visible and editable by anyone who can view this
-                profile, independent of the Edit toggle above. Seeded from the
-                notes captured on the applicant during onboarding. */}
-            <div style={{ padding: '1rem 1.25rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Admin Notes</p>
-                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : ''}</span>
-              </div>
-              <textarea
-                value={notesDraft}
-                onChange={e => setNotesDraft(e.target.value)}
-                onBlur={() => { if (notesDraft !== (selectedVolunteer.admin_notes || '')) handleSaveNotes() }}
-                placeholder="Notes on this volunteer's application, needs, or wants…"
-                rows={4}
-                style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.9rem', outline: 'none', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.5 }}
-              />
-            </div>
-
             {!editing ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -2289,6 +2271,24 @@ export default function AdminPage() {
                 <button onClick={handleSaveEdit} disabled={saving} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{saving ? 'Saving...' : 'Save Changes'}</button>
               </div>
             )}
+
+            {/* Admin Notes — visible and editable by anyone who can view this
+                profile, independent of the Edit toggle above. Seeded from the
+                notes captured on the applicant during onboarding. */}
+            <div style={{ padding: '1rem 1.25rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)', marginTop: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Admin Notes</p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : ''}</span>
+              </div>
+              <textarea
+                value={notesDraft}
+                onChange={e => setNotesDraft(e.target.value)}
+                onBlur={() => { if (notesDraft !== (selectedVolunteer.admin_notes || '')) handleSaveNotes() }}
+                placeholder="Notes on this volunteer's application, needs, or wants…"
+                rows={4}
+                style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.9rem', outline: 'none', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.5 }}
+              />
+            </div>
           </div>
         )}
 
