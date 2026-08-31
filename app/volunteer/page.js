@@ -607,6 +607,10 @@ function VolunteerPageInner() {
   const [changingPassword, setChangingPassword] = useState(false)
   const [pushEnabled, setPushEnabled]           = useState(false)
   const [pushLoading, setPushLoading]           = useState(false)
+
+  // ── Notification opt-in banner (mobile only) ──────────────────────────────
+  const [showNotifBanner, setShowNotifBanner]   = useState(false)
+  const [notifBannerLoading, setNotifBannerLoading] = useState(false)
   const [editingCreds, setEditingCreds]         = useState(false)
   const [credForm, setCredForm]                 = useState({})
   const [savingCreds, setSavingCreds]           = useState(false)
@@ -689,6 +693,37 @@ function VolunteerPageInner() {
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
+  }, [])
+
+  // Decide whether to show the "enable notifications" banner. It shows only
+  // on mobile, only once the user is logged in, and it hides itself once the
+  // user has picked EITHER option — persisted in localStorage so it stays
+  // hidden across refreshes. (A native browser permission denial can't be
+  // re-prompted programmatically, so re-showing our banner after "Yes"
+  // wouldn't accomplish anything; the user has to flip it back on manually
+  // in their browser's site settings.) It also hides itself if the browser
+  // already reports Notification.permission === 'granted'.
+  useEffect(() => {
+    if (!isMobile || !user) { setShowNotifBanner(false); return }
+    if (typeof window === 'undefined' || !('Notification' in window)) { setShowNotifBanner(false); return }
+    let dismissed = false
+    try { dismissed = localStorage.getItem('notifBannerDismissed') === 'true' } catch (e) { /* localStorage unavailable */ }
+    if (dismissed || Notification.permission === 'granted') { setShowNotifBanner(false); return }
+    setShowNotifBanner(true)
+  }, [isMobile, user])
+
+  const handleNotifBannerEnable = useCallback(async () => {
+    setNotifBannerLoading(true)
+    const sub = await subscribeToPush(supabase, user.id)
+    setNotifBannerLoading(false)
+    setPushEnabled(!!sub)
+    try { localStorage.setItem('notifBannerDismissed', 'true') } catch (e) { /* localStorage unavailable */ }
+    setShowNotifBanner(false)
+  }, [user])
+
+  const handleNotifBannerDecline = useCallback(() => {
+    try { localStorage.setItem('notifBannerDismissed', 'true') } catch (e) { /* localStorage unavailable */ }
+    setShowNotifBanner(false)
   }, [])
 
   // ── Hidden dev-credits view ───────────────────────────────────────────────
@@ -1943,55 +1978,24 @@ function VolunteerPageInner() {
 
         {/* Hidden dev credits — triple-tap the header logo on mobile to open */}
         {showCredits && isMobile && (
-          <div
-            onClick={() => setShowCredits(false)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0,0,0,0.85)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1100,
-              padding: '1.5rem',
-              cursor: 'pointer',
-            }}
-          >
-            <div
-              onClick={e => e.stopPropagation()}
-              style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: '16px',
-                padding: '2rem 1.75rem',
-                maxWidth: '320px',
-                width: '100%',
-                textAlign: 'center',
-                cursor: 'default',
-              }}
-            >
-              <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
-                Developed by
-              </p>
-              <p style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text)', marginBottom: '1.5rem' }}>
-                Joshua Kent
-              </p>
-              <button
-                onClick={() => setShowCredits(false)}
-                style={{
-                  padding: '0.6rem 1.5rem',
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 600,
-                  fontSize: '0.85rem',
-                  cursor: 'pointer',
-                  fontFamily: 'DM Sans, sans-serif',
-                }}
-              >
-                Close
-              </button>
+          <div onClick={() => setShowCredits(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '1.5rem', cursor: 'pointer' }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '2rem 1.75rem', maxWidth: '320px', width: '100%', textAlign: 'center', cursor: 'default' }}>
+              <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>Developed by</p>
+              <p style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text)', marginBottom: '1.5rem' }}>Joshua Kent</p>
+              <button onClick={() => setShowCredits(false)} style={{ padding: '0.6rem 1.5rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>Close</button>
+            </div>
+          </div>
+        )}
+
+        {/* Enable-notifications banner (mobile only) */}
+        {showNotifBanner && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: '1.5rem' }}>
+            <div style={{ background: '#fff', borderRadius: '16px', padding: '1.75rem 1.5rem', maxWidth: '340px', width: '100%', textAlign: 'center', boxShadow: '0 8px 40px rgba(0,0,0,0.35)' }}>
+              <p style={{ fontSize: '1rem', fontWeight: 500, color: '#1a1a1a', lineHeight: 1.5, marginBottom: '1.5rem' }}>Enable notifications so you don't miss messages and shift reminders</p>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button onClick={handleNotifBannerDecline} disabled={notifBannerLoading} style={{ flex: 1, padding: '0.75rem', background: '#fff', color: '#0a6cff', border: '1px solid #0a6cff', borderRadius: '8px', fontWeight: 600, fontSize: '0.9rem', cursor: notifBannerLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>No</button>
+                <button onClick={handleNotifBannerEnable} disabled={notifBannerLoading} style={{ flex: 1, padding: '0.75rem', background: '#0a6cff', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '0.9rem', cursor: notifBannerLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{notifBannerLoading ? 'Working…' : 'Yes'}</button>
+              </div>
             </div>
           </div>
         )}
