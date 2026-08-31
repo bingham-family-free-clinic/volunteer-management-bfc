@@ -2547,7 +2547,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               {[
                 { n: 1, label: 'Affiliation',  valid: s1 },
                 { n: 2, label: 'Position',     valid: step2Valid },
-                { n: 3, label: 'Availability', valid: step3Valid },
                 { n: 4, label: 'Checklist',    valid: checklistCount > 0 },
               ].map(({ n, label, valid }) => (
                 <button key={n} onClick={() => setOnboardStep(n)} style={{ padding: '0.35rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: onboardStep === n ? 700 : 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', border: `1px solid ${onboardStep === n ? C.blue : valid ? C.blue + '44' : 'var(--border)'}`, background: onboardStep === n ? C.blue + '18' : 'var(--bg)', color: onboardStep === n ? C.blue : valid ? C.blue : 'var(--muted)' }}>
@@ -2586,40 +2585,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
             {/* Step 3 */}
             {onboardStep === 3 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <div>
-                  <p style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.35rem' }}>Availability &amp; Waitlist Preferences</p>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: 1.6 }}>Select which specific shifts this volunteer can cover.</p>
-                </div>
-                <div style={{ padding: '1.1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a`, overflowX: 'auto' }}>
-                  <p style={{ ...secLabel, color: C.blue, marginBottom: '0.85rem' }}>Shift Grid</p>
-                  <SlotPicker selected={onboardForm.preferred_slots} onChange={val => setOnboardForm(f => ({ ...f, preferred_slots: val }))} />
-                </div>
-                <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
-                  <p style={{ ...secLabel, color: C.blue, marginBottom: '0.75rem' }}>Willing to Fill Roles</p>
-                  <RolePicker selected={onboardForm.preferred_roles} onChange={val => setOnboardForm(f => ({ ...f, preferred_roles: val }))} />
-                  {onboardForm.preferred_roles.length === 0 && (
-                    <p style={{ fontSize: '0.8rem', color: C.danger, fontStyle: 'italic', marginTop: '0.6rem' }}>Select at least one role to continue.</p>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                  {onboardForm.preferred_slots.length === 0
-                    ? <span style={{ fontSize: '0.8rem', color: C.danger, fontStyle: 'italic' }}>Select at least one shift to continue.</span>
-                    : onboardForm.preferred_slots.map(k => {
-                        const s = ALL_SLOTS.find(x => x.key === k)
-                        return <span key={k} style={{ padding: '0.2rem 0.55rem', borderRadius: '100px', fontSize: '0.72rem', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontFamily: 'DM Mono, monospace' }}>{s?.label || k}</span>
-                      })
-                  }
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                  <button onClick={() => setOnboardStep(2)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_preferred_slots: onboardForm.preferred_slots, onboard_preferred_roles: onboardForm.preferred_roles }); setOnboardStep(4) }} disabled={!step3Valid} style={solidBtn(C.blue, !step3Valid)}>Save &amp; Next</button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 4 */}
-            {onboardStep === 4 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Onboarding Checklist</p>
@@ -2661,7 +2626,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 )}
 
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  <button onClick={() => setOnboardStep(3)} style={ghostBtn()}>Back</button>
+                  <button onClick={() => setOnboardStep(2)} style={ghostBtn()}>Back</button>
                   <button onClick={handleCreateProfile} disabled={creatingProfile || !allStepsValid} style={solidBtn(C.primary, creatingProfile || !allStepsValid)}>
                     {creatingProfile ? 'Creating...' : 'Create Volunteer Profile'}
                   </button>
@@ -2682,7 +2647,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   <p style={{ fontSize: '0.82rem', color: C.warn, fontWeight: 500 }}>
                     {!step1Valid() && 'Affiliation details required. '}
                     {!step2Valid && 'Default position required. '}
-                    {!step3Valid && 'At least one available shift and one role required. '}
                   </p>
                 )}
               </div>
