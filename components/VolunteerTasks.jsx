@@ -88,23 +88,18 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   const [nameVal, setNameVal] = useState(task.name)
   const [savingName, setSavingName] = useState(false)
   const notesRef = useRef(null)
+  const [supportsFieldSizing] = useState(() =>
+    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+  )
 
   useEffect(() => {
     const el = notesRef.current
     if (!el) return
 
-    // Browsers that natively support field-sizing: content handle the
-    // grow/shrink themselves at layout time via CSS — no height juggling,
-    // so no scroll-jump problem to work around either. Only run the manual
-    // JS fallback below on browsers that don't support it yet.
-    const supportsFieldSizing = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+    // Browsers that support field-sizing dynamically adjust the textbox height
     if (supportsFieldSizing) return
 
-    // Failsafe for browsers without field-sizing support: size the box once,
-    // when the notes editor opens, to fit the existing text — with a floor
-    // of about 10 lines — rather than resizing (and re-triggering the
-    // scroll-jump behavior) on every keystroke. If someone types past this
-    // height, the box scrolls internally instead of growing further.
+    // Failsafe for browsers without field-sizing support keep the textbox static
     const computed = window.getComputedStyle(el)
     const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
     const paddingTop = parseFloat(computed.paddingTop) || 0
@@ -346,7 +341,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   onChange={e => setNotesVal(e.target.value)}
                   rows={4}
                   placeholder="Add context, links, or updates…"
-                  style={{ ...S.input, resize: 'none', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', fontSize: '0.85rem' }}
+                  style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', fontSize: '0.85rem' }}
                 />
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
