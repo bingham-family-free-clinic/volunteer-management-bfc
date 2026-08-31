@@ -2749,25 +2749,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 Reject Application
               </button>
             </div>
-
-            {/* Admin Notes — free text on the applicant's needs/wants/notes.
-                Persists on the application now, and is copied onto the
-                volunteer's profile (editable on the Volunteers tab) once the
-                profile is created. Visible across every onboarding step. */}
-            <div style={{ marginTop: '1.25rem', padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
-                <p style={{ ...secLabel, color: C.blue, marginBottom: 0 }}>Admin Notes</p>
-                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : 'Saved to applicant & carried to profile'}</span>
-              </div>
-              <textarea
-                value={notesDraft}
-                onChange={e => setNotesDraft(e.target.value)}
-                onBlur={() => saveApplicantNotes(applicant.id, notesDraft)}
-                placeholder="Notes on this person's application, needs, or wants…"
-                rows={4}
-                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.5 }}
-              />
-            </div>
           </div>
         )}
 
@@ -2821,6 +2802,22 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 Select at least one trained role before moving to the waitlist.
               </p>
             )}
+          </div>
+        )}
+        {(isOnboarding || isTraining) && (
+          <div style={{ ...card, padding: '1rem 1.25rem', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+              <p style={{ ...secLabel, color: C.blue, marginBottom: 0 }}>Admin Notes</p>
+              <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : 'Saved to applicant & carried to profile'}</span>
+            </div>
+            <textarea
+              value={notesDraft}
+              onChange={e => setNotesDraft(e.target.value)}
+              onBlur={() => saveApplicantNotes(applicant.id, notesDraft)}
+              placeholder="Notes on this person's application, needs, or wants…"
+              rows={4}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.5 }}
+            />
           </div>
         )}
 
