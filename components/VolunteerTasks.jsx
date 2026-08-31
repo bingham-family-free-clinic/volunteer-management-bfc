@@ -91,9 +91,24 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
 
   useEffect(() => {
     const el = notesRef.current
-    if (el) {
-      el.style.height = 'auto'
-      el.style.height = el.scrollHeight + 'px'
+    if (!el) return
+
+    // Resizing the textarea's height can trigger the browser's built-in
+    // "scroll focused element into view" behavior, which tends to overcorrect
+    // and shove the whole page down. So: remember where we were, resize,
+    // put the scroll position back, then only nudge it ourselves if the
+    // textarea actually ended up off screen — and only by the amount needed.
+    const prevScrollY = window.scrollY
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
+    window.scrollTo(0, prevScrollY)
+
+    const rect = el.getBoundingClientRect()
+    const buffer = 20
+    if (rect.bottom > window.innerHeight - buffer) {
+      window.scrollBy(0, rect.bottom - window.innerHeight + buffer)
+    } else if (rect.top < buffer) {
+      window.scrollBy(0, rect.top - buffer)
     }
   }, [notesVal, editingNotes])
 
