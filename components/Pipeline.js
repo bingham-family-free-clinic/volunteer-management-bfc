@@ -1488,7 +1488,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setCreatingProfile(true)
 
     const { data: fnData, error: fnErr } = await supabase.functions.invoke('create-volunteer', {
-      body: { email: selected.email },
+      body: { email: selected.email, password: 'BFC2025!' },
     })
     if (fnErr) { msg(fnErr.message, 'error'); setCreatingProfile(false); return }
     if (fnData?.error) { msg(fnData.error, 'error'); setCreatingProfile(false); return }
