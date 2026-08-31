@@ -888,6 +888,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // (post-onboarding) instead of during the onboarding wizard. Keyed by
   // applicant id so edits on one card don't leak into another.
   const [trainingSaving,       setTrainingSaving]       = useState({}) // { [applicantId]: boolean }
+  const [trainingDrafts,       setTrainingDrafts]       = useState({}) // { [applicantId]: { preferred_slots, preferred_roles } }
   const [movingToWaitlistId,   setMovingToWaitlistId]   = useState(null)
   const [rejectingTrainingId,  setRejectingTrainingId]  = useState(null)
 
@@ -1369,6 +1370,92 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setAffiliationModal(null)
   }
 
+  // ─── Training stage: availability & trained-roles editing, waitlist/reject ─
+
+  // Merges any in-progress local edits for this applicant with what's already
+  // saved on their application row, so callers always see the latest values
+  // regardless of whether a given field has been touched yet.
+  function getTrainingDraft(applicant) {
+    return {
+      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? applicant.preferred_slots ?? [],
+      preferred_roles: trainingDrafts[applicant.id]?.preferred_roles ?? applicant.preferred_roles ?? [],
+    }
+  }
+
+  async function updateTrainingField(applicantId, field, value) {
+    setTrainingDrafts(prev => ({
+      ...prev,
+      [applicantId]: { ...(prev[applicantId] || {}), [field]: value },
+    }))
+    setTrainingSaving(prev => ({ ...prev, [applicantId]: true }))
+    const { error } = await supabase.from('volunteer_applications').update({ [field]: value }).eq('id', applicantId)
+    if (error) msg(`Failed to save ${field === 'preferred_slots' ? 'availability' : 'trained roles'}: ${error.message}`, 'error')
+    setTrainingSaving(prev => ({ ...prev, [applicantId]: false }))
+  }
+
+  async function moveToWaitlist(applicant) {
+    const { preferred_slots, preferred_roles } = getTrainingDraft(applicant)
+    setMovingToWaitlistId(applicant.id)
+
+    const { error: waitlistErr } = await supabase.from('waitlist').insert({
+      volunteer_id:    applicant.volunteer_id,
+      preferred_slots,
+      preferred_roles,
+      source:          'pipeline',
+      added_by:        profile.id,
+    })
+    if (waitlistErr) {
+      msg(`Waitlist insert failed: ${waitlistErr.message}`, 'error')
+      setMovingToWaitlistId(null)
+      return
+    }
+
+    const { error: appErr } = await supabase.from('volunteer_applications')
+      .update({ stage: 'completed', stage_updated_at: new Date().toISOString() })
+      .eq('id', applicant.id)
+    if (appErr) {
+      msg(`Added to waitlist, but failed to update pipeline stage: ${appErr.message}`, 'error')
+      setMovingToWaitlistId(null)
+      return
+    }
+
+    await audit('moved_to_waitlist', 'volunteer', applicant.volunteer_id, applicant.full_name,
+      `preferred_roles: ${preferred_roles.join(', ') || 'none'}`)
+    msg(`${applicant.full_name} moved to the waitlist`)
+
+    setTrainingDrafts(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
+    setSelected(null)
+    await loadAll()
+    setActiveTab('recent')
+    setMovingToWaitlistId(null)
+  }
+
+  // Removes the volunteer from the active pipeline without touching their
+  // account — they keep their profile/login, they're just not moving into
+  // active service right now. Distinct from the pre-profile "Reject
+  // Application" flow (openRejectModal/confirmReject), which sends a
+  // rejection email and never created an account in the first place.
+  async function rejectFromTraining(applicant) {
+    setRejectingTrainingId(applicant.id)
+    const { error } = await supabase.from('volunteer_applications')
+      .update({ stage: 'completed', stage_updated_at: new Date().toISOString() })
+      .eq('id', applicant.id)
+    if (error) {
+      msg(error.message, 'error')
+      setRejectingTrainingId(null)
+      return
+    }
+    await audit('rejected_from_training', 'volunteer', applicant.volunteer_id, applicant.full_name,
+      'moved to Recently Added — account kept active')
+    msg(`${applicant.full_name} moved to Recently Added`)
+
+    setTrainingDrafts(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
+    setSelected(null)
+    await loadAll()
+    setActiveTab('recent')
+    setRejectingTrainingId(null)
+  }
+
   async function toggleChecklistItem(applicantId, key, value) {
     setSavingChecklist(true)
     const next = { ...checklist, [key]: value }
@@ -1646,7 +1733,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const _missingDocs = getMissingRequiredDocs()
     if (_missingDocs.length > 0) {
       msg(`Missing required docs: ${_missingDocs.join(', ')}`, 'error')
-      setOnboardStep(5)
+      setOnboardStep(3)
       return
     }
 
@@ -1687,16 +1774,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       admin_notes: notesDraft || selected.notes || null,
     })
     if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
-    {/* 
-    const { error: waitlistErr } = await supabase.from('waitlist').insert({
-      volunteer_id:    uid,
-      preferred_slots: affiliData.preferred_slots ?? [],
-      preferred_roles: affiliData.preferred_roles ?? [],
-      source:          'pipeline',
-      added_by:        profile.id,
-    })
-    if (waitlistErr) msg(`Profile created but waitlist insert failed: ${waitlistErr.message}`, 'error')
-    */}
 
     const { error: appErr } = await supabase.from('volunteer_applications')
       .update({ stage: 'training', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
@@ -2417,7 +2494,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isApplied    = applicant.stage === 'applied'
     const isInterview  = applicant.stage === 'interview'
     const isOnboarding = applicant.stage === 'onboarding'
+    const isTraining   = applicant.stage === 'training'
     const isRejected   = applicant.stage === 'rejected'
+    const trainingDraft = isTraining ? getTrainingDraft(applicant) : null
 
     const fields = [
       { label: 'Email',       value: applicant.email },
@@ -2532,7 +2611,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           </div>
         )}
 
-        {/* Onboarding — 5 steps */}
+        {/* Onboarding — 3 steps */}
         {isOnboarding && (
           <div style={{ ...card, padding: '1rem 1.25rem', borderColor: C.blue + '55', background: C.blue + '06' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -2548,7 +2627,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               {[
                 { n: 1, label: 'Affiliation',  valid: s1 },
                 { n: 2, label: 'Position',     valid: step2Valid },
-                { n: 4, label: 'Checklist',    valid: checklistCount > 0 },
+                { n: 3, label: 'Checklist',    valid: checklistCount > 0 },
               ].map(({ n, label, valid }) => (
                 <button key={n} onClick={() => setOnboardStep(n)} style={{ padding: '0.35rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: onboardStep === n ? 700 : 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', border: `1px solid ${onboardStep === n ? C.blue : valid ? C.blue + '44' : 'var(--border)'}`, background: onboardStep === n ? C.blue + '18' : 'var(--bg)', color: onboardStep === n ? C.blue : valid ? C.blue : 'var(--muted)' }}>
                   {valid && onboardStep !== n ? `${label} ✓` : label}
@@ -2561,7 +2640,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>What is their affiliation?</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.6rem' }}>
-                  {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, default_role: f.default_role, preferred_slots: f.preferred_slots, preferred_roles: f.preferred_roles }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
+                  {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, default_role: f.default_role }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
                 </div>
                 {onboardForm.affiliation && <AffiliationExtras onboardForm={onboardForm} setOnboardForm={setOnboardForm} labelStyle={labelStyle} inputStyle={inputStyle} secLabel={secLabel} />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -2640,7 +2719,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       {profileSummary().map(item => <div key={item.label} style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.78rem', color: 'var(--muted)' }}><span style={{ color: 'var(--text)', fontWeight: 500 }}>{item.label}: </span>{item.value}</div>)}
                       <div style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: C.blue + '10', border: `1px solid ${C.blue}35`, fontSize: '0.78rem' }}><span style={{ color: 'var(--muted)', fontWeight: 500 }}>Password: </span><span style={{ fontFamily: 'DM Mono, monospace', color: C.blue, fontWeight: 600 }}>BFC2025!</span></div>
                     </div>
-                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Will be automatically added to the waitlist on creation.</p>
+                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Will be moved to Training on creation, where availability and trained roles are set before joining the waitlist.</p>
                   </div>
                 )}
 
@@ -2679,6 +2758,59 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 style={{ ...inputStyle, resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.5 }}
               />
             </div>
+          </div>
+        )}
+
+        {/* Training — availability & trained roles are set here, post-onboarding */}
+        {isTraining && (
+          <div style={{ ...card, padding: '1rem 1.25rem', borderColor: C.training + '55', background: C.training + '08' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+              <p style={{ ...secLabel, color: C.training, marginBottom: 0 }}>Training</p>
+              <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: trainingSaving[applicant.id] ? 'italic' : 'normal' }}>
+                {trainingSaving[applicant.id] ? 'saving…' : '✓ saved'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+              Set <strong>{applicant.full_name}</strong>'s availability and the roles they've been trained in, then move them to the waitlist.
+            </p>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <p style={{ ...secLabel, marginBottom: '0.65rem' }}>Availability</p>
+              <SlotPicker
+                selected={trainingDraft.preferred_slots}
+                onChange={slots => updateTrainingField(applicant.id, 'preferred_slots', slots)}
+              />
+            </div>
+
+            <div style={{ marginBottom: '0.5rem' }}>
+              <p style={{ ...secLabel, marginBottom: '0.65rem' }}>Trained Roles</p>
+              <RolePicker
+                selected={trainingDraft.preferred_roles}
+                onChange={roles => updateTrainingField(applicant.id, 'preferred_roles', roles)}
+              />
+            </div>
+
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: `1px solid ${C.training}22`, display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => rejectFromTraining(applicant)}
+                disabled={movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id}
+                style={outlineBtn(C.danger)}
+              >
+                {rejectingTrainingId === applicant.id ? 'Rejecting…' : 'Reject'}
+              </button>
+              <button
+                onClick={() => moveToWaitlist(applicant)}
+                disabled={movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id || trainingDraft.preferred_roles.length === 0}
+                style={solidBtn(C.training, movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id || trainingDraft.preferred_roles.length === 0)}
+              >
+                {movingToWaitlistId === applicant.id ? 'Moving…' : 'Move to Waitlist'}
+              </button>
+            </div>
+            {trainingDraft.preferred_roles.length === 0 && (
+              <p style={{ fontSize: '0.78rem', color: C.warn, fontWeight: 500, textAlign: 'right', marginTop: '0.5rem' }}>
+                Select at least one trained role before moving to the waitlist.
+              </p>
+            )}
           </div>
         )}
 
