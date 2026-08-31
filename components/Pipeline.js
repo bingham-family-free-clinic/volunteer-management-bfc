@@ -1687,7 +1687,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       admin_notes: notesDraft || selected.notes || null,
     })
     if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
-
+    {/* 
     const { error: waitlistErr } = await supabase.from('waitlist').insert({
       volunteer_id:    uid,
       preferred_slots: affiliData.preferred_slots ?? [],
@@ -1696,14 +1696,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       added_by:        profile.id,
     })
     if (waitlistErr) msg(`Profile created but waitlist insert failed: ${waitlistErr.message}`, 'error')
+    */}
 
     const { error: appErr } = await supabase.from('volunteer_applications')
-      .update({ stage: 'completed', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
+      .update({ stage: 'training', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
       .eq('id', selected.id)
     if (appErr) msg(`Profile created but application stage update failed: ${appErr.message}`, 'error')
 
-    await audit('created_volunteer', 'volunteer', uid, selected.full_name, 'from pipeline → added to waitlist')
-    if (!waitlistErr && !appErr) msg(`Profile created for ${selected.full_name} — added to waitlist`)
+    await audit('created_volunteer', 'volunteer', uid, selected.full_name, 'from pipeline → moved to training')
+    if (!appErr) msg(`Profile created for ${selected.full_name} — moved to training`)
     if (onVolunteerCreated) onVolunteerCreated()
 
     setSelected(null)
