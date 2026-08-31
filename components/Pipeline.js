@@ -1372,13 +1372,22 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // ─── Training stage: availability & trained-roles editing, waitlist/reject ─
 
+  // The applicant/onboarding row stores these under the onboard_-prefixed
+  // column names; the waitlist table (and the rest of this component) uses
+  // the shorter preferred_slots/preferred_roles names, so this maps between
+  // the two wherever we read from or write to volunteer_applications.
+  const TRAINING_FIELD_COLUMN = {
+    preferred_slots: 'onboard_preferred_slots',
+    preferred_roles: 'onboard_preferred_roles',
+  }
+
   // Merges any in-progress local edits for this applicant with what's already
   // saved on their application row, so callers always see the latest values
   // regardless of whether a given field has been touched yet.
   function getTrainingDraft(applicant) {
     return {
-      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? applicant.preferred_slots ?? [],
-      preferred_roles: trainingDrafts[applicant.id]?.preferred_roles ?? applicant.preferred_roles ?? [],
+      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? applicant.onboard_preferred_slots ?? [],
+      preferred_roles: trainingDrafts[applicant.id]?.preferred_roles ?? applicant.onboard_preferred_roles ?? [],
     }
   }
 
@@ -1388,7 +1397,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       [applicantId]: { ...(prev[applicantId] || {}), [field]: value },
     }))
     setTrainingSaving(prev => ({ ...prev, [applicantId]: true }))
-    const { error } = await supabase.from('volunteer_applications').update({ [field]: value }).eq('id', applicantId)
+    const column = TRAINING_FIELD_COLUMN[field]
+    const { error } = await supabase.from('volunteer_applications').update({ [column]: value }).eq('id', applicantId)
     if (error) msg(`Failed to save ${field === 'preferred_slots' ? 'availability' : 'trained roles'}: ${error.message}`, 'error')
     setTrainingSaving(prev => ({ ...prev, [applicantId]: false }))
   }
