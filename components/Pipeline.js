@@ -23,8 +23,8 @@ function parseSlotKey(key) {
   return { day, shift }
 }
 
-const STAGES       = ['applied', 'interview', 'onboarding', 'rejected']
-const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', rejected: 'Rejected' }
+const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
+const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', training: 'Training', rejected: 'Rejected' }
 
 // ── Blue-only palette ─────────────────────────────────────────────────────────
 const C = {
@@ -36,6 +36,7 @@ const C = {
   warn:     '#0284c7',
   danger:   '#1e40af',
   success:  '#0369a1',
+  training: '#0c4a6e',
 }
 
 const STAGE_COLORS = {
@@ -43,6 +44,7 @@ const STAGE_COLORS = {
   interview:             C.warn,
   onboarding:            C.blue,
   onboarding_missionary: C.primary,
+  training:              C.training,
   rejected:              C.danger,
 }
 
@@ -84,7 +86,7 @@ const CHECKLIST_ITEMS = [
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
 const NON_MISSIONARY_REQUIRED = ['background_check', 'id_check', 'immunization']
 
-const TOTAL_STEPS = 4
+const TOTAL_STEPS = 3
 
 // ─── Slot picker ──────────────────────────────────────────────────────────────
 function SlotPicker({ selected, onChange }) {
@@ -882,6 +884,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [rejectModal,      setRejectModal]      = useState(null)   // { applicant } | null — choose notify-email vs silent reject
   const [creatingProfile, setCreatingProfile] = useState(false)
 
+  // Training stage — availability & roles-trained-in are collected here
+  // (post-onboarding) instead of during the onboarding wizard. Keyed by
+  // applicant id so edits on one card don't leak into another.
+  const [trainingSaving,       setTrainingSaving]       = useState({}) // { [applicantId]: boolean }
+  const [movingToWaitlistId,   setMovingToWaitlistId]   = useState(null)
+  const [rejectingTrainingId,  setRejectingTrainingId]  = useState(null)
+
   // templates shape: { interview: { subject, body }, onboarding: { ... }, rejected: { ... } }
   const [templates,        setTemplates]        = useState({})
   const [templatesLoading, setTemplatesLoading] = useState(false)
@@ -916,8 +925,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     credentials: '',
     license_exp: '', bls_exp: '', dea_exp: '', ftca_exp: '', tb_exp: '',
     default_role: '',
-    preferred_slots: [],
-    preferred_roles: [],
   }
   const [onboardForm,  setOnboardForm]  = useState(EMPTY_FORM)
   const [onboardStep,  setOnboardStep]  = useState(1)
@@ -1724,8 +1731,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setOnboardForm({
       affiliation:   a.onboard_affiliation   || '',
       default_role:  a.onboard_default_role  || '',
-      preferred_slots: a.onboard_preferred_slots || [],
-      preferred_roles: a.onboard_preferred_roles || [],
       sma_name:          affiliData.sma_name          || '',
       sma_contact:       affiliData.sma_contact        || '',
       school:            affiliData.school             || '',
@@ -1877,8 +1882,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     return true
   }
   const step2Valid    = !!onboardForm.default_role
-  const step3Valid    = onboardForm.preferred_slots.length > 0 && onboardForm.preferred_roles.length > 0
-  const allStepsValid = step1Valid() && step2Valid && step3Valid && docsComplete
+  const allStepsValid = step1Valid() && step2Valid && docsComplete
 
   function profileSummary() {
     const base = [
@@ -1887,8 +1891,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       { label: 'Affil.',   value: onboardForm.affiliation },
       { label: 'Position', value: onboardForm.default_role },
     ]
-    if (onboardForm.preferred_slots.length > 0)
-      base.push({ label: 'Slots', value: `${onboardForm.preferred_slots.length} selected` })
     return base
   }
 
