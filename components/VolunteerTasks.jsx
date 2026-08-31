@@ -100,28 +100,21 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
     const supportsFieldSizing = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
     if (supportsFieldSizing) return
 
-    const prevScrollY = window.scrollY
+    // Failsafe for browsers without field-sizing support: size the box once,
+    // when the notes editor opens, to fit the existing text — with a floor
+    // of about 10 lines — rather than resizing (and re-triggering the
+    // scroll-jump behavior) on every keystroke. If someone types past this
+    // height, the box scrolls internally instead of growing further.
+    const computed = window.getComputedStyle(el)
+    const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
+    const paddingTop = parseFloat(computed.paddingTop) || 0
+    const paddingBottom = parseFloat(computed.paddingBottom) || 0
+    const minHeight = lineHeight * 10 + paddingTop + paddingBottom
+
     el.style.height = 'auto'
-    el.style.height = el.scrollHeight + 'px'
-
-    // Browsers auto-scroll a focused element into view whenever its size
-    // changes, and that adjustment happens asynchronously — a frame after
-    // this code runs — so correcting the scroll position immediately here
-    // gets overridden right after. Doing the correction inside
-    // requestAnimationFrame instead runs it after the browser's own
-    // adjustment, so it actually sticks.
-    requestAnimationFrame(() => {
-      window.scrollTo(0, prevScrollY)
-
-      const rect = el.getBoundingClientRect()
-      const buffer = 20
-      if (rect.bottom > window.innerHeight - buffer) {
-        window.scrollBy(0, rect.bottom - window.innerHeight + buffer)
-      } else if (rect.top < buffer) {
-        window.scrollBy(0, rect.top - buffer)
-      }
-    })
-  }, [notesVal, editingNotes])
+    const contentHeight = el.scrollHeight
+    el.style.height = Math.max(contentHeight, minHeight) + 'px'
+  }, [editingNotes])
 
   const isMine = task.assignee_id === currentUserId
   const due = formatDue(task.due_date)
@@ -353,7 +346,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   onChange={e => setNotesVal(e.target.value)}
                   rows={4}
                   placeholder="Add context, links, or updates…"
-                  style={{ ...S.input, resize: 'none', overflow: 'hidden', fieldSizing: 'content', fontSize: '0.85rem' }}
+                  style={{ ...S.input, resize: 'none', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', fontSize: '0.85rem' }}
                 />
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
