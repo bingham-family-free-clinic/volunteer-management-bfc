@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { getMountainNow } from '../lib/timeUtils'
 
@@ -87,6 +87,15 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal] = useState(task.name)
   const [savingName, setSavingName] = useState(false)
+  const notesRef = useRef(null)
+
+  useEffect(() => {
+    const el = notesRef.current
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = el.scrollHeight + 'px'
+    }
+  }, [notesVal, editingNotes])
 
   const isMine = task.assignee_id === currentUserId
   const due = formatDue(task.due_date)
@@ -313,11 +322,12 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <textarea
+                  ref={notesRef}
                   value={notesVal}
                   onChange={e => setNotesVal(e.target.value)}
                   rows={4}
                   placeholder="Add context, links, or updates…"
-                  style={{ ...S.input, resize: 'vertical', fontSize: '0.85rem' }}
+                  style={{ ...S.input, resize: 'none', overflow: 'hidden', fontSize: '0.85rem' }}
                 />
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
