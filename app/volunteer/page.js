@@ -1993,8 +1993,8 @@ function VolunteerPageInner() {
             <div style={{ background: '#fff', borderRadius: '16px', padding: '1.75rem 1.5rem', maxWidth: '340px', width: '100%', textAlign: 'center', boxShadow: '0 8px 40px rgba(0,0,0,0.35)' }}>
               <p style={{ fontSize: '1rem', fontWeight: 500, color: '#1a1a1a', lineHeight: 1.5, marginBottom: '1.5rem' }}>Enable notifications so you don't miss messages and shift reminders</p>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <button onClick={handleNotifBannerDecline} disabled={notifBannerLoading} style={{ flex: 1, padding: '0.75rem', background: '#fff', color: '#0a6cff', border: '1px solid #0a6cff', borderRadius: '8px', fontWeight: 600, fontSize: '0.9rem', cursor: notifBannerLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>No</button>
-                <button onClick={handleNotifBannerEnable} disabled={notifBannerLoading} style={{ flex: 1, padding: '0.75rem', background: '#0a6cff', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '0.9rem', cursor: notifBannerLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{notifBannerLoading ? 'Working…' : 'Yes'}</button>
+                <button onClick={handleNotifBannerDecline} disabled={notifBannerLoading} style={{ flex: 1, padding: '0.75rem', background: '#fff', color: '#02416B', border: '1px solid #02416B', borderRadius: '8px', fontWeight: 600, fontSize: '0.9rem', cursor: notifBannerLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>Later</button>
+                <button onClick={handleNotifBannerEnable} disabled={notifBannerLoading} style={{ flex: 1, padding: '0.75rem', background: '#02416B', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '0.9rem', cursor: notifBannerLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{notifBannerLoading ? 'Working…' : 'Yes'}</button>
               </div>
             </div>
           </div>
