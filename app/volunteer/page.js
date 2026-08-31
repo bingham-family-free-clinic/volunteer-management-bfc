@@ -682,8 +682,10 @@ function VolunteerPageInner() {
       const isNarrow = window.innerWidth < 428
       const next = isMobileUA || isNarrow
       setIsMobile(prev => {
-        if (prev !== next) console.log('[VolunteerPage] isMobile changed:', prev, '->', next, 'ua match:', isMobileUA, 'width:', window.innerWidth)
-        return next
+        if (prev !== next) {
+          return next
+        }
+        return prev
       })
     }
     check()
