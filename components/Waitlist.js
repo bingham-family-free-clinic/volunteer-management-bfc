@@ -189,6 +189,13 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
   const [manualNotes,   setManualNotes]   = useState('')
   const [savingManual,  setSavingManual]  = useState(false)
 
+  // Edit entry modal — admin can modify any aspect of a waitlist entry
+  const [editModal,  setEditModal]  = useState(null)
+  const [editSlots,  setEditSlots]  = useState([])
+  const [editRoles,  setEditRoles]  = useState([])
+  const [editNotes,  setEditNotes]  = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
   const [toast, setToast] = useState(null)
 
   // ─── Boot ──────────────────────────────────────────────────────────────────
@@ -223,42 +230,9 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
       setWaitlistError(`Failed to load waitlist: ${error.message} (code: ${error.code})`)
       setWaitlist([])
     } else {
-      const withAttendance = await Promise.all(
-        (data || []).map(async row => ({
-          ...row,
-          attendancePercent: await getAttendancePercent(row.profiles?.id)
-
-        }))
-      )
-      withAttendance.sort((a, b) => {
-        const aQualified = a.attendancePercent >= 75
-        const bQualified = b.attendancePercent >= 75
-        if (aQualified !== bQualified) {
-          return bQualified - aQualified
-        }
-        return 0
-      })
-      setWaitlist(withAttendance)
+      setWaitlist(data || [])
     }
     setWaitlistLoading(false)
-  }
-
-  async function getAttendancePercent(volunteerId) {
-    const { data: records, error } = await supabase
-      .from('attendance_records')
-      .select('status')
-      .eq('volunteer_id', volunteerId)
-
-    if (error) {
-      console.error('Error loading attendance:', error)
-      return 0
-    }
-
-    if (!records?.length) return 0
-
-    const attended = records.filter(r => r.status !== 'absent').length
-
-    return Math.round((attended / records.length) * 100)
   }
 
   async function loadSchedule() {
@@ -345,6 +319,35 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
     await loadSchedule()
     if (onAssigned) onAssigned()
     setAssigningSlot(false)
+  }
+
+  function openEdit(entry) {
+    setEditModal(entry)
+    setEditSlots(entry.preferred_slots || [])
+    setEditRoles(entry.preferred_roles || [])
+    setEditNotes(entry.notes || '')
+  }
+
+  async function handleEditSave() {
+    if (!editModal) return
+    setSavingEdit(true)
+
+    const { error } = await supabase
+      .from('waitlist')
+      .update({
+        preferred_slots: editSlots,
+        preferred_roles: editRoles,
+        notes:           editNotes || null,
+      })
+      .eq('id', editModal.id)
+
+    if (error) { msg(error.message, 'error'); setSavingEdit(false); return }
+
+    await audit('edited_waitlist', 'waitlist', editModal.id, editModal.profiles?.full_name, 'updated availability/roles')
+    msg(`${editModal.profiles?.full_name}'s waitlist entry updated`)
+    setEditModal(null)
+    await loadWaitlist()
+    setSavingEdit(false)
   }
 
   async function removeFromWaitlist(entry) {
@@ -506,6 +509,49 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
     )
   }
 
+  // ─── Edit Modal ────────────────────────────────────────────────────────────
+
+  function EditModal() {
+    if (!editModal) return null
+
+    return (
+      <div onClick={() => setEditModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '1.5rem' }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '1.75rem', maxWidth: '560px', width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.4)', maxHeight: '85vh', overflowY: 'auto' }}>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <h3 style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.25rem' }}>Edit Waitlist Entry</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Editing <strong style={{ color: 'var(--text)' }}>{editModal.profiles?.full_name}</strong>'s availability and role preferences.</p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
+
+            <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22`, overflowX: 'auto' }}>
+              <p style={{ ...labelStyle, marginBottom: '0.85rem' }}>Preferred Shifts <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(leave blank for flexible — any slot)</span></p>
+              <SlotPicker selected={editSlots} onChange={setEditSlots} />
+            </div>
+
+            <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22` }}>
+              <p style={{ ...labelStyle, marginBottom: '0.75rem' }}>Preferred Roles <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(leave blank for any role)</span></p>
+              <RolePicker selected={editRoles} onChange={setEditRoles} />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Notes <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
+              <input value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any context..." style={inputStyle} />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+            <button onClick={() => setEditModal(null)} style={ghostBtn()}>Cancel</button>
+            <button onClick={handleEditSave} disabled={savingEdit} style={solidBtn(C.blue, savingEdit)}>
+              {savingEdit ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -516,7 +562,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
         <div>
           <h2 style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.2rem' }}>Slot Waitlist</h2>
           <p style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
-            {waitlist.length} volunteer{waitlist.length !== 1 ? 's' : ''} waiting · ordered by wait time, volunteers with 75%+ attendance are prioritized
+            {waitlist.length} volunteer{waitlist.length !== 1 ? 's' : ''} waiting · ordered by wait time
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -654,6 +700,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
                       <button onClick={() => openAssign(entry)} style={{ padding: '0.35rem 0.85rem', borderRadius: '7px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.green + '14', color: C.green, border: `1px solid ${C.green}55` }}>
                         Assign Slot →
                       </button>
+                      <button onClick={() => openEdit(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}55` }}>Edit</button>
                       <button onClick={() => removeFromWaitlist(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Remove</button>
                     </div>
                   </div>
@@ -683,6 +730,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
       )}
 
       <AssignModal />
+      <EditModal />
 
       {toast && (
         <div style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: toast.type === 'error' ? '#ef4444' : '#3b82f6', color: '#fff', padding: '0.75rem 1.5rem', borderRadius: '100px', fontWeight: 500, fontSize: '0.9rem', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', zIndex: 100, fontFamily: 'DM Sans, sans-serif' }}>
