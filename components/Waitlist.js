@@ -191,10 +191,11 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
 
   // Edit entry modal — admin can modify any aspect of a waitlist entry
   const [editModal,  setEditModal]  = useState(null)
-  const [editSlots,  setEditSlots]  = useState([])
-  const [editRoles,  setEditRoles]  = useState([])
-  const [editNotes,  setEditNotes]  = useState('')
-  const [savingEdit, setSavingEdit] = useState(false)
+  const [editSlots,   setEditSlots]   = useState([])
+  const [editRoles,   setEditRoles]   = useState([])
+  const [editNotes,   setEditNotes]   = useState('')
+  const [editAddedAt, setEditAddedAt] = useState('')
+  const [savingEdit,  setSavingEdit]  = useState(false)
 
   const [toast, setToast] = useState(null)
 
@@ -326,11 +327,23 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
     setEditSlots(entry.preferred_slots || [])
     setEditRoles(entry.preferred_roles || [])
     setEditNotes(entry.notes || '')
+    // added_at drives list order (seniority) — seed the date-only portion for editing
+    setEditAddedAt(entry.added_at ? entry.added_at.split('T')[0] : '')
   }
 
   async function handleEditSave() {
     if (!editModal) return
+    if (!editAddedAt) { msg('Date added is required', 'error'); return }
     setSavingEdit(true)
+
+    const origDate = editModal.added_at ? editModal.added_at.split('T')[0] : ''
+    const dateChanged = editAddedAt !== origDate
+
+    // Preserve original time-of-day when only the date changes; otherwise default to now
+    const origTime  = editModal.added_at ? editModal.added_at.split('T')[1] : null
+    const newAddedAt = dateChanged
+      ? `${editAddedAt}T${origTime || new Date().toISOString().split('T')[1]}`
+      : editModal.added_at
 
     const { error } = await supabase
       .from('waitlist')
@@ -338,12 +351,16 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
         preferred_slots: editSlots,
         preferred_roles: editRoles,
         notes:           editNotes || null,
+        added_at:        newAddedAt,
       })
       .eq('id', editModal.id)
 
     if (error) { msg(error.message, 'error'); setSavingEdit(false); return }
 
-    await audit('edited_waitlist', 'waitlist', editModal.id, editModal.profiles?.full_name, 'updated availability/roles')
+    const details = dateChanged
+      ? `updated availability/roles; date added changed ${origDate || '—'} → ${editAddedAt}`
+      : 'updated availability/roles'
+    await audit('edited_waitlist', 'waitlist', editModal.id, editModal.profiles?.full_name, details)
     msg(`${editModal.profiles?.full_name}'s waitlist entry updated`)
     setEditModal(null)
     await loadWaitlist()
@@ -538,6 +555,14 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
             <div>
               <label style={labelStyle}>Notes <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
               <input value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any context..." style={inputStyle} />
+            </div>
+
+            <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.yellow}33` }}>
+              <label style={labelStyle}>Date Added <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(controls seniority / list order)</span></label>
+              <input type="date" value={editAddedAt} onChange={e => setEditAddedAt(e.target.value)} style={inputStyle} />
+              <p style={{ fontSize: '0.74rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
+                Moving this earlier bumps them up the waitlist; moving it later pushes them down. Changes are logged in the audit trail.
+              </p>
             </div>
           </div>
 
