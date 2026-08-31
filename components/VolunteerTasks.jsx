@@ -93,6 +93,13 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
     const el = notesRef.current
     if (!el) return
 
+    // Browsers that natively support field-sizing: content handle the
+    // grow/shrink themselves at layout time via CSS — no height juggling,
+    // so no scroll-jump problem to work around either. Only run the manual
+    // JS fallback below on browsers that don't support it yet.
+    const supportsFieldSizing = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+    if (supportsFieldSizing) return
+
     const prevScrollY = window.scrollY
     el.style.height = 'auto'
     el.style.height = el.scrollHeight + 'px'
@@ -346,7 +353,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   onChange={e => setNotesVal(e.target.value)}
                   rows={4}
                   placeholder="Add context, links, or updates…"
-                  style={{ ...S.input, resize: 'none', overflow: 'hidden', fontSize: '0.85rem' }}
+                  style={{ ...S.input, resize: 'none', overflow: 'hidden', fieldSizing: 'content', fontSize: '0.85rem' }}
                 />
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
