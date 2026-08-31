@@ -23,8 +23,8 @@ function parseSlotKey(key) {
   return { day, shift }
 }
 
-const STAGES       = ['applied', 'interview', 'onboarding', 'rejected']
-const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', rejected: 'Rejected' }
+const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
+const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', training: 'Training', rejected: 'Rejected' }
 
 // ── Blue-only palette ─────────────────────────────────────────────────────────
 const C = {
@@ -36,6 +36,7 @@ const C = {
   warn:     '#0284c7',
   danger:   '#1e40af',
   success:  '#0369a1',
+  training: '#0c4a6e',
 }
 
 const STAGE_COLORS = {
@@ -43,6 +44,7 @@ const STAGE_COLORS = {
   interview:             C.warn,
   onboarding:            C.blue,
   onboarding_missionary: C.primary,
+  training:              C.training,
   rejected:              C.danger,
 }
 
@@ -84,7 +86,7 @@ const CHECKLIST_ITEMS = [
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
 const NON_MISSIONARY_REQUIRED = ['background_check', 'id_check', 'immunization']
 
-const TOTAL_STEPS = 4
+const TOTAL_STEPS = 3
 
 // ─── Slot picker ──────────────────────────────────────────────────────────────
 function SlotPicker({ selected, onChange }) {
@@ -786,6 +788,85 @@ function CalendarTab({
   )
 }
 
+// Textbox inputs for extra fields that only appear for certain affiliation types (missionary, student, intern, provider).
+
+function CredentialInput({ fieldKey, label, value, onChange, allowNA, labelStyle, inputStyle }) {
+  const mode = value === 'N/A' ? 'na' : value === 'expired' ? 'expired' : 'date'
+  return (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+        <select value={mode} onChange={e => { const m = e.target.value; onChange(m === 'na' ? 'N/A' : m === 'expired' ? 'expired' : '') }} style={{ ...inputStyle, fontSize: '0.82rem', padding: '0.45rem 0.65rem' }}>
+          <option value="date">Set date</option>
+          {allowNA && <option value="na">N/A</option>}
+          <option value="expired">Mark expired</option>
+        </select>
+        {mode === 'date' && <input type="date" value={value && value !== 'N/A' && value !== 'expired' ? value : ''} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, fontSize: '0.82rem', padding: '0.45rem 0.65rem' }} />}
+      </div>
+    </div>
+  )
+}
+
+function AffiliationExtras({ onboardForm, setOnboardForm, labelStyle, inputStyle, secLabel }) {
+  const a = onboardForm.affiliation
+  if (a === 'missionary') return (
+    <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
+      <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Mission Service Assignment</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+        <div><label style={labelStyle}>SMA Name</label><input value={onboardForm.sma_name} onChange={e => setOnboardForm(f => ({ ...f, sma_name: e.target.value }))} placeholder="Full name" style={inputStyle} /></div>
+        <div><label style={labelStyle}>SMA Contact</label><input value={onboardForm.sma_contact} onChange={e => setOnboardForm(f => ({ ...f, sma_contact: e.target.value }))} placeholder="Phone or email" style={inputStyle} /></div>
+      </div>
+    </div>
+  )
+  if (a === 'student') return (
+    <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
+      <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Academic Information</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+        <div>
+          <label style={labelStyle}>School <span style={{ color: C.danger }}>*</span></label>
+          <select value={onboardForm.school} onChange={e => setOnboardForm(f => ({ ...f, school: e.target.value }))} style={inputStyle}>
+            <option value="">— Select school —</option>
+            {SCHOOLS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>Major <span style={{ color: C.danger }}>*</span></label>
+          <select value={onboardForm.major} onChange={e => setOnboardForm(f => ({ ...f, major: e.target.value }))} style={inputStyle}>
+            <option value="">— Select major —</option>
+            {MAJORS.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+      </div>
+    </div>
+  )
+  if (a === 'intern') return (
+    <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
+      <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Internship Details</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+        <div><label style={labelStyle}>School <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.intern_school} onChange={e => setOnboardForm(f => ({ ...f, intern_school: e.target.value }))} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Department <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.intern_department} onChange={e => setOnboardForm(f => ({ ...f, intern_department: e.target.value }))} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Advisor Name <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.advisor_name} onChange={e => setOnboardForm(f => ({ ...f, advisor_name: e.target.value }))} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Advisor Contact <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.advisor_contact} onChange={e => setOnboardForm(f => ({ ...f, advisor_contact: e.target.value }))} style={inputStyle} /></div>
+      </div>
+    </div>
+  )
+  if (a === 'provider') return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+      <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
+        <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Credentials / Licensure <span style={{ color: 'var(--muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></p>
+        <input value={onboardForm.credentials} onChange={e => setOnboardForm(f => ({ ...f, credentials: e.target.value }))} placeholder="e.g. MD, NP, RN, PA" style={inputStyle} />
+      </div>
+      <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
+        <p style={{ ...secLabel, color: C.muted, marginBottom: '0.85rem' }}>Credential Expiration Dates <span style={{ color: 'var(--muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.75rem' }}>
+          {PROVIDER_CRED_FIELDS.map(f => <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={onboardForm[f.key] || ''} onChange={val => setOnboardForm(p => ({ ...p, [f.key]: val }))} allowNA={!!f.allowNA} labelStyle={labelStyle} inputStyle={inputStyle} />)}
+        </div>
+      </div>
+    </div>
+  )
+  return null
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
@@ -802,6 +883,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [affiliationPick,  setAffiliationPick]  = useState('')      // value chosen in modal
   const [rejectModal,      setRejectModal]      = useState(null)   // { applicant } | null — choose notify-email vs silent reject
   const [creatingProfile, setCreatingProfile] = useState(false)
+
+  // Training stage — availability & roles-trained-in are collected here
+  // (post-onboarding) instead of during the onboarding wizard. Keyed by
+  // applicant id so edits on one card don't leak into another.
+  const [trainingSaving,       setTrainingSaving]       = useState({}) // { [applicantId]: boolean }
+  const [trainingDrafts,       setTrainingDrafts]       = useState({}) // { [applicantId]: { preferred_slots, preferred_roles } }
+  const [movingToWaitlistId,   setMovingToWaitlistId]   = useState(null)
+  const [rejectingTrainingId,  setRejectingTrainingId]  = useState(null)
 
   // templates shape: { interview: { subject, body }, onboarding: { ... }, rejected: { ... } }
   const [templates,        setTemplates]        = useState({})
@@ -837,12 +926,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     credentials: '',
     license_exp: '', bls_exp: '', dea_exp: '', ftca_exp: '', tb_exp: '',
     default_role: '',
-    preferred_slots: [],
-    preferred_roles: [],
   }
   const [onboardForm,  setOnboardForm]  = useState(EMPTY_FORM)
   const [onboardStep,  setOnboardStep]  = useState(1)
   const [savingStep,   setSavingStep]   = useState(false)
+
+  // Admin notes — free text captured during onboarding, carried over to the
+  // volunteer's profile once created (visible/editable on the Volunteers tab).
+  const [notesDraft,  setNotesDraft]  = useState('')
+  const [savingNotes, setSavingNotes] = useState(false)
 
   const EMPTY_CHECKLIST = {
     confidentiality_agreement: false,
@@ -1129,6 +1221,18 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSavingStep(false)
   }
 
+  // ─── Admin notes (application/needs/wants) ────────────────────────────────
+  async function saveApplicantNotes(applicantId, value) {
+    setSavingNotes(true)
+    const { error } = await supabase.from('volunteer_applications').update({ notes: value }).eq('id', applicantId)
+    if (error) {
+      msg(error.message, 'error')
+    } else {
+      setSelected(prev => (prev && prev.id === applicantId) ? { ...prev, notes: value } : prev)
+    }
+    setSavingNotes(false)
+  }
+
   async function sendStageEmail(applicant, stage) {
     if (!EMAIL_STAGES.includes(stage)) return
 
@@ -1264,6 +1368,102 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
     setMovingStage(false)
     setAffiliationModal(null)
+  }
+
+  // ─── Training stage: availability & trained-roles editing, waitlist/reject ─
+
+  // The applicant/onboarding row stores these under the onboard_-prefixed
+  // column names; the waitlist table (and the rest of this component) uses
+  // the shorter preferred_slots/preferred_roles names, so this maps between
+  // the two wherever we read from or write to volunteer_applications.
+  const TRAINING_FIELD_COLUMN = {
+    preferred_slots: 'onboard_preferred_slots',
+    preferred_roles: 'onboard_preferred_roles',
+  }
+
+  // Merges any in-progress local edits for this applicant with what's already
+  // saved on their application row, so callers always see the latest values
+  // regardless of whether a given field has been touched yet.
+  function getTrainingDraft(applicant) {
+    return {
+      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? applicant.onboard_preferred_slots ?? [],
+      preferred_roles: trainingDrafts[applicant.id]?.preferred_roles ?? applicant.onboard_preferred_roles ?? [],
+    }
+  }
+
+  async function updateTrainingField(applicantId, field, value) {
+    setTrainingDrafts(prev => ({
+      ...prev,
+      [applicantId]: { ...(prev[applicantId] || {}), [field]: value },
+    }))
+    setTrainingSaving(prev => ({ ...prev, [applicantId]: true }))
+    const column = TRAINING_FIELD_COLUMN[field]
+    const { error } = await supabase.from('volunteer_applications').update({ [column]: value }).eq('id', applicantId)
+    if (error) msg(`Failed to save ${field === 'preferred_slots' ? 'availability' : 'trained roles'}: ${error.message}`, 'error')
+    setTrainingSaving(prev => ({ ...prev, [applicantId]: false }))
+  }
+
+  async function moveToWaitlist(applicant) {
+    const { preferred_slots, preferred_roles } = getTrainingDraft(applicant)
+    setMovingToWaitlistId(applicant.id)
+
+    const { error: waitlistErr } = await supabase.from('waitlist').insert({
+      volunteer_id:    applicant.volunteer_id,
+      preferred_slots,
+      preferred_roles,
+      source:          'pipeline',
+      added_by:        profile.id,
+    })
+    if (waitlistErr) {
+      msg(`Waitlist insert failed: ${waitlistErr.message}`, 'error')
+      setMovingToWaitlistId(null)
+      return
+    }
+
+    const { error: appErr } = await supabase.from('volunteer_applications')
+      .update({ stage: 'completed', stage_updated_at: new Date().toISOString() })
+      .eq('id', applicant.id)
+    if (appErr) {
+      msg(`Added to waitlist, but failed to update pipeline stage: ${appErr.message}`, 'error')
+      setMovingToWaitlistId(null)
+      return
+    }
+
+    await audit('moved_to_waitlist', 'volunteer', applicant.volunteer_id, applicant.full_name,
+      `preferred_roles: ${preferred_roles.join(', ') || 'none'}`)
+    msg(`${applicant.full_name} moved to the waitlist`)
+
+    setTrainingDrafts(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
+    setSelected(null)
+    await loadAll()
+    setActiveTab('recent')
+    setMovingToWaitlistId(null)
+  }
+
+  // Removes the volunteer from the active pipeline without touching their
+  // account — they keep their profile/login, they're just not moving into
+  // active service right now. Distinct from the pre-profile "Reject
+  // Application" flow (openRejectModal/confirmReject), which sends a
+  // rejection email and never created an account in the first place.
+  async function rejectFromTraining(applicant) {
+    setRejectingTrainingId(applicant.id)
+    const { error } = await supabase.from('volunteer_applications')
+      .update({ stage: 'completed', stage_updated_at: new Date().toISOString() })
+      .eq('id', applicant.id)
+    if (error) {
+      msg(error.message, 'error')
+      setRejectingTrainingId(null)
+      return
+    }
+    await audit('rejected_from_training', 'volunteer', applicant.volunteer_id, applicant.full_name,
+      'moved to Recently Added — account kept active')
+    msg(`${applicant.full_name} moved to Recently Added`)
+
+    setTrainingDrafts(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
+    setSelected(null)
+    await loadAll()
+    setActiveTab('recent')
+    setRejectingTrainingId(null)
   }
 
   async function toggleChecklistItem(applicantId, key, value) {
@@ -1405,6 +1605,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   // ─── Offload ──────────────────────────────────────────────────────────────
+  // Downloads each file locally, then deletes it from Supabase Storage —
+  // only for files that actually finished downloading, so a failed download
+  // never causes data loss. DB references to deleted files are cleared too,
+  // so nothing in the app points at a file that no longer exists.
 
   async function handleOffload(applicant) {
     setOffloadingId(applicant.id)
@@ -1416,18 +1620,31 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         const { data: rData, error: rErr } = await supabase.storage.from('resumes').createSignedUrl(applicant.resume_url, 300)
         if (!rErr && rData?.signedUrl) {
           const ext = applicant.resume_url.split('.').pop()
-          fileEntries.push({ label: 'Resume', url: rData.signedUrl, filename: `resume.${ext}` })
+          fileEntries.push({ label: 'Resume', url: rData.signedUrl, filename: `resume.${ext}`, bucket: 'resumes', path: applicant.resume_url })
+        } else if (rErr) {
+          console.warn('Could not sign resume URL:', rErr.message)
         }
       }
 
+      const unavailable = []
       for (const item of FILE_CHECKLIST_ITEMS) {
         const storagePath = cl[item.urlKey]
         if (!storagePath) continue
         const { data, error } = await supabase.storage.from(item.bucket).createSignedUrl(storagePath, 300)
         if (!error && data?.signedUrl) {
-          fileEntries.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}` })
+          fileEntries.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}`, bucket: item.bucket, path: storagePath, urlKey: item.urlKey, itemKey: item.key })
+        } else {
+          unavailable.push(item.label)
+          console.warn(`Could not sign URL for ${item.label} (bucket: ${item.bucket}):`, error?.message)
         }
       }
+      if (unavailable.length > 0) {
+        msg(`Skipped (couldn't access in Storage): ${unavailable.join(', ')} — check console`, 'error')
+      }
+
+      // Only files that are confirmed downloaded end up here — this is what
+      // actually gets deleted from Supabase Storage afterward.
+      const downloaded = []
 
       if (fileEntries.length === 0) {
         msg('No files to download — marking as offloaded', 'success')
@@ -1439,29 +1656,74 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           const zip    = new JSZip()
           const folder = zip.folder(applicant.full_name.replace(/\s+/g, '_'))
           for (const entry of fileEntries) {
-            try { const res = await fetch(entry.url); folder.file(entry.filename, await res.blob()) }
-            catch (e) { console.warn(`Could not fetch ${entry.label}:`, e) }
+            try {
+              const res = await fetch(entry.url)
+              if (!res.ok) throw new Error(`HTTP ${res.status}`)
+              folder.file(entry.filename, await res.blob())
+              downloaded.push(entry)
+            } catch (e) {
+              console.warn(`Could not fetch ${entry.label}:`, e)
+            }
           }
-          const zipBlob = await zip.generateAsync({ type: 'blob' })
-          const link = document.createElement('a')
-          link.href = URL.createObjectURL(zipBlob)
-          link.download = `${applicant.full_name.replace(/\s+/g, '_')}_files.zip`
-          link.click()
-          URL.revokeObjectURL(link.href)
+          if (downloaded.length > 0) {
+            const zipBlob = await zip.generateAsync({ type: 'blob' })
+            const link = document.createElement('a')
+            link.href = URL.createObjectURL(zipBlob)
+            link.download = `${applicant.full_name.replace(/\s+/g, '_')}_files.zip`
+            link.click()
+            URL.revokeObjectURL(link.href)
+          }
         } else {
+          // No JSZip available — fall back to individual downloads. We can't
+          // verify these actually saved (browser download, not a fetch), so
+          // we assume success, same as the app's prior behavior.
           for (const entry of fileEntries) {
             const link = document.createElement('a')
             link.href = entry.url; link.download = entry.filename; link.target = '_blank'
             document.body.appendChild(link); link.click(); document.body.removeChild(link)
             await new Promise(r => setTimeout(r, 400))
+            downloaded.push(entry)
           }
         }
       }
 
+      // Delete only the files that were actually downloaded, grouped by
+      // bucket since storage.remove() takes a list of paths per bucket.
+      const failedDeletes = []
+      const byBucket = downloaded.reduce((acc, e) => {
+        (acc[e.bucket] ||= []).push(e)
+        return acc
+      }, {})
+      for (const [bucket, entries] of Object.entries(byBucket)) {
+        const { error: delErr } = await supabase.storage.from(bucket).remove(entries.map(e => e.path))
+        if (delErr) { failedDeletes.push(...entries.map(e => e.label)); console.warn(`Could not delete from ${bucket}:`, delErr) }
+      }
+
+      // Clear DB references to whatever was actually deleted, so nothing in
+      // the app still points at a file that no longer exists in Storage.
+      const successfullyDeleted = downloaded.filter(e => !failedDeletes.includes(e.label))
+      const resumeDeleted = successfullyDeleted.some(e => e.bucket === 'resumes')
+      const checklistClears = successfullyDeleted.filter(e => e.urlKey)
+
+      if (resumeDeleted) {
+        await supabase.from('volunteer_applications').update({ resume_url: null }).eq('id', applicant.id)
+      }
+      if (checklistClears.length > 0) {
+        const clearPatch = {}
+        for (const e of checklistClears) { clearPatch[e.urlKey] = null }
+        await supabase.from('onboarding_checklists').update(clearPatch).eq('applicant_id', applicant.id)
+      }
+
       await supabase.from('volunteer_applications')
         .update({ stage: 'offloaded', offloaded_at: new Date().toISOString() }).eq('id', applicant.id)
-      await audit('offloaded_volunteer', 'volunteer', applicant.id, applicant.full_name, 'files downloaded, removed from recently added')
-      msg(`${applicant.full_name} offloaded successfully`)
+
+      if (failedDeletes.length > 0) {
+        msg(`${applicant.full_name} offloaded, but ${failedDeletes.length} file(s) could not be removed from storage — check console`, 'error')
+      } else {
+        msg(`${applicant.full_name} offloaded — files downloaded and removed from Supabase`)
+      }
+      await audit('offloaded_volunteer', 'volunteer', applicant.id, applicant.full_name,
+        `files downloaded, ${successfullyDeleted.length} removed from storage${failedDeletes.length ? `, ${failedDeletes.length} failed to delete` : ''}`)
       setCompleted(prev => prev.filter(a => a.id !== applicant.id))
       setRecentChecklist(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
     } catch (e) {
@@ -1481,7 +1743,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const _missingDocs = getMissingRequiredDocs()
     if (_missingDocs.length > 0) {
       msg(`Missing required docs: ${_missingDocs.join(', ')}`, 'error')
-      setOnboardStep(5)
+      setOnboardStep(3)
       return
     }
 
@@ -1519,25 +1781,17 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       dea_exp:     isProvider ? (affiliData.dea_exp     || null) : null,
       ftca_exp:    isProvider ? (affiliData.ftca_exp    || null) : null,
       tb_exp:      isProvider ? (affiliData.tb_exp      || null) : null,
+      admin_notes: notesDraft || selected.notes || null,
     })
     if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
 
-    const { error: waitlistErr } = await supabase.from('waitlist').insert({
-      volunteer_id:    uid,
-      preferred_slots: affiliData.preferred_slots ?? [],
-      preferred_roles: affiliData.preferred_roles ?? [],
-      source:          'pipeline',
-      added_by:        profile.id,
-    })
-    if (waitlistErr) msg(`Profile created but waitlist insert failed: ${waitlistErr.message}`, 'error')
-
     const { error: appErr } = await supabase.from('volunteer_applications')
-      .update({ stage: 'completed', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
+      .update({ stage: 'training', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
       .eq('id', selected.id)
     if (appErr) msg(`Profile created but application stage update failed: ${appErr.message}`, 'error')
 
-    await audit('created_volunteer', 'volunteer', uid, selected.full_name, 'from pipeline → added to waitlist')
-    if (!waitlistErr && !appErr) msg(`Profile created for ${selected.full_name} — added to waitlist`)
+    await audit('created_volunteer', 'volunteer', uid, selected.full_name, 'from pipeline → moved to training')
+    if (!appErr) msg(`Profile created for ${selected.full_name} — moved to training`)
     if (onVolunteerCreated) onVolunteerCreated()
 
     setSelected(null)
@@ -1546,6 +1800,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setChecklist(EMPTY_CHECKLIST)
     setApplicantPhotoUrl(null)
     setApplicantAvatarPath(null)
+    setNotesDraft('')
 
     await loadAll()
     setActiveTab('recent')
@@ -1576,6 +1831,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSelected(applicant)
     setOnboardStep(1)
     setChecklist(EMPTY_CHECKLIST)
+    setNotesDraft(a.notes || '')
 
     const affiliData = applicant.onboard_affil_data || {}
     setOnboardForm({
@@ -1707,83 +1963,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       : <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600 }}>✓ saved</span>
   }
 
-  function CredentialInput({ fieldKey, label, value, onChange, allowNA }) {
-    const mode = value === 'N/A' ? 'na' : value === 'expired' ? 'expired' : 'date'
-    return (
-      <div>
-        <label style={labelStyle}>{label}</label>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          <select value={mode} onChange={e => { const m = e.target.value; onChange(m === 'na' ? 'N/A' : m === 'expired' ? 'expired' : '') }} style={{ ...inputStyle, fontSize: '0.82rem', padding: '0.45rem 0.65rem' }}>
-            <option value="date">Set date</option>
-            {allowNA && <option value="na">N/A</option>}
-            <option value="expired">Mark expired</option>
-          </select>
-          {mode === 'date' && <input type="date" value={value && value !== 'N/A' && value !== 'expired' ? value : ''} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, fontSize: '0.82rem', padding: '0.45rem 0.65rem' }} />}
-        </div>
-      </div>
-    )
-  }
-
-  function AffiliationExtras() {
-    const a = onboardForm.affiliation
-    if (a === 'missionary') return (
-      <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
-        <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Mission Service Assignment</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
-          <div><label style={labelStyle}>SMA Name</label><input value={onboardForm.sma_name} onChange={e => setOnboardForm(f => ({ ...f, sma_name: e.target.value }))} placeholder="Full name" style={inputStyle} /></div>
-          <div><label style={labelStyle}>SMA Contact</label><input value={onboardForm.sma_contact} onChange={e => setOnboardForm(f => ({ ...f, sma_contact: e.target.value }))} placeholder="Phone or email" style={inputStyle} /></div>
-        </div>
-      </div>
-    )
-    if (a === 'student') return (
-      <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
-        <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Academic Information</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
-          <div>
-            <label style={labelStyle}>School <span style={{ color: C.danger }}>*</span></label>
-            <select value={onboardForm.school} onChange={e => setOnboardForm(f => ({ ...f, school: e.target.value }))} style={inputStyle}>
-              <option value="">— Select school —</option>
-              {SCHOOLS.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Major <span style={{ color: C.danger }}>*</span></label>
-            <select value={onboardForm.major} onChange={e => setOnboardForm(f => ({ ...f, major: e.target.value }))} style={inputStyle}>
-              <option value="">— Select major —</option>
-              {MAJORS.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-        </div>
-      </div>
-    )
-    if (a === 'intern') return (
-      <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
-        <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Internship Details</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
-          <div><label style={labelStyle}>School <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.intern_school} onChange={e => setOnboardForm(f => ({ ...f, intern_school: e.target.value }))} style={inputStyle} /></div>
-          <div><label style={labelStyle}>Department <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.intern_department} onChange={e => setOnboardForm(f => ({ ...f, intern_department: e.target.value }))} style={inputStyle} /></div>
-          <div><label style={labelStyle}>Advisor Name <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.advisor_name} onChange={e => setOnboardForm(f => ({ ...f, advisor_name: e.target.value }))} style={inputStyle} /></div>
-          <div><label style={labelStyle}>Advisor Contact <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.advisor_contact} onChange={e => setOnboardForm(f => ({ ...f, advisor_contact: e.target.value }))} style={inputStyle} /></div>
-        </div>
-      </div>
-    )
-    if (a === 'provider') return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
-          <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Credentials / Licensure <span style={{ color: 'var(--muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></p>
-          <input value={onboardForm.credentials} onChange={e => setOnboardForm(f => ({ ...f, credentials: e.target.value }))} placeholder="e.g. MD, NP, RN, PA" style={inputStyle} />
-        </div>
-        <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
-          <p style={{ ...secLabel, color: C.muted, marginBottom: '0.85rem' }}>Credential Expiration Dates <span style={{ color: 'var(--muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.75rem' }}>
-            {PROVIDER_CRED_FIELDS.map(f => <CredentialInput key={f.key} fieldKey={f.key} label={f.label} value={onboardForm[f.key] || ''} onChange={val => setOnboardForm(p => ({ ...p, [f.key]: val }))} allowNA={!!f.allowNA} />)}
-          </div>
-        </div>
-      </div>
-    )
-    return null
-  }
-
   function FileRow({ item, applicantId }) {
     const ref = useRef(null)
     const has       = !!(checklist[item.urlKey])
@@ -1811,8 +1990,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     return true
   }
   const step2Valid    = !!onboardForm.default_role
-  const step3Valid    = onboardForm.preferred_slots.length > 0 && onboardForm.preferred_roles.length > 0
-  const allStepsValid = step1Valid() && step2Valid && step3Valid && docsComplete
+  const allStepsValid = step1Valid() && step2Valid && docsComplete
 
   function profileSummary() {
     const base = [
@@ -1821,8 +1999,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       { label: 'Affil.',   value: onboardForm.affiliation },
       { label: 'Position', value: onboardForm.default_role },
     ]
-    if (onboardForm.preferred_slots.length > 0)
-      base.push({ label: 'Slots', value: `${onboardForm.preferred_slots.length} selected` })
     return base
   }
 
@@ -2348,7 +2524,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isApplied    = applicant.stage === 'applied'
     const isInterview  = applicant.stage === 'interview'
     const isOnboarding = applicant.stage === 'onboarding'
+    const isTraining   = applicant.stage === 'training'
     const isRejected   = applicant.stage === 'rejected'
+    const trainingDraft = isTraining ? getTrainingDraft(applicant) : null
 
     const fields = [
       { label: 'Email',       value: applicant.email },
@@ -2463,7 +2641,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           </div>
         )}
 
-        {/* Onboarding — 5 steps */}
+        {/* Onboarding — 3 steps */}
         {isOnboarding && (
           <div style={{ ...card, padding: '1rem 1.25rem', borderColor: C.blue + '55', background: C.blue + '06' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -2479,8 +2657,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               {[
                 { n: 1, label: 'Affiliation',  valid: s1 },
                 { n: 2, label: 'Position',     valid: step2Valid },
-                { n: 3, label: 'Availability', valid: step3Valid },
-                { n: 4, label: 'Checklist',    valid: checklistCount > 0 },
+                { n: 3, label: 'Checklist',    valid: checklistCount > 0 },
               ].map(({ n, label, valid }) => (
                 <button key={n} onClick={() => setOnboardStep(n)} style={{ padding: '0.35rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: onboardStep === n ? 700 : 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', border: `1px solid ${onboardStep === n ? C.blue : valid ? C.blue + '44' : 'var(--border)'}`, background: onboardStep === n ? C.blue + '18' : 'var(--bg)', color: onboardStep === n ? C.blue : valid ? C.blue : 'var(--muted)' }}>
                   {valid && onboardStep !== n ? `${label} ✓` : label}
@@ -2493,9 +2670,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>What is their affiliation?</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.6rem' }}>
-                  {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, default_role: f.default_role, preferred_slots: f.preferred_slots, preferred_roles: f.preferred_roles }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
+                  {AFFILIATION_OPTIONS.map(opt => { const active = onboardForm.affiliation === opt.value; return <button key={opt.value} onClick={() => setOnboardForm(f => ({ ...EMPTY_FORM, affiliation: opt.value, default_role: f.default_role }))} style={{ padding: '0.75rem 1rem', borderRadius: '10px', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.88rem', transition: 'all 0.15s' }}>{opt.label}</button> })}
                 </div>
-                {onboardForm.affiliation && <AffiliationExtras />}
+                {onboardForm.affiliation && <AffiliationExtras onboardForm={onboardForm} setOnboardForm={setOnboardForm} labelStyle={labelStyle} inputStyle={inputStyle} secLabel={secLabel} />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() }); setOnboardStep(2) }} disabled={!s1} style={solidBtn(C.blue, !s1)}>Save &amp; Next</button>
                 </div>
@@ -2518,40 +2695,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
             {/* Step 3 */}
             {onboardStep === 3 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <div>
-                  <p style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.35rem' }}>Availability &amp; Waitlist Preferences</p>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: 1.6 }}>Select which specific shifts this volunteer can cover.</p>
-                </div>
-                <div style={{ padding: '1.1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a`, overflowX: 'auto' }}>
-                  <p style={{ ...secLabel, color: C.blue, marginBottom: '0.85rem' }}>Shift Grid</p>
-                  <SlotPicker selected={onboardForm.preferred_slots} onChange={val => setOnboardForm(f => ({ ...f, preferred_slots: val }))} />
-                </div>
-                <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
-                  <p style={{ ...secLabel, color: C.blue, marginBottom: '0.75rem' }}>Willing to Fill Roles</p>
-                  <RolePicker selected={onboardForm.preferred_roles} onChange={val => setOnboardForm(f => ({ ...f, preferred_roles: val }))} />
-                  {onboardForm.preferred_roles.length === 0 && (
-                    <p style={{ fontSize: '0.8rem', color: C.danger, fontStyle: 'italic', marginTop: '0.6rem' }}>Select at least one role to continue.</p>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                  {onboardForm.preferred_slots.length === 0
-                    ? <span style={{ fontSize: '0.8rem', color: C.danger, fontStyle: 'italic' }}>Select at least one shift to continue.</span>
-                    : onboardForm.preferred_slots.map(k => {
-                        const s = ALL_SLOTS.find(x => x.key === k)
-                        return <span key={k} style={{ padding: '0.2rem 0.55rem', borderRadius: '100px', fontSize: '0.72rem', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontFamily: 'DM Mono, monospace' }}>{s?.label || k}</span>
-                      })
-                  }
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                  <button onClick={() => setOnboardStep(2)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_preferred_slots: onboardForm.preferred_slots, onboard_preferred_roles: onboardForm.preferred_roles }); setOnboardStep(4) }} disabled={!step3Valid} style={solidBtn(C.blue, !step3Valid)}>Save &amp; Next</button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 4 */}
-            {onboardStep === 4 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Onboarding Checklist</p>
@@ -2593,7 +2736,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 )}
 
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  <button onClick={() => setOnboardStep(3)} style={ghostBtn()}>Back</button>
+                  <button onClick={() => setOnboardStep(2)} style={ghostBtn()}>Back</button>
                   <button onClick={handleCreateProfile} disabled={creatingProfile || !allStepsValid} style={solidBtn(C.primary, creatingProfile || !allStepsValid)}>
                     {creatingProfile ? 'Creating...' : 'Create Volunteer Profile'}
                   </button>
@@ -2606,7 +2749,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       {profileSummary().map(item => <div key={item.label} style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.78rem', color: 'var(--muted)' }}><span style={{ color: 'var(--text)', fontWeight: 500 }}>{item.label}: </span>{item.value}</div>)}
                       <div style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: C.blue + '10', border: `1px solid ${C.blue}35`, fontSize: '0.78rem' }}><span style={{ color: 'var(--muted)', fontWeight: 500 }}>Password: </span><span style={{ fontFamily: 'DM Mono, monospace', color: C.blue, fontWeight: 600 }}>BFC2025!</span></div>
                     </div>
-                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Will be automatically added to the waitlist on creation.</p>
+                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Will be moved to Training on creation, where availability and trained roles are set before joining the waitlist.</p>
                   </div>
                 )}
 
@@ -2614,7 +2757,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   <p style={{ fontSize: '0.82rem', color: C.warn, fontWeight: 500 }}>
                     {!step1Valid() && 'Affiliation details required. '}
                     {!step2Valid && 'Default position required. '}
-                    {!step3Valid && 'At least one available shift and one role required. '}
                   </p>
                 )}
               </div>
@@ -2627,6 +2769,75 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 Reject Application
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Training — availability & trained roles are set here, post-onboarding */}
+        {isTraining && (
+          <div style={{ ...card, padding: '1rem 1.25rem', borderColor: C.training + '55', background: C.training + '08' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+              <p style={{ ...secLabel, color: C.training, marginBottom: 0 }}>Training</p>
+              <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: trainingSaving[applicant.id] ? 'italic' : 'normal' }}>
+                {trainingSaving[applicant.id] ? 'saving…' : '✓ saved'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+              Set <strong>{applicant.full_name}</strong>'s availability and the roles they've been trained in, then move them to the waitlist.
+            </p>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <p style={{ ...secLabel, marginBottom: '0.65rem' }}>Availability</p>
+              <SlotPicker
+                selected={trainingDraft.preferred_slots}
+                onChange={slots => updateTrainingField(applicant.id, 'preferred_slots', slots)}
+              />
+            </div>
+
+            <div style={{ marginBottom: '0.5rem' }}>
+              <p style={{ ...secLabel, marginBottom: '0.65rem' }}>Trained Roles</p>
+              <RolePicker
+                selected={trainingDraft.preferred_roles}
+                onChange={roles => updateTrainingField(applicant.id, 'preferred_roles', roles)}
+              />
+            </div>
+
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: `1px solid ${C.training}22`, display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => rejectFromTraining(applicant)}
+                disabled={movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id}
+                style={outlineBtn(C.danger)}
+              >
+                {rejectingTrainingId === applicant.id ? 'Rejecting…' : 'Reject'}
+              </button>
+              <button
+                onClick={() => moveToWaitlist(applicant)}
+                disabled={movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id || trainingDraft.preferred_roles.length === 0}
+                style={solidBtn(C.training, movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id || trainingDraft.preferred_roles.length === 0)}
+              >
+                {movingToWaitlistId === applicant.id ? 'Moving…' : 'Move to Waitlist'}
+              </button>
+            </div>
+            {trainingDraft.preferred_roles.length === 0 && (
+              <p style={{ fontSize: '0.78rem', color: C.warn, fontWeight: 500, textAlign: 'right', marginTop: '0.5rem' }}>
+                Select at least one trained role before moving to the waitlist.
+              </p>
+            )}
+          </div>
+        )}
+        {(isOnboarding || isTraining) && (
+          <div style={{ ...card, padding: '1rem 1.25rem', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+              <p style={{ ...secLabel, color: C.blue, marginBottom: 0 }}>Admin Notes</p>
+              <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : 'Saved to applicant & carried to profile'}</span>
+            </div>
+            <textarea
+              value={notesDraft}
+              onChange={e => setNotesDraft(e.target.value)}
+              onBlur={() => saveApplicantNotes(applicant.id, notesDraft)}
+              placeholder="Notes on this person's application, needs, or wants…"
+              rows={4}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.5 }}
+            />
           </div>
         )}
 
@@ -2645,7 +2856,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   if (selected) {
     return (
       <div style={{ position: 'relative' }}>
-        <ApplicantDetail applicant={selected} />
+        {ApplicantDetail({ applicant: selected })}
         {toast && <Toast toast={toast} />}
         <AffiliationModal />
         <RejectModal />

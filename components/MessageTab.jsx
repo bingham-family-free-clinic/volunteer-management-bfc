@@ -88,7 +88,7 @@ function ReplyThread({
     ? previewSource.body.replace(/\n/g, ' ')
     : '📎 Image'
   const previewSenderName = latestUnreadReply
-    ? (latestUnreadReply.sender?.full_name || 'Admin')
+    ? (latestUnreadReply.sender?.full_name || 'HR')
     : (senderLabel || message.sender?.full_name || 'Unknown')
 
   const isAdmin        = profile?.role === 'admin'
@@ -400,6 +400,7 @@ export function MessageTab({
   const [broadcastReadCounts, setBroadcastReadCounts] = useState({})
   const [allUsers, setAllUsers]               = useState(allUsersProp)
   const [lightboxUrl, setLightboxUrl]         = useState(null)
+  const [inboxFilter, setInboxFilter] = useState('all')
 
   // Compose state
   const [msgView, setMsgView]                 = useState('inbox')
@@ -578,6 +579,28 @@ export function MessageTab({
   }).filter(m => {
     if (!getInboxMessages) return true
     return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
+  })
+
+  const filteredInboxThreads = inboxThreads.filter(m => {
+    if (inboxFilter === 'hr') {
+      return m.recipient_type === 'admin'
+    }
+
+    if (inboxFilter === 'role') {
+      return (
+          m.recipient_type === 'role' &&
+          m.recipient_role === profile?.default_role
+      )
+    }
+
+    if (inboxFilter === 'direct') {
+      return (
+          m.recipient_type === 'volunteer' &&
+          m.recipient_volunteer_id === user?.id
+      )
+    }
+
+    return true
   })
 
   // Unread count across all inbox threads (for tab badge and parent notification)
@@ -765,11 +788,50 @@ export function MessageTab({
       {msgView === 'inbox' && (
         <div style={S.card}>
           <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Inbox</h2>
-          {inboxThreads.length === 0 ? (
-            <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No messages yet.</p>
+
+          <div
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                flexWrap: 'wrap',
+                marginBottom: '1.25rem',
+              }}
+          >
+            {[
+              ['all', 'All'],
+              ['direct', 'Directly to me'],
+              ...(isAdmin ? [['hr', 'HR']] : []),
+              ['role', 'My Role'],
+            ].map(([key, label]) => (
+                <button
+                    key={key}
+                    type="button"
+                    onClick={() => setInboxFilter(key)}
+                    style={{
+                      padding: '0.35rem 0.75rem',
+                      borderRadius: '100px',
+                      fontSize: '0.78rem',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      fontFamily: 'DM Sans, sans-serif',
+                      background: inboxFilter === key ? 'var(--accent)' : 'var(--bg)',
+                      color: inboxFilter === key ? '#fff' : 'var(--muted)',
+                      border: inboxFilter === key
+                          ? '1px solid var(--accent)'
+                          : '1px solid var(--border)',
+                    }}
+                >
+                  {label}
+                </button>
+            ))}
+          </div>
+
+
+          {filteredInboxThreads.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No messages</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {inboxThreads.map(m => (
+              {filteredInboxThreads.map(m => (
                 <ReplyThread
                   key={m.id}
                   message={m}
@@ -817,7 +879,7 @@ export function MessageTab({
               {sentMessages.map(m => {
                 const toLabel =
                   m.recipient_type === 'everyone' ? 'To: Everyone' :
-                  m.recipient_type === 'admin'    ? 'To: Admin' :
+                  m.recipient_type === 'admin'    ? 'To: HR' :
                   m.recipient_type === 'shift'    ? `To: ${m.recipient_day ? m.recipient_day.charAt(0).toUpperCase() + m.recipient_day.slice(1, 3) : ''} ${m.recipient_shift || ''}`.trim() :
                   m.recipient_type === 'role'     ? `To: ${m.recipient_role}` :
                   m.recipient_type === 'volunteer'? `To: ${allUsers.find(u => u.id === m.recipient_volunteer_id)?.full_name || 'Individual'}` :
@@ -870,7 +932,7 @@ export function MessageTab({
               <label style={S.label}>Send to</label>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 {[
-                  { value: 'admin',    label: 'Admin' },
+                  { value: 'admin',    label: 'HR' },
                   ...(isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
                   ...(isProvider && !isAdmin ? [{ value: 'providers', label: 'All Providers' }] : []),
                   ...(!isProvider && !isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { SHIFTS, ROLES, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS } from '../../lib/constants'
+import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
 import DataDashboard from '../../components/DataDashboard'
 import ClinicOpenings from '../../components/ClinicOpenings'
@@ -56,6 +56,10 @@ const ADMIN_ROLES = [
   'Office Manager', 'Human Resources', 'Credentialing'
 ]
 
+// If a volunteer is scheduled to these roles, their default role will be updated to match. (not including admins)
+const VOLUNTEER_UPDATE_DEFAULT_ROLES = [
+  'Clinical Supervisor'
+]
 
 function hasAdminAccess(p) {
   return p?.affiliation === 'provider' || ADMIN_ACCESS_DEFAULT_ROLES.includes(p?.default_role)
@@ -600,6 +604,11 @@ export default function AdminPage() {
   const [changingStatus, setChangingStatus]             = useState(false)
   const [editForm, setEditForm]                         = useState({})
   const [saving, setSaving]                             = useState(false)
+  // Admin notes — free text on the volunteer's application/needs/wants,
+  // carried over from the onboarding pipeline. Always editable by anyone
+  // who can view this volunteer's profile, independent of the Edit toggle.
+  const [notesDraft, setNotesDraft]                     = useState('')
+  const [savingNotes, setSavingNotes]                   = useState(false)
   const [filterAffiliation, setFilterAffiliation]       = useState('all')
   const [filterSchool, setFilterSchool]                 = useState('all')
   const [filterRole, setFilterRole]                     = useState('all')
@@ -1229,6 +1238,7 @@ export default function AdminPage() {
       end_date: v.end_date || '', status_reason: v.status_reason || '',
       team: v.team || '',
     })
+    setNotesDraft(v.admin_notes || '')
     setStatusForm({ status: v.status || 'active', status_reason: v.status_reason || '' })
     setEditing(false)
     setShowRecentShifts(false); setShowScheduledShifts(false)
@@ -1412,7 +1422,7 @@ export default function AdminPage() {
     // --- DIRECTOR RBAC CHECK ---
     let needsProfileUpdate = false;
 
-    if (ADMIN_ROLES.includes(addingRole)) {
+    if (ADMIN_ROLES.includes(addingRole) || VOLUNTEER_UPDATE_DEFAULT_ROLES.includes(addingRole)) {
       if (vol?.default_role !== addingRole) {
         if (profile?.default_role !== 'Director') {
           showMessage(
@@ -1438,7 +1448,7 @@ export default function AdminPage() {
       return sum + (entry.week_pattern === 'every' ? 1 : 0.5);
     }, 0);
 
-    const limit = ROLE_SUGGESTIONS[addingRole];
+    const limit = getRoleCapacity(scheduleDay, scheduleShift, addingRole);
 
     if (limit && effectiveCount >= limit && !canOverrideRoleLimits) {
       showMessage(`Limit reached for ${addingRole} (${limit})`, 'error');
@@ -1500,34 +1510,64 @@ export default function AdminPage() {
       return;
     }
 
-    // --- AUTOMATIC PROFILE UPDATE FOR ADMIN ROLES ---
+    // --- AUTOMATIC PROFILE UPDATE FOR ADMIN ROLES AND VOLUNTEER ROLES THAT CHANGE DEFAULT ROLE ---
     if (needsProfileUpdate) {
-      const { error: profileErr } = await supabase
-        .from('profiles')
-        .update({
-          default_role: addingRole,
-          role: 'admin',
-        })
-        .eq('id', addVolId);
+      if (ADMIN_ROLES.includes(addingRole)) {
+        const { error: profileErr } = await supabase
+          .from('profiles')
+          .update({
+            default_role: addingRole,
+            role: 'admin',
+          })
+          .eq('id', addVolId);
 
-      if (profileErr) {
-        console.error(profileErr);
-        showMessage(
-          `Volunteer was scheduled, but their profile could not be updated: ${profileErr.message}`,
-          'error'
-        );
-      } else {
-        setVolunteers(prev =>
-          prev.map(v =>
-            v.id === addVolId
-              ? {
-                  ...v,
-                  default_role: addingRole,
-                  role: 'admin',
-                }
-              : v
-          )
-        );
+        if (profileErr) {
+          console.error(profileErr);
+          showMessage(
+            `Volunteer was scheduled, but their profile could not be updated: ${profileErr.message}`,
+            'error'
+          );
+        } else {
+          setVolunteers(prev =>
+            prev.map(v =>
+              v.id === addVolId
+                ? {
+                    ...v,
+                    default_role: addingRole,
+                    role: 'admin',
+                  }
+                : v
+            )
+          );
+        }
+      } else if (VOLUNTEER_UPDATE_DEFAULT_ROLES.includes(addingRole)) {
+        const { error: profileErr } = await supabase
+          .from('profiles')
+          .update({
+            default_role: addingRole,
+            role: 'volunteer',
+          })
+          .eq('id', addVolId);
+
+        if (profileErr) {
+          console.error(profileErr);
+          showMessage(
+            `Volunteer was scheduled, but their profile could not be updated: ${profileErr.message}`,
+            'error'
+          );
+        } else {
+          setVolunteers(prev =>
+            prev.map(v =>
+              v.id === addVolId
+                ? {
+                    ...v,
+                    default_role: addingRole,
+                    role: 'volunteer',
+                  }
+                : v
+            )
+          );
+        }
       }
     }
 
@@ -1598,6 +1638,31 @@ export default function AdminPage() {
     setVolunteers(prev => prev.map(v => v.id === volunteerId ? { ...v, ...patch } : v))
     setChangingStatus(false)
   }
+  // Admin notes are saved independently of the full profile Edit form, so
+  // anyone who can open a volunteer's profile can jot down or update notes
+  // without needing to enter Edit mode.
+  async function handleSaveNotes() {
+    if (!selectedVolunteer) return
+    setSavingNotes(true)
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ admin_notes: notesDraft || null })
+      .eq('id', selectedVolunteer.id)
+
+    if (error) {
+      showMessage(error.message, 'error')
+      setSavingNotes(false)
+      return
+    }
+
+    const fresh = { ...selectedVolunteer, admin_notes: notesDraft || null }
+    setSelectedVolunteer(fresh)
+    setVolunteers(prev => prev.map(v => (v.id === selectedVolunteer.id ? fresh : v)))
+    showMessage('Notes saved!', 'success')
+    setSavingNotes(false)
+  }
+
   async function handleSaveEdit() {
     setSaving(true)
 
@@ -1767,7 +1832,8 @@ export default function AdminPage() {
       if (filterDefaultRole !== 'all' && v.default_role !== filterDefaultRole) return false
       return true
     })
-    .sort((a, b) => { const ln = n => (n?.full_name?.split(' ').slice(-1)[0] || '').toLowerCase(); return ln(a).localeCompare(ln(b)) })
+    .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+
   // Volunteers tab display only — hides Providers from the browsable list without
   // affecting the volunteer/shift-assignment dropdowns elsewhere, which still use userList.
   // Credentialing gets a restricted view: only clinical care volunteers (affiliation
@@ -1912,7 +1978,7 @@ export default function AdminPage() {
                   return (
                     <div key={role} style={{ ...card, padding: '1rem 1.25rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: entries.length > 0 || isOpen ? '0.75rem' : 0 }}>
-                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{role}{ROLE_SUGGESTIONS[role] ? ` — ${ROLE_SUGGESTIONS[role]}` : ''}</span>
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{role}{getRoleCapacity(scheduleDay, scheduleShift, role) ? ` — ${getRoleCapacity(scheduleDay, scheduleShift, role)}` : ''}</span>
                         <button onClick={() => { setAddingRole(isOpen ? null : role); setAddVolId('') }} style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOpen ? 'var(--surface)' : 'rgba(2,65,107,0.12)', color: isOpen ? 'var(--muted)' : 'var(--accent)', border: `1px solid ${isOpen ? 'var(--border)' : 'var(--accent)'}` }}>{isOpen ? 'Cancel' : '+ Assign'}</button>
                       </div>
                       {entries.length > 0 && (
@@ -2205,6 +2271,24 @@ export default function AdminPage() {
                 <button onClick={handleSaveEdit} disabled={saving} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{saving ? 'Saving...' : 'Save Changes'}</button>
               </div>
             )}
+
+            {/* Admin Notes — visible and editable by anyone who can view this
+                profile, independent of the Edit toggle above. Seeded from the
+                notes captured on the applicant during onboarding. */}
+            <div style={{ padding: '1rem 1.25rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)', marginTop: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Admin Notes</p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{savingNotes ? 'Saving…' : ''}</span>
+              </div>
+              <textarea
+                value={notesDraft}
+                onChange={e => setNotesDraft(e.target.value)}
+                onBlur={() => { if (notesDraft !== (selectedVolunteer.admin_notes || '')) handleSaveNotes() }}
+                placeholder="Notes on this volunteer's application, needs, or wants…"
+                rows={4}
+                style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.9rem', outline: 'none', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.5 }}
+              />
+            </div>
           </div>
         )}
 

@@ -682,8 +682,10 @@ function VolunteerPageInner() {
       const isNarrow = window.innerWidth < 428
       const next = isMobileUA || isNarrow
       setIsMobile(prev => {
-        if (prev !== next) console.log('[VolunteerPage] isMobile changed:', prev, '->', next, 'ua match:', isMobileUA, 'width:', window.innerWidth)
-        return next
+        if (prev !== next) {
+          return next
+        }
+        return prev
       })
     }
     check()
@@ -1321,16 +1323,6 @@ function VolunteerPageInner() {
             onSignOut={handleSignOut}
             unreadCount={unreadCount}
           />
-        )}
-
-        {/* Status banner */}
-        {!isMobile && (
-          <div style={{ ...S.card, marginBottom: '1.5rem', borderColor: activeShift ? 'var(--accent)' : 'var(--border)', background: activeShift ? 'rgba(74,222,128,0.05)' : 'var(--surface)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: activeShift ? 'var(--accent)' : 'var(--muted)', boxShadow: activeShift ? '0 0 8px var(--accent)' : 'none' }} />
-              <span style={{ fontWeight: 500 }}>{activeShift ? `Clocked in since ${formatTime(activeShift.clock_in)}` : 'Not clocked in'}</span>
-            </div>
-          </div>
         )}
 
         {/* Weekly training banner — shown every week until acknowledged */}
@@ -1974,7 +1966,7 @@ function VolunteerPageInner() {
                 Developed by
               </p>
               <p style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text)', marginBottom: '1.5rem' }}>
-                Joshua Kent
+                Joshua Kent <br /> Michael Scott <br /> William Bingham
               </p>
               <button
                 onClick={() => setShowCredits(false)}
