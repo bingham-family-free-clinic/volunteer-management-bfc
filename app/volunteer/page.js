@@ -759,6 +759,14 @@ function VolunteerPageInner() {
       })
     }
 
+      const { data: open } = await supabase
+          .from('shifts')
+          .select('id, clock_in, role')
+          .eq('volunteer_id', user.id)
+          .is('clock_out', null)
+          .maybeSingle()
+      setActiveShift(open || null)
+
     setLoading(false)
 
     // Seed the unread message count badge immediately on load
@@ -788,15 +796,7 @@ function VolunteerPageInner() {
     }).length
     setUnreadCount(count)
 
-    const { data: open } = await supabase
-      .from('shifts')
-      .select('id, clock_in, role')
-      .eq('volunteer_id', user.id)
-      .is('clock_out', null)
-      .maybeSingle()
-    setActiveShift(open || null)
-
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+    /*const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
     const { data: lunch } = await supabase
       .from('lunch_assignments')
       .select('lunch_shift')
@@ -804,6 +804,7 @@ function VolunteerPageInner() {
       .eq('assignment_date', today)
       .maybeSingle()
     setLunchAssignment(lunch || null)
+    */
 
     await fetchScheduleTab(user.id)
   }
