@@ -1,4 +1,5 @@
 'use client'
+import JSZip from 'jszip'
 import { useState, useEffect, useRef } from 'react'
 import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS } from '../lib/constants'
 import { formatSlotFull, formatSlotDayLabel, formatSlotTime, TIMEZONE_LABEL } from '../lib/interview-schedule'
@@ -1480,48 +1481,131 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSavingChecklist(false)
   }
 
-  async function handleFileUpload(applicantId, item, file) {
-    if (!file || !item.bucket || !item.urlKey) return
+  async function uploadChecklistFiles(applicantId, item, filesArr) {
+    if (!filesArr.length || !item.bucket || !item.urlKey) {
+      throw new Error('Invalid file upload')
+    }
+
+    const zip = new JSZip()
+
+    for (const file of filesArr) {
+      zip.file(file.name, file)
+    }
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' })
+
+    const path = `${applicantId}/${item.key}-${Date.now()}.zip`
+
+    const { error } = await supabase.storage
+        .from(item.bucket)
+        .upload(path, zipBlob, {
+          contentType: 'application/zip',
+          upsert: true
+        })
+
+    if (error) throw error
+
+    return path
+  }
+
+  async function handleFileUpload(applicantId, item, filesArr) {
+    if (!filesArr.length || !item.bucket || !item.urlKey) return
+
     setUploadingKey(item.key)
+
     try {
-      const ext  = file.name.split('.').pop()
-      const path = `${applicantId}/${item.key}-${Date.now()}.${ext}`
-      const { error: upErr } = await supabase.storage.from(item.bucket).upload(path, file, { upsert: true })
-      if (upErr) { msg(upErr.message, 'error'); setUploadingKey(null); return }
-      const next = { ...checklist, [item.urlKey]: path }
+      const path = await uploadChecklistFiles(
+          applicantId,
+          item,
+          filesArr
+      )
+
+      const next = {
+        ...checklist,
+        [item.urlKey]: path
+      }
+
       setChecklist(next)
-      const { error: dbErr } = await supabase.from('onboarding_checklists')
-        .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
-      if (dbErr) msg(dbErr.message, 'error')
-      else msg(`${item.label} uploaded`)
-    } catch (e) { msg(e.message, 'error') }
-    setUploadingKey(null)
+
+      const { error: dbErr } = await supabase
+          .from('onboarding_checklists')
+          .upsert(
+              {
+                applicant_id: applicantId,
+                ...next,
+                updated_at: new Date().toISOString()
+              },
+              {
+                onConflict: 'applicant_id'
+              }
+          )
+
+      if (dbErr) {
+        msg(dbErr.message, 'error')
+      } else {
+        msg(`${item.label} uploaded`)
+      }
+
+    } catch (e) {
+      msg(e.message, 'error')
+    } finally {
+      setUploadingKey(null)
+    }
   }
 
   // ─── Recently Added: per-item file upload ─────────────────────────────────
 
-  async function handleRecentFileUpload(applicantId, item, file) {
-    if (!file || !item.bucket || !item.urlKey) return
+  async function handleRecentFileUpload(applicantId, item, filesArr) {
+    if (!filesArr.length || !item.bucket || !item.urlKey) return
+
     const uploadKey = `${applicantId}-${item.key}`
     setRecentUploadingKey(uploadKey)
+
     try {
-      const ext  = file.name.split('.').pop()
-      const path = `${applicantId}/${item.key}-${Date.now()}.${ext}`
-      const { error: upErr } = await supabase.storage.from(item.bucket).upload(path, file, { upsert: true })
-      if (upErr) { msg(upErr.message, 'error'); setRecentUploadingKey(null); return }
-      const existing = recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }
+      const path = await uploadChecklistFiles(
+          applicantId,
+          item,
+          filesArr
+      )
+
+      const existing =
+          recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }
+
       const next = {
         ...existing,
         [item.urlKey]: path,
-        [item.key]:    true,
+        [item.key]: true,
       }
-      setRecentChecklist(prev => ({ ...prev, [applicantId]: next }))
-      const { error: dbErr } = await supabase.from('onboarding_checklists')
-        .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
-      if (dbErr) msg(dbErr.message, 'error')
-      else msg(`${item.label} uploaded`)
-    } catch (e) { msg(e.message, 'error') }
-    setRecentUploadingKey(null)
+
+      setRecentChecklist(prev => ({
+        ...prev,
+        [applicantId]: next
+      }))
+
+      const { error: dbErr } = await supabase
+          .from('onboarding_checklists')
+          .upsert(
+              {
+                applicant_id: applicantId,
+                ...next,
+                updated_at: new Date().toISOString()
+              },
+              {
+                onConflict: 'applicant_id'
+              }
+          )
+
+      if (dbErr) {
+        msg(dbErr.message, 'error')
+      } else {
+        msg(`${item.label} uploaded`)
+      }
+
+    } catch (e) {
+      msg(e.message, 'error')
+    } finally {
+      setRecentUploadingKey(null)
+    }
   }
 
   async function handleRecentPhotoUpload(applicantId, file) {
@@ -1653,11 +1737,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       if (fileEntries.length === 0) {
         msg('No files to download — marking as offloaded', 'success')
       } else {
-        let JSZip = null
-        try { JSZip = (await import('jszip')).default } catch (_) {}
 
         if (JSZip) {
           const zip    = new JSZip()
+
           const folder = zip.folder(applicant.full_name.replace(/\s+/g, '_'))
           for (const entry of fileEntries) {
             try {
@@ -1813,16 +1896,36 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // ─── Select applicant ─────────────────────────────────────────────────────
 
-  function selectApplicant(a) {
-    setSelected(a)
+  async function selectApplicant(a) {
+    let applicant = a
+
+    // re-fetch the applicant row if it's in the interview stage, to ensure interview_scheduled_at is up to date
+    if (a.stage === 'interview') {
+      const { data, error } = await supabase
+        .from('volunteer_applications')
+        .select('*')
+        .eq('id', a.id)
+        .single()
+
+      if (error) {
+        console.error('failed to refresh applicant on select:', error)
+      } else if (data) {
+        applicant = data
+        setApplicants(prev => prev.map(app => app.id === data.id ? data : app))
+      }
+    }
+
+    setSelected(applicant)
     setOnboardStep(1)
     setChecklist(EMPTY_CHECKLIST)
     setNotesDraft(a.notes || '')
 
-    const affiliData = a.onboard_affil_data || {}
+    const affiliData = applicant.onboard_affil_data || {}
     setOnboardForm({
-      affiliation:   a.onboard_affiliation   || '',
-      default_role:  a.onboard_default_role  || '',
+      affiliation:   applicant.onboard_affiliation   || '',
+      default_role:  applicant.onboard_default_role  || '',
+      preferred_slots: applicant.onboard_preferred_slots || [],
+      preferred_roles: applicant.onboard_preferred_roles || [],
       sma_name:          affiliData.sma_name          || '',
       sma_contact:       affiliData.sma_contact        || '',
       school:            affiliData.school             || '',
@@ -1839,7 +1942,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       tb_exp:            affiliData.tb_exp             || '',
     })
 
-    if (a.stage === 'onboarding') loadChecklist(a.id)
+    if (applicant.stage === 'onboarding') loadChecklist(applicant.id)
 
     // Reset photo state — photo will appear only once uploaded this session
     setApplicantPhotoUrl(null)
@@ -1960,7 +2063,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     if (!item.bucket || !item.urlKey) return null
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem' }}>
-        <input ref={ref} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(applicantId, item, f); e.target.value = '' }} />
+        <input ref={ref}
+               type="file"
+               multiple
+               accept=".pdf,.jpg,.jpeg,.png,.webp,image/*"
+               style={{ display: 'none' }}
+               onChange={e => {
+                 const files = Array.from(e.target.files || [])
+                 if (files.length > 0) {
+                   handleFileUpload(applicantId, item, files);
+                 }
+                 e.target.value = ''
+               }
+
+               }
+        />
         {has
           ? <><button onClick={() => openFile(item.bucket, checklist[item.urlKey])} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>View File</button><button onClick={() => ref.current?.click()} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Replace</button></>
           : <button onClick={() => ref.current?.click()} disabled={uploading} style={{ padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: uploading ? 0.5 : 1 }}>{uploading ? 'Uploading...' : '+ Attach File'}</button>
@@ -2473,7 +2590,20 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                             </span>
                             {hasFile && <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600, flexShrink: 0 }}>Uploaded</span>}
                           </div>
-                          <input ref={ref} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleRecentFileUpload(a.id, item, f); e.target.value = '' }} />
+                          <input ref={ref}
+                                 type="file"
+                                 multiple
+                                 accept=".pdf,.jpg,.jpeg,.png,.webp,image/*"
+                                 style={{ display: 'none' }}
+                                 onChange={e => {
+                                   const files = Array.from(e.target.files || []);
+
+                                   if (files.length > 0)
+                                     handleRecentFileUpload(a.id, item, files);
+                                   e.target.value = ''
+                                 }
+                                }
+                          />
                           <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
                             {hasFile && <button onClick={() => openFile(item.bucket, cl[item.urlKey])} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>View ↗</button>}
                             <button onClick={() => ref.current?.click()} disabled={isUploading} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: isUploading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: isUploading ? 0.5 : 1 }}>

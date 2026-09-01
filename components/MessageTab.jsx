@@ -465,7 +465,7 @@ export function MessageTab({
         .eq('user_id', user.id),
       supabase
         .from('profiles')
-        .select('id, full_name, default_role')
+        .select('id, full_name, default_role, status')
         .order('full_name'),
     ])
 
@@ -624,10 +624,14 @@ export function MessageTab({
     .slice(0, 4)
     .map(id => allUsers.find(u => u.id === id))
     .filter(Boolean)
+    .filter(m => m.status === 'active')
 
   const comboResults = (() => {
     const q = comboQuery.trim().toLowerCase()
-    const baseList = allUsers.filter(u => u.id !== user?.id)
+    const baseList =
+        allUsers
+        .filter(u => u.id !== user?.id)
+        .filter(u => u.status === 'active')
     if (q.length === 0) {
       const recentIds = new Set(recentRecipients.map(u => u.id))
       const rest = baseList.filter(u => !recentIds.has(u.id))
