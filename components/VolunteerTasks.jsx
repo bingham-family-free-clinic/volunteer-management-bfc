@@ -88,9 +88,20 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   const [nameVal, setNameVal] = useState(task.name)
   const [savingName, setSavingName] = useState(false)
   const notesRef = useRef(null)
+  const notesScrollPosRef = useRef(null)
   const [supportsFieldSizing] = useState(() =>
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
   )
+
+  // Saves the scroll height when opening the notes editor
+  useEffect(() => {
+    if (!editingNotes || notesScrollPosRef.current === null) return
+    const savedScrollY = notesScrollPosRef.current
+    notesScrollPosRef.current = null
+    requestAnimationFrame(() => {
+      window.scrollTo(0, savedScrollY)
+    })
+  }, [editingNotes])
 
   useEffect(() => {
     const el = notesRef.current
@@ -327,7 +338,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   {task.notes || <em>No notes yet.</em>}
                 </p>
                 <button
-                  onClick={() => { setNotesVal(task.notes || ''); setEditingNotes(true) }}
+                  onClick={() => { notesScrollPosRef.current = window.scrollY; setNotesVal(task.notes || ''); setEditingNotes(true) }}
                   style={{ marginTop: '0.5rem', fontSize: '0.78rem', color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', padding: 0 }}
                 >
                   Edit notes
