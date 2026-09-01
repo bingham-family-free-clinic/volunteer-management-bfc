@@ -759,6 +759,8 @@ function VolunteerPageInner() {
       })
     }
 
+    setLoading(false)
+
     // Seed the unread message count badge immediately on load
     const { data: allMsgs } = await supabase
       .from('messages')
@@ -804,8 +806,6 @@ function VolunteerPageInner() {
     setLunchAssignment(lunch || null)
 
     await fetchScheduleTab(user.id)
-
-    setLoading(false)
   }
 
   // ── Per-tab lazy fetchers ─────────────────────────────────────────────────
