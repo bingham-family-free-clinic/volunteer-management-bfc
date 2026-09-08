@@ -1714,7 +1714,7 @@ function VolunteerPageInner() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     {myCallOuts.map(c => {
                       return (
-                        <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'var(--bg)', borderRadius: '8px', border: `1px solid ${isApproved ? 'rgba(74,222,128,0.4)' : 'var(--border)'}`, flexWrap: 'wrap', gap: '0.75rem' }}>
+                        <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'var(--bg)', borderRadius: '8px', border: `1px solid ${'var(--border)'}`, flexWrap: 'wrap', gap: '0.75rem' }}>
                           <div>
                             <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{c.callout_date}<span style={{ marginLeft: '0.5rem', fontFamily: 'DM Mono, monospace', fontSize: '0.82rem', color: 'var(--muted)' }}>{c.shift_time}</span></p>
                             <p style={{ color: 'var(--muted)', fontSize: '0.82rem', textTransform: 'capitalize' }}>{c.day_of_week}{c.role ? ` · ${c.role}` : ''}{c.profiles?.full_name ? ` · ${c.profiles.full_name} calling out` : ''}</p>
