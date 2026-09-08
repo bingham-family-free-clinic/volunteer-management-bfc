@@ -52,7 +52,7 @@ const ADMIN_ACCESS_DEFAULT_ROLES = [
 
 // These are the roles that the Director has to assign. Standard admin don't get to touch this.
 const ADMIN_ROLES = [
-  'Director', 'Executive Assistant', 'Administrative Assistant', 
+  'Director', 'Executive Assistant', 'Administrative Assistant',
   'Office Manager', 'Human Resources', 'Credentialing'
 ]
 
@@ -726,7 +726,7 @@ export default function AdminPage() {
   const visibleSchedule     = labVolunteerIds ? schedule.filter(s => labVolunteerIds.has(s.volunteer_id))    : schedule
   const visibleActiveShifts = labVolunteerIds ? activeShifts.filter(s => labVolunteerIds.has(s.volunteer_id)) : activeShifts
   const visibleCallouts     = labVolunteerIds ? callouts.filter(c => labVolunteerIds.has(c.volunteer_id))   : callouts
-    
+
   // ── Profile photo state ──────────────────────────────────────────────────────
   const [profilePhotoUrl, setProfilePhotoUrl]         = useState(null)
   const [profilePhotoLoading, setProfilePhotoLoading] = useState(false)
@@ -1617,11 +1617,21 @@ export default function AdminPage() {
     setChangingStatus(true)
     const volunteerId = selectedVolunteer.id
     const isDeactivating = newStatus === 'inactive'
-    const { error } = await supabase.from('profiles').update({
-      status: newStatus,
-      status_reason: isDeactivating ? (reason || null) : null,
-      status_changed_at: new Date().toISOString(),
-    }).eq('id', volunteerId)
+    const updates = {
+        status: newStatus,
+        status_reason: isDeactivating ? (reason || null) : null,
+        status_changed_at: new Date().toISOString(),
+    }
+
+    if (isDeactivating) {
+        updates.role = 'volunteer'
+    }
+
+    const { error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', volunteerId)
+
     if (error) { showMessage(error.message, 'error'); setChangingStatus(false); return }
     if (isDeactivating) {
       const { error: se } = await supabase.from('schedule').delete().eq('volunteer_id', volunteerId)
@@ -1632,7 +1642,11 @@ export default function AdminPage() {
     await audit(isDeactivating ? 'deactivated_volunteer' : 'reactivated_volunteer', 'volunteer', volunteerId, selectedVolunteer.full_name, reason || null)
     showMessage(isDeactivating ? 'Volunteer deactivated and removed from schedule.' : 'Volunteer reactivated!', 'success')
     // Patch volunteer in local state — avoid full re-fetch
-    const patch = { status: newStatus, status_reason: isDeactivating ? (reason || null) : null }
+    const patch = {
+        status: newStatus,
+        status_reason: isDeactivating ? (reason || null) : null,
+        ...(isDeactivating ? { role: 'volunteer' } : {}),
+    }
     const fresh = { ...selectedVolunteer, ...patch }
     setSelectedVolunteer(fresh)
     setVolunteers(prev => prev.map(v => v.id === volunteerId ? { ...v, ...patch } : v))
@@ -2640,7 +2654,7 @@ export default function AdminPage() {
         {tab === 'languages' && canSeeLanguageCoverage && (
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
         )}
-        {/* 
+        {/*
         {tab === 'lunch'     && <LunchScheduler supabase={supabase} profile={profile} />}
         */}
         {tab === 'tasks' && (
