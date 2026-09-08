@@ -580,8 +580,7 @@ function VolunteerPageInner() {
 
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
   const [schedule, setSchedule] = useState([])
-  const [myCallOuts, setMyCallOuts] = useState([])
-  const [approvedCallouts, setApprovedCallouts] = useState([])
+  const [MyCallouts, setMyCallouts] = useState([])
   const [approvedCovers, setApprovedCovers]     = useState([])
 
   // ── Callout tab state (lazy) ──────────────────────────────────────────────
@@ -824,9 +823,9 @@ function VolunteerPageInner() {
         .order('day_of_week'),
       supabase
         .from('callouts')
-        .select('id, callout_date, day_of_week, shift_time, role, reason')
+        .select('id, callout_date, day_of_week, shift_time, role, reason, status')
         .eq('volunteer_id', userId)
-        .eq('status', 'approved')
+        .neq('status', 'denied')
         .gte('callout_date', today)
         .order('callout_date', { ascending: true }),
       supabase
@@ -837,9 +836,8 @@ function VolunteerPageInner() {
     ])
     
     setSchedule(sched || [])
-    setApprovedCallouts(callouts?.filter(c => c.status === 'approved') ?? [])
-    setMyCallOuts(callouts || [])
-
+    setMyCallouts(callouts || [])
+    
     const volunteerIds = [...new Set((myCoverReqs || []).map(r => r.callout?.volunteer_id).filter(Boolean))]
     let volunteerNames = {}
     if (volunteerIds.length > 0) {
@@ -1025,6 +1023,18 @@ function VolunteerPageInner() {
       else { showToast(`${rows.length} call-out${rows.length !== 1 ? 's' : ''} submitted!`, 'success'); setCalloutStartDate(''); setCalloutEndDate(''); setCalloutReason('') }
     } finally {
       setCalloutSubmitting(false)
+    }
+  }
+
+  async function handleCancelCallout(calloutId) {
+    const { data, error } = await supabase
+      .from('callouts')
+      .update({ status: 'cancelled' })
+      .eq('id', calloutId)
+    if (error) showToast(error.message, 'error')
+    else {
+      showToast('Call-out cancelled.', 'success')
+      setMyCallouts(prev => prev.map(c => c.id === calloutId ? { ...c, status: 'cancelled' } : c))
     }
   }
 
@@ -1487,14 +1497,14 @@ function VolunteerPageInner() {
               )}
             </div>
 
-            {approvedCallouts.length > 0 && (
+            {MyCallouts.length > 0 && (
               <div style={S.card}>
                 <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>
-                  Approved Call-Outs
+                  Active Call-Outs
                 </h2>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {approvedCallouts.map(c => (
+                  {MyCallouts.map(c => (
                     <div
                       key={c.id}
                       style={{
@@ -1504,7 +1514,7 @@ function VolunteerPageInner() {
                         padding: '0.75rem 1rem',
                         background: 'var(--bg)',
                         borderRadius: '8px',
-                        border: '1px solid rgba(239,68,68,0.25)',
+                        border: '1px solid var(--border)',
                         gap: '0.75rem',
                         flexWrap: 'wrap',
                       }}
@@ -1521,20 +1531,7 @@ function VolunteerPageInner() {
                           {new Date(c.callout_date + 'T12:00:00').toLocaleDateString(
                             'en-US',
                             { weekday: 'short', month: 'short', day: 'numeric' }
-                          )}
-                        </span>
-
-                        <span style={{
-                          fontFamily: 'DM Mono, monospace',
-                          fontSize: '0.78rem',
-                          background: 'rgba(239,68,68,0.12)',
-                          color: '#ef4444',
-                          padding: '0.15rem 0.5rem',
-                          borderRadius: '6px',
-                          border: '1px solid rgba(239,68,68,0.25)',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {c.shift_time}
+                          )} {c.shift_time}
                         </span>
 
                         {c.role && (
@@ -1560,17 +1557,28 @@ function VolunteerPageInner() {
                       </div>
 
                       {/* RIGHT SIDE (status-style like schedule shift time) */}
-                      <span style={{
-                        fontFamily: 'DM Mono, monospace',
-                        fontSize: '0.8rem',
-                        color: '#ef4444',
-                        background: 'rgba(239,68,68,0.06)',
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: '6px',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        Call-out
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+
+                        <span style={{
+                          fontFamily: 'DM Mono, monospace',
+                          fontSize: '0.8rem',
+                          color: c.status === 'approved' ? '#02416B' : '#5a5a5a',
+                          background: c.status === 'approved' ? '#92a6b9' : '#979797',
+                          padding: '0.2rem 0.6rem',
+                          borderRadius: '6px',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {c.status === 'approved' ? 'Approved' : 'Pending'}
+                        </span>
+
+                        <button
+                              onClick={() => handleCancelCallout(c.id)}
+                              style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
+                              onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
+                              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+                            >✕</button>
+
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1707,27 +1715,6 @@ function VolunteerPageInner() {
                 <button type="submit" disabled={calloutSubmitDisabled || calloutSubmitting} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: (calloutSubmitDisabled || calloutSubmitting) ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: (calloutSubmitDisabled || calloutSubmitting) ? 0.5 : 1 }}>{calloutSubmitting ? 'Submitting…' : 'Submit Call-Out'}</button>
               </form>
             </div>
-                
-            {myCallOuts.length > 0 && (
-              <div style={S.card}>
-                <h2 style={{ fontWeight: 600, marginBottom: '0.4rem' }}>Submitted Call-Outs</h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {myCallOuts.map(c => {
-                      return (
-                        <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'var(--bg)', borderRadius: '8px', border: `1px solid ${'var(--border)'}`, flexWrap: 'wrap', gap: '0.75rem' }}>
-                          <div>
-                            <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{c.callout_date}<span style={{ marginLeft: '0.5rem', fontFamily: 'DM Mono, monospace', fontSize: '0.82rem', color: 'var(--muted)' }}>{c.shift_time}</span></p>
-                            <p style={{ color: 'var(--muted)', fontSize: '0.82rem', textTransform: 'capitalize' }}>{c.day_of_week}{c.role ? ` · ${c.role}` : ''}{c.profiles?.full_name ? ` · ${c.profiles.full_name} calling out` : ''}</p>
-                          </div>
-                          <span style={{ fontSize: '0.8rem', padding: '0.25rem 0.7rem', borderRadius: '100px', background: c.status === 'approved' ? 'rgba(74,222,128,0.12)' : c.status === 'pending' ? 'rgba(96,165,250,0.1)' : 'rgba(239,68,68,0.1)', color: c.status === 'approved' ? 'var(--accent)' : c.status === 'pending' ? '#60a5fa' : '#ef4444', border: `1px solid ${c.status === 'approved' ? 'rgba(74,222,128,0.3)' : c.status === 'pending' ? 'rgba(96,165,250,0.3)' : 'rgba(239,68,68,0.3)'}`, fontWeight: 600 }}>
-                            {c.status === 'approved' ? 'Approved' : c.status === 'pending' ? 'Pending' : 'Denied'}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-              </div>
-            )}
 
             <div style={S.card}>
               <h2 style={{ fontWeight: 600, marginBottom: '0.4rem' }}>Open Shifts</h2>
