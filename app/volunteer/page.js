@@ -580,6 +580,7 @@ function VolunteerPageInner() {
 
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
   const [schedule, setSchedule] = useState([])
+  const [myCallOuts, setMyCallOuts] = useState([])
   const [approvedCallouts, setApprovedCallouts] = useState([])
   const [approvedCovers, setApprovedCovers]     = useState([])
 
@@ -815,7 +816,7 @@ function VolunteerPageInner() {
 
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
 
-    const [{ data: sched }, { data: myCallouts }, { data: myCoverReqs }] = await Promise.all([
+    const [{ data: sched }, { data: callouts }, { data: myCoverReqs }] = await Promise.all([
       supabase
         .from('schedule')
         .select('id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, volunteer_id')
@@ -836,8 +837,9 @@ function VolunteerPageInner() {
     ])
     
     setSchedule(sched || [])
-    setApprovedCallouts(myCallouts || [])
-    
+    setApprovedCallouts(callouts?.filter(c => c.status === 'approved') ?? [])
+    setMyCallOuts(callouts || [])
+
     const volunteerIds = [...new Set((myCoverReqs || []).map(r => r.callout?.volunteer_id).filter(Boolean))]
     let volunteerNames = {}
     if (volunteerIds.length > 0) {
@@ -1705,6 +1707,27 @@ function VolunteerPageInner() {
                 <button type="submit" disabled={calloutSubmitDisabled || calloutSubmitting} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: (calloutSubmitDisabled || calloutSubmitting) ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: (calloutSubmitDisabled || calloutSubmitting) ? 0.5 : 1 }}>{calloutSubmitting ? 'Submitting…' : 'Submit Call-Out'}</button>
               </form>
             </div>
+                
+            {myCallOuts.length > 0 && (
+              <div style={S.card}>
+                <h2 style={{ fontWeight: 600, marginBottom: '0.4rem' }}>Submitted Call-Outs</h2>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {myCallOuts.map(c => {
+                      return (
+                        <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'var(--bg)', borderRadius: '8px', border: `1px solid ${isApproved ? 'rgba(74,222,128,0.4)' : 'var(--border)'}`, flexWrap: 'wrap', gap: '0.75rem' }}>
+                          <div>
+                            <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{c.callout_date}<span style={{ marginLeft: '0.5rem', fontFamily: 'DM Mono, monospace', fontSize: '0.82rem', color: 'var(--muted)' }}>{c.shift_time}</span></p>
+                            <p style={{ color: 'var(--muted)', fontSize: '0.82rem', textTransform: 'capitalize' }}>{c.day_of_week}{c.role ? ` · ${c.role}` : ''}{c.profiles?.full_name ? ` · ${c.profiles.full_name} calling out` : ''}</p>
+                          </div>
+                          <span style={{ fontSize: '0.8rem', padding: '0.25rem 0.7rem', borderRadius: '100px', background: c.status === 'approved' ? 'rgba(74,222,128,0.12)' : c.status === 'pending' ? 'rgba(96,165,250,0.1)' : 'rgba(239,68,68,0.1)', color: c.status === 'approved' ? 'var(--accent)' : c.status === 'pending' ? '#60a5fa' : '#ef4444', border: `1px solid ${c.status === 'approved' ? 'rgba(74,222,128,0.3)' : c.status === 'pending' ? 'rgba(96,165,250,0.3)' : 'rgba(239,68,68,0.3)'}`, fontWeight: 600 }}>
+                            {c.status === 'approved' ? 'Approved' : c.status === 'pending' ? 'Pending' : 'Denied'}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+              </div>
+            )}
 
             <div style={S.card}>
               <h2 style={{ fontWeight: 600, marginBottom: '0.4rem' }}>Open Shifts</h2>
