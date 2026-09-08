@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { getMountainNow } from '../lib/timeUtils'
 
@@ -87,6 +87,40 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal] = useState(task.name)
   const [savingName, setSavingName] = useState(false)
+  const notesRef = useRef(null)
+  const notesScrollPosRef = useRef(null)
+  const [supportsFieldSizing] = useState(() =>
+    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+  )
+
+  // Saves the scroll height when opening the notes editor
+  useEffect(() => {
+    if (!editingNotes || notesScrollPosRef.current === null) return
+    const savedScrollY = notesScrollPosRef.current
+    notesScrollPosRef.current = null
+    requestAnimationFrame(() => {
+      window.scrollTo(0, savedScrollY)
+    })
+  }, [editingNotes])
+
+  useEffect(() => {
+    const el = notesRef.current
+    if (!el) return
+
+    // Browsers that support field-sizing dynamically adjust the textbox height
+    if (supportsFieldSizing) return
+
+    // Failsafe for browsers without field-sizing support keep the textbox static
+    const computed = window.getComputedStyle(el)
+    const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
+    const paddingTop = parseFloat(computed.paddingTop) || 0
+    const paddingBottom = parseFloat(computed.paddingBottom) || 0
+    const minHeight = lineHeight * 10 + paddingTop + paddingBottom
+
+    el.style.height = 'auto'
+    const contentHeight = el.scrollHeight
+    el.style.height = Math.max(contentHeight, minHeight) + 'px'
+  }, [editingNotes])
 
   const isMine = task.assignee_id === currentUserId
   const due = formatDue(task.due_date)
@@ -304,7 +338,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   {task.notes || <em>No notes yet.</em>}
                 </p>
                 <button
-                  onClick={() => { setNotesVal(task.notes || ''); setEditingNotes(true) }}
+                  onClick={() => { notesScrollPosRef.current = window.scrollY; setNotesVal(task.notes || ''); setEditingNotes(true) }}
                   style={{ marginTop: '0.5rem', fontSize: '0.78rem', color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', padding: 0 }}
                 >
                   Edit notes
@@ -313,11 +347,12 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <textarea
+                  ref={notesRef}
                   value={notesVal}
                   onChange={e => setNotesVal(e.target.value)}
                   rows={4}
                   placeholder="Add context, links, or updates…"
-                  style={{ ...S.input, resize: 'vertical', fontSize: '0.85rem' }}
+                  style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', fontSize: '0.85rem' }}
                 />
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button

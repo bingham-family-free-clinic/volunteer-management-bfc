@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { ROLES, SHIFTS, ROLE_SUGGESTIONS } from '../lib/constants'
+import { ROLES, SHIFTS, getRoleCapacity } from '../lib/constants'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ export function computeAvailableSlots(entry, currentSchedule) {
   for (const key of slotKeys) {
     const { day, shift } = parseSlotKey(key)
     for (const role of roles) {
-      const limit = ROLE_SUGGESTIONS[role]
+      const limit = getRoleCapacity(day, shift, role)
       if (limit === 0) continue
 
       if (limit !== undefined && limit !== null && limit > 0) {
@@ -189,6 +189,14 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
   const [manualNotes,   setManualNotes]   = useState('')
   const [savingManual,  setSavingManual]  = useState(false)
 
+  // Edit entry modal — admin can modify any aspect of a waitlist entry
+  const [editModal,  setEditModal]  = useState(null)
+  const [editSlots,   setEditSlots]   = useState([])
+  const [editRoles,   setEditRoles]   = useState([])
+  const [editNotes,   setEditNotes]   = useState('')
+  const [editAddedAt, setEditAddedAt] = useState('')
+  const [savingEdit,  setSavingEdit]  = useState(false)
+
   const [toast, setToast] = useState(null)
 
   // ─── Boot ──────────────────────────────────────────────────────────────────
@@ -210,7 +218,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
   }, [waitlist, schedule])
 
   // ─── Loaders ───────────────────────────────────────────────────────────────
-
+  
   async function loadWaitlist() {
     setWaitlistLoading(true)
     setWaitlistError(null)
@@ -276,7 +284,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
 
     // Fresh query at assignment time to prevent races
     const { data: freshSchedule } = await supabase.from('schedule').select('*')
-    const limit = ROLE_SUGGESTIONS[assignRole]
+    const limit = getRoleCapacity(day, shift, assignRole)
 
     if (limit !== undefined && limit !== null && limit > 0) {
       const activeEntries = (freshSchedule || []).filter(s =>
@@ -312,6 +320,51 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
     await loadSchedule()
     if (onAssigned) onAssigned()
     setAssigningSlot(false)
+  }
+
+  function openEdit(entry) {
+    setEditModal(entry)
+    setEditSlots(entry.preferred_slots || [])
+    setEditRoles(entry.preferred_roles || [])
+    setEditNotes(entry.notes || '')
+    // added_at drives list order (seniority) — seed the date-only portion for editing
+    setEditAddedAt(entry.added_at ? entry.added_at.split('T')[0] : '')
+  }
+
+  async function handleEditSave() {
+    if (!editModal) return
+    if (!editAddedAt) { msg('Date added is required', 'error'); return }
+    setSavingEdit(true)
+
+    const origDate = editModal.added_at ? editModal.added_at.split('T')[0] : ''
+    const dateChanged = editAddedAt !== origDate
+
+    // Preserve original time-of-day when only the date changes; otherwise default to now
+    const origTime  = editModal.added_at ? editModal.added_at.split('T')[1] : null
+    const newAddedAt = dateChanged
+      ? `${editAddedAt}T${origTime || new Date().toISOString().split('T')[1]}`
+      : editModal.added_at
+
+    const { error } = await supabase
+      .from('waitlist')
+      .update({
+        preferred_slots: editSlots,
+        preferred_roles: editRoles,
+        notes:           editNotes || null,
+        added_at:        newAddedAt,
+      })
+      .eq('id', editModal.id)
+
+    if (error) { msg(error.message, 'error'); setSavingEdit(false); return }
+
+    const details = dateChanged
+      ? `updated availability/roles; date added changed ${origDate || '—'} → ${editAddedAt}`
+      : 'updated availability/roles'
+    await audit('edited_waitlist', 'waitlist', editModal.id, editModal.profiles?.full_name, details)
+    msg(`${editModal.profiles?.full_name}'s waitlist entry updated`)
+    setEditModal(null)
+    await loadWaitlist()
+    setSavingEdit(false)
   }
 
   async function removeFromWaitlist(entry) {
@@ -370,6 +423,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
     const uniqueKeys    = [...new Set(slots.map(s => s.key))]
     const rolesForSlot  = slots.filter(s => s.key === assignSlotKey)
     const availableRoles = rolesForSlot.length > 0 ? rolesForSlot.map(s => s.role) : ROLES
+    const { day: selDay, shift: selShift } = assignSlotKey ? parseSlotKey(assignSlotKey) : { day: null, shift: null }
 
     return (
       <div onClick={() => setAssignModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '1.5rem' }}>
@@ -429,7 +483,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
                 {ROLES.map(r => {
                   const inAvailable = availableRoles.includes(r)
                   const slotData    = rolesForSlot.find(s => s.role === r)
-                  const limit       = ROLE_SUGGESTIONS[r]
+                  const limit       = getRoleCapacity(selDay, selShift, r)
                   const isUnlimited = limit === undefined || limit === null
                   const dimmed      = !inAvailable && rolesForSlot.length > 0 && !isUnlimited
                   return (
@@ -453,7 +507,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
               <div style={{ padding: '0.7rem 0.95rem', borderRadius: '8px', background: C.green + '08', border: `1px solid ${C.green}44` }}>
                 <p style={{ fontSize: '0.82rem', color: C.green, fontWeight: 600 }}>
                   ✓ {ALL_SLOTS.find(s => s.key === assignSlotKey)?.label || assignSlotKey} — {assignRole}
-                  {(ROLE_SUGGESTIONS[assignRole] === undefined || ROLE_SUGGESTIONS[assignRole] === null) && (
+                  {(getRoleCapacity(selDay, selShift, assignRole) === undefined || getRoleCapacity(selDay, selShift, assignRole) === null) && (
                     <span style={{ marginLeft: '0.5rem', fontSize: '0.72rem', opacity: 0.7 }}>(unlimited role)</span>
                   )}
                 </p>
@@ -465,6 +519,57 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
             <button onClick={() => setAssignModal(null)} style={ghostBtn()}>Cancel</button>
             <button onClick={handleAssignSlot} disabled={assigningSlot || !assignSlotKey || !assignRole} style={solidBtn(C.green, assigningSlot || !assignSlotKey || !assignRole)}>
               {assigningSlot ? 'Assigning...' : 'Confirm & Assign'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── Edit Modal ────────────────────────────────────────────────────────────
+
+  function EditModal() {
+    if (!editModal) return null
+
+    return (
+      <div onClick={() => setEditModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '1.5rem' }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '1.75rem', maxWidth: '560px', width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.4)', maxHeight: '85vh', overflowY: 'auto' }}>
+
+          <div style={{ marginBottom: '1.25rem' }}>
+            <h3 style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.25rem' }}>Edit Waitlist Entry</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Editing <strong style={{ color: 'var(--text)' }}>{editModal.profiles?.full_name}</strong>'s availability and role preferences.</p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
+
+            <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22`, overflowX: 'auto' }}>
+              <p style={{ ...labelStyle, marginBottom: '0.85rem' }}>Preferred Shifts <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(leave blank for flexible — any slot)</span></p>
+              <SlotPicker selected={editSlots} onChange={setEditSlots} />
+            </div>
+
+            <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22` }}>
+              <p style={{ ...labelStyle, marginBottom: '0.75rem' }}>Preferred Roles <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(leave blank for any role)</span></p>
+              <RolePicker selected={editRoles} onChange={setEditRoles} />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Notes <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
+              <input value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any context..." style={inputStyle} />
+            </div>
+
+            <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.yellow}33` }}>
+              <label style={labelStyle}>Date Added <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(controls seniority / list order)</span></label>
+              <input type="date" value={editAddedAt} onChange={e => setEditAddedAt(e.target.value)} style={inputStyle} />
+              <p style={{ fontSize: '0.74rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
+                Moving this earlier bumps them up the waitlist; moving it later pushes them down. Changes are logged in the audit trail.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+            <button onClick={() => setEditModal(null)} style={ghostBtn()}>Cancel</button>
+            <button onClick={handleEditSave} disabled={savingEdit} style={solidBtn(C.blue, savingEdit)}>
+              {savingEdit ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </div>
@@ -620,6 +725,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
                       <button onClick={() => openAssign(entry)} style={{ padding: '0.35rem 0.85rem', borderRadius: '7px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.green + '14', color: C.green, border: `1px solid ${C.green}55` }}>
                         Assign Slot →
                       </button>
+                      <button onClick={() => openEdit(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}55` }}>Edit</button>
                       <button onClick={() => removeFromWaitlist(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Remove</button>
                     </div>
                   </div>
@@ -648,7 +754,8 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
         </div>
       )}
 
-      <AssignModal />
+      {AssignModal()}
+      {EditModal()}
 
       {toast && (
         <div style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: toast.type === 'error' ? '#ef4444' : '#3b82f6', color: '#fff', padding: '0.75rem 1.5rem', borderRadius: '100px', fontWeight: 500, fontSize: '0.9rem', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', zIndex: 100, fontFamily: 'DM Sans, sans-serif' }}>

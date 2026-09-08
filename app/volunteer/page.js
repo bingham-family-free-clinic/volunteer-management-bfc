@@ -686,8 +686,10 @@ function VolunteerPageInner() {
       const isNarrow = window.innerWidth < 428
       const next = isMobileUA || isNarrow
       setIsMobile(prev => {
-        if (prev !== next) console.log('[VolunteerPage] isMobile changed:', prev, '->', next, 'ua match:', isMobileUA, 'width:', window.innerWidth)
-        return next
+        if (prev !== next) {
+          return next
+        }
+        return prev
       })
     }
     check()
@@ -792,6 +794,16 @@ function VolunteerPageInner() {
       })
     }
 
+      const { data: open } = await supabase
+          .from('shifts')
+          .select('id, clock_in, role')
+          .eq('volunteer_id', user.id)
+          .is('clock_out', null)
+          .maybeSingle()
+      setActiveShift(open || null)
+
+    setLoading(false)
+
     // Seed the unread message count badge immediately on load
     const { data: allMsgs } = await supabase
       .from('messages')
@@ -819,15 +831,7 @@ function VolunteerPageInner() {
     }).length
     setUnreadCount(count)
 
-    const { data: open } = await supabase
-      .from('shifts')
-      .select('id, clock_in, role')
-      .eq('volunteer_id', user.id)
-      .is('clock_out', null)
-      .maybeSingle()
-    setActiveShift(open || null)
-
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+    /*const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
     const { data: lunch } = await supabase
       .from('lunch_assignments')
       .select('lunch_shift')
@@ -835,10 +839,9 @@ function VolunteerPageInner() {
       .eq('assignment_date', today)
       .maybeSingle()
     setLunchAssignment(lunch || null)
+    */
 
     await fetchScheduleTab(user.id)
-
-    setLoading(false)
   }
 
   // ── Per-tab lazy fetchers ─────────────────────────────────────────────────
@@ -1356,16 +1359,6 @@ function VolunteerPageInner() {
             onSignOut={handleSignOut}
             unreadCount={unreadCount}
           />
-        )}
-
-        {/* Status banner */}
-        {!isMobile && (
-          <div style={{ ...S.card, marginBottom: '1.5rem', borderColor: activeShift ? 'var(--accent)' : 'var(--border)', background: activeShift ? 'rgba(74,222,128,0.05)' : 'var(--surface)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: activeShift ? 'var(--accent)' : 'var(--muted)', boxShadow: activeShift ? '0 0 8px var(--accent)' : 'none' }} />
-              <span style={{ fontWeight: 500 }}>{activeShift ? `Clocked in since ${formatTime(activeShift.clock_in)}` : 'Not clocked in'}</span>
-            </div>
-          </div>
         )}
 
         {/* Weekly training banner — shown every week until acknowledged */}
@@ -1981,7 +1974,7 @@ function VolunteerPageInner() {
           <div onClick={() => setShowCredits(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '1.5rem', cursor: 'pointer' }}>
             <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '2rem 1.75rem', maxWidth: '320px', width: '100%', textAlign: 'center', cursor: 'default' }}>
               <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>Developed by</p>
-              <p style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text)', marginBottom: '1.5rem' }}>Joshua Kent</p>
+              <p style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text)', marginBottom: '1.5rem' }}>Joshua Kent <br /> Michael Scott <br /> William Bingham</p>
               <button onClick={() => setShowCredits(false)} style={{ padding: '0.6rem 1.5rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>Close</button>
             </div>
           </div>

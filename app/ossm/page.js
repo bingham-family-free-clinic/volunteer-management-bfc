@@ -1000,16 +1000,30 @@ function OSSMPageInner() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) { window.location.href = '/'; return }
 
-    const { data: mData } = await supabase
+    const { data: profileData } = await supabase
       .from('profiles')
       .select('id, full_name, email, phone, sma_name, sma_contact, affiliation, status, default_role')
-      .eq('affiliation', 'missionary')
       .eq('status', 'active')
       .order('full_name')
 
+    const profiles = profileData ?? []
+
+    const mData = profiles.filter(r => r.affiliation === 'missionary')
+
+    const userProfile = profiles.find(m => m.id === session?.user.id)
+
+    const isOssm = userProfile?.default_role?.toLowerCase() === 'ossm'
+
+    console.log(userProfile?.default_role?.toLowerCase())
+
+    if (!isOssm) {
+      window.location.replace("/volunteer")
+      return
+    }
+
     // OSSM staff should never show up in their own Missionaries tab, even if
     // their affiliation happens to also be 'missionary'.
-    const filtered = (mData || []).filter(m => (m.default_role || '').toLowerCase() !== 'ossm')
+    const filtered = mData.filter(m => (m.default_role || '').toLowerCase() !== 'ossm')
     setMissionaries(filtered)
 
     setLoading(false)

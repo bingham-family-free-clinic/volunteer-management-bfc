@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { ROLE_SUGGESTIONS } from '../lib/constants'
+import { ROLE_SUGGESTIONS, getRoleCapacity } from '../lib/constants'
 
 const DAYS    = ['monday','tuesday','wednesday','thursday','friday']
 const SHIFTS  = ['10-2','2-6']
@@ -39,7 +39,8 @@ export default function ClinicOpenings({ onClose }) {
       const results = []
       for (const day of DAYS) {
         for (const shift of SHIFTS) {
-          for (const [role, required] of Object.entries(ROLE_SUGGESTIONS)) {
+          for (const role of Object.keys(ROLE_SUGGESTIONS)) {
+            const required = getRoleCapacity(day, shift, role)
             const slotRows = activeRows.filter(r =>
               r.day_of_week?.toLowerCase().trim() === day &&
               r.shift_time?.toLowerCase().trim()  === shift &&
