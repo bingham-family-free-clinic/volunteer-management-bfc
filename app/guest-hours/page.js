@@ -149,12 +149,12 @@ export default function GuestHoursPage() {
               <label style={labelStyle}>Date</label>
               <input type="date" value={workDate} onChange={e => setWorkDate(e.target.value)} required min={mountainDateStr(-1)} max={mountainDateStr(1)} style={inputStyle} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: '0.75rem' }}>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>Arrival Time</label>
                 <input type="time" value={arrival} onChange={e => setArrival(e.target.value)} required style={inputStyle} />
               </div>
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>Exit Time</label>
                 <input type="time" value={exit} onChange={e => setExit(e.target.value)} required style={inputStyle} />
               </div>
