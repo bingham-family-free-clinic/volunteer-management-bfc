@@ -634,10 +634,12 @@ export default function AdminPage() {
   const [guestOrgs, setGuestOrgs]                 = useState([])
   const [guestHoursRecent, setGuestHoursRecent]   = useState([])
   const [guestOrgsLoading, setGuestOrgsLoading]   = useState(false)
-  const [guestOrgsOpen, setGuestOrgsOpen]         = useState(true)
-  const [guestShiftsOpen, setGuestShiftsOpen]     = useState(true)
+  const [guestOrgsOpen, setGuestOrgsOpen]         = useState(false)
+  const [guestShiftsOpen, setGuestShiftsOpen]     = useState(false)
   const [expandedGuestOrgId, setExpandedGuestOrgId] = useState(null)
   const [togglingGuestOrgId, setTogglingGuestOrgId] = useState(null)
+  const [newGuestOrgName, setNewGuestOrgName] = useState('')
+  const [creatingGuestOrg, setCreatingGuestOrg] = useState(false)
 
   // ── Create volunteer state ──────────────────────────────────────────────────
   const [newName, setNewName]               = useState(''); const [newEmail, setNewEmail]             = useState(''); const [newPassword, setNewPassword]         = useState('')
@@ -895,6 +897,33 @@ export default function AdminPage() {
       showMessage(`${org.name} ${next ? 'reactivated' : 'deactivated'}`, 'success')
     }
     setTogglingGuestOrgId(null)
+  }
+
+  async function handleCreateGuestOrg(e) {
+    e.preventDefault()
+    const name = (newGuestOrgName || '').trim().replace(/<[^>]*>/g, '')
+    if (name.length < 2 || name.length > 60) {
+      showMessage('Organization name must be 2–60 characters.', 'error')
+      return
+    }
+    setCreatingGuestOrg(true)
+    const { data, error } = await supabase
+      .from('guest_organizations')
+      .insert({ name })
+      .select('id,name,is_active')
+      .single()
+    if (error) {
+      showMessage(
+        error.code === '23505' ? `"${name}" already exists.` : error.message,
+        'error'
+      )
+    } else {
+      setGuestOrgs(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      setNewGuestOrgName('')
+      await audit('created_guest_org', 'guest_organization', data.id, data.name)
+      showMessage(`"${data.name}" added!`, 'success')
+    }
+    setCreatingGuestOrg(false)
   }
 
   // Active shifts: only the columns Live/stats actually need
@@ -2114,63 +2143,6 @@ export default function AdminPage() {
         {/* ── VOLUNTEERS LIST ────────────────────────────────────────────────── */}
         {tab === 'volunteers' && !selectedVolunteer && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {/* Guest organizations — visible to ALL admins, not subject to the
-                volunteer filters / role scoping below. Deactivate hides an org
-                from the public /guest-hours form without deleting history. */}
-            <ExpandableSection label="Guest Organizations" isOpen={guestOrgsOpen} onToggle={() => setGuestOrgsOpen(o => !o)} loading={guestOrgsLoading} count={guestOrgs.length || undefined}>
-              {guestOrgs.length === 0 && !guestOrgsLoading ? (
-                <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.85rem' }}>
-                  No guest organizations yet — run supabase/migration1–3.sql, or check RLS policies.
-                </p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {guestOrgs.map(org => {
-                    const totals = guestHoursTotals[org.id]
-                    const recent = guestHoursRecent.filter(r => r.organization_id === org.id).slice(0, 10)
-                    const expanded = expandedGuestOrgId === org.id
-                    const inactive = !org.is_active
-                    return (
-                      <div key={org.id} style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: inactive ? 'rgba(156,163,175,0.06)' : 'var(--bg)', opacity: inactive ? 0.75 : 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                          <button onClick={() => setExpandedGuestOrgId(expanded ? null : org.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', padding: 0 }}>
-                            <span style={{ fontWeight: 600 }}>{org.name}</span>
-                            <span style={{ color: 'var(--muted)', fontSize: '0.8rem', marginLeft: '0.6rem', fontFamily: 'DM Mono, monospace' }}>
-                              {totals ? `${Number(totals.hours).toFixed(1)}h · ${totals.count} ${totals.count === 1 ? 'entry' : 'entries'}` : '—'}
-                            </span>
-                            <span style={{ color: 'var(--muted)', fontSize: '0.8rem', marginLeft: '0.4rem' }}>{expanded ? '▾' : '›'}</span>
-                          </button>
-                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            {inactive && <span style={badgeStyle('#9ca3af')}>inactive</span>}
-                            <button
-                              onClick={() => handleToggleGuestOrg(org)}
-                              disabled={togglingGuestOrgId === org.id}
-                              style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 500, cursor: togglingGuestOrgId === org.id ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: inactive ? 'rgba(74,222,128,0.12)' : 'rgba(156,163,175,0.12)', color: inactive ? 'var(--accent)' : 'var(--muted)', border: '1px solid var(--border)' }}
-                            >
-                              {togglingGuestOrgId === org.id ? '…' : inactive ? 'Reactivate' : 'Deactivate'}
-                            </button>
-                          </div>
-                        </div>
-                        {expanded && (
-                          <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                            {recent.length === 0 ? (
-                              <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.82rem' }}>No submissions yet.</p>
-                            ) : recent.map(r => (
-                              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.82rem', padding: '0.4rem 0.6rem', background: 'var(--surface)', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                                <span style={{ fontWeight: 500 }}>{r.guest_name} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>· {r.work_date} · {String(r.arrival_time).slice(0, 5)}–{String(r.exit_time).slice(0, 5)}</span></span>
-                                <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)', flexShrink: 0 }}>{Number(r.duration_hours).toFixed(2)}h</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                  <p style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
-                    Public form: <span style={{ fontFamily: 'DM Mono, monospace' }}>/guest-hours</span> · Hours auto-submit (no approval). Guest hours are also merged into the Shifts tab and Data totals.
-                  </p>
-                </div>
-              )}
-            </ExpandableSection>
             <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
               <button onClick={() => setFiltersOpen(o => !o)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1.25rem', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                 <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Filters</span>
@@ -2214,6 +2186,80 @@ export default function AdminPage() {
                   })}
                 </div>
               )}
+            </ExpandableSection>
+            {/* Guest organizations — bottom of the page, collapsed by default.
+                Visible to ALL admins, not subject to the volunteer filters /
+                role scoping above. Deactivate hides an org from the public
+                /guest-hours form without deleting history. */}
+            <ExpandableSection label="Guest Organizations" isOpen={guestOrgsOpen} onToggle={() => setGuestOrgsOpen(o => !o)} loading={guestOrgsLoading} count={guestOrgs.length || undefined}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {guestOrgs.length === 0 && !guestOrgsLoading ? (
+                  <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.85rem' }}>
+                    No guest organizations yet — add the first one below (or run supabase/migration1–3.sql and migration5.sql).
+                  </p>
+                ) : (
+                  guestOrgs.map(org => {
+                    const totals = guestHoursTotals[org.id]
+                    const recent = guestHoursRecent.filter(r => r.organization_id === org.id).slice(0, 10)
+                    const expanded = expandedGuestOrgId === org.id
+                    const inactive = !org.is_active
+                    return (
+                      <div key={org.id} style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: inactive ? 'rgba(156,163,175,0.06)' : 'var(--bg)', opacity: inactive ? 0.75 : 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <button onClick={() => setExpandedGuestOrgId(expanded ? null : org.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', padding: 0 }}>
+                            <span style={{ fontWeight: 600 }}>{org.name}</span>
+                            <span style={{ color: 'var(--muted)', fontSize: '0.8rem', marginLeft: '0.6rem', fontFamily: 'DM Mono, monospace' }}>
+                              {totals ? `${Number(totals.hours).toFixed(1)}h · ${totals.count} ${totals.count === 1 ? 'entry' : 'entries'}` : '—'}
+                            </span>
+                            <span style={{ color: 'var(--muted)', fontSize: '0.8rem', marginLeft: '0.4rem' }}>{expanded ? '▾' : '›'}</span>
+                          </button>
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            {inactive && <span style={badgeStyle('#9ca3af')}>inactive</span>}
+                            <button
+                              onClick={() => handleToggleGuestOrg(org)}
+                              disabled={togglingGuestOrgId === org.id}
+                              style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 500, cursor: togglingGuestOrgId === org.id ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: inactive ? 'rgba(74,222,128,0.12)' : 'rgba(156,163,175,0.12)', color: inactive ? 'var(--accent)' : 'var(--muted)', border: '1px solid var(--border)' }}
+                            >
+                              {togglingGuestOrgId === org.id ? '…' : inactive ? 'Reactivate' : 'Deactivate'}
+                            </button>
+                          </div>
+                        </div>
+                        {expanded && (
+                          <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                            {recent.length === 0 ? (
+                              <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.82rem' }}>No submissions yet.</p>
+                            ) : recent.map(r => (
+                              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.82rem', padding: '0.4rem 0.6rem', background: 'var(--surface)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                                <span style={{ fontWeight: 500 }}>{r.guest_name} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>· {r.work_date} · {String(r.arrival_time).slice(0, 5)}–{String(r.exit_time).slice(0, 5)}</span></span>
+                                <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)', flexShrink: 0 }}>{Number(r.duration_hours).toFixed(2)}h</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+                <form onSubmit={handleCreateGuestOrg} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <input
+                    value={newGuestOrgName}
+                    onChange={e => setNewGuestOrgName(e.target.value)}
+                    placeholder="New organization name…"
+                    maxLength={60}
+                    style={{ ...inputStyle, flex: 1, minWidth: '200px' }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={creatingGuestOrg || newGuestOrgName.trim().length < 2}
+                    style={{ padding: '0.75rem 1.25rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: creatingGuestOrg ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: creatingGuestOrg ? 0.7 : 1 }}
+                  >
+                    {creatingGuestOrg ? 'Adding…' : '+ Add'}
+                  </button>
+                </form>
+                <p style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
+                  Public form: <span style={{ fontFamily: 'DM Mono, monospace' }}>/guest-hours</span> · Hours auto-submit (no approval). Guest hours are also merged into the Shifts tab and Data totals.
+                </p>
+              </div>
             </ExpandableSection>
           </div>
         )}
