@@ -9,6 +9,12 @@ const inputStyle = {
   fontSize: '0.95rem', outline: 'none',
   fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box',
 }
+// Native date/time pickers carry UA intrinsic minimum widths that refuse to
+// shrink on mobile browsers and overflow right. Block layout + hard caps keep
+// them flush with the other fields.
+const pickerStyle = {
+  ...inputStyle, display: 'block', minWidth: 0, maxWidth: '100%',
+}
 const labelStyle = {
   display: 'block', fontSize: '0.8rem', color: 'var(--muted)',
   marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em',
@@ -145,18 +151,18 @@ export default function GuestHoursPage() {
               <label style={labelStyle}>Name</label>
               <input type="text" value={name} onChange={e => setName(e.target.value)} required maxLength={100} placeholder="First + Last" style={inputStyle} autoComplete="name" />
             </div>
-            <div>
+            <div style={{ minWidth: 0, width: '100%' }}>
               <label style={labelStyle}>Date</label>
-              <input type="date" value={workDate} onChange={e => setWorkDate(e.target.value)} required min={mountainDateStr(-1)} max={mountainDateStr(1)} style={inputStyle} />
+              <input type="date" value={workDate} onChange={e => setWorkDate(e.target.value)} required min={mountainDateStr(-1)} max={mountainDateStr(1)} style={pickerStyle} />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: '0.75rem' }}>
               <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>Arrival Time</label>
-                <input type="time" value={arrival} onChange={e => setArrival(e.target.value)} required style={inputStyle} />
+                <input type="time" value={arrival} onChange={e => setArrival(e.target.value)} required style={pickerStyle} />
               </div>
               <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>Exit Time</label>
-                <input type="time" value={exit} onChange={e => setExit(e.target.value)} required style={inputStyle} />
+                <input type="time" value={exit} onChange={e => setExit(e.target.value)} required style={pickerStyle} />
               </div>
             </div>
             {preview && !invalidReason && (
