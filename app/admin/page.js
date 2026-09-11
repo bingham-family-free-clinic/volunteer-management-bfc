@@ -627,6 +627,18 @@ export default function AdminPage() {
   const [firstShiftDate, setFirstShiftDate]             = useState(null)
   const [loadingFirstShift, setLoadingFirstShift]       = useState(false)
 
+  // ── Guest organizations (one-time volunteers) ─────────────────────────────
+  // Visible to every admin on the Volunteers tab — intentionally NOT filtered
+  // by isDirector / isCredentialing / lab scope. Fully self-contained: totals
+  // and detail come from guest_hours_submissions; no profiles linkage.
+  const [guestOrgs, setGuestOrgs]                 = useState([])
+  const [guestHoursRecent, setGuestHoursRecent]   = useState([])
+  const [guestOrgsLoading, setGuestOrgsLoading]   = useState(false)
+  const [guestOrgsOpen, setGuestOrgsOpen]         = useState(true)
+  const [guestShiftsOpen, setGuestShiftsOpen]     = useState(true)
+  const [expandedGuestOrgId, setExpandedGuestOrgId] = useState(null)
+  const [togglingGuestOrgId, setTogglingGuestOrgId] = useState(null)
+
   // ── Create volunteer state ──────────────────────────────────────────────────
   const [newName, setNewName]               = useState(''); const [newEmail, setNewEmail]             = useState(''); const [newPassword, setNewPassword]         = useState('')
   const [newRole, setNewRole]               = useState('volunteer'); const [newAffiliation, setNewAffiliation] = useState(''); const [newCredentials, setNewCredentials]   = useState('')
@@ -815,6 +827,74 @@ export default function AdminPage() {
       .select(PROFILE_LIST_COLS)
       .order('full_name')
     setVolunteers(data || [])
+  }
+
+  // Guest organizations + recent guest submissions. Tables may not exist yet
+  // (migrations run separately), so failures resolve to empty lists instead
+  // of breaking the Volunteers tab. Self-contained: no profiles linkage.
+  async function loadGuestOrgs() {
+    setGuestOrgsLoading(true)
+    try {
+      const [{ data: orgs }, { data: recent }] = await Promise.all([
+        supabase.from('guest_organizations').select('id,name,is_active').order('name'),
+        supabase.from('guest_hours_submissions')
+          .select('id,guest_name,organization_id,work_date,arrival_time,exit_time,duration_hours,submitted_at')
+          .order('submitted_at', { ascending: false })
+          .limit(60),
+      ])
+      setGuestOrgs(orgs || [])
+      setGuestHoursRecent(recent || [])
+    } catch (e) {
+      console.error('loadGuestOrgs failed (migrations may not be applied yet):', e)
+      setGuestOrgs([])
+      setGuestHoursRecent([])
+    } finally {
+      setGuestOrgsLoading(false)
+    }
+  }
+
+  // Totals per org across ALL guest submissions (not just the recent 60).
+  // Paginates in 1000-row chunks; fine for expected kiosk volume.
+  const [guestHoursTotals, setGuestHoursTotals] = useState({})
+  async function loadGuestHoursTotals() {
+    try {
+      let from = 0
+      const totals = {}
+      for (;;) {
+        const { data, error } = await supabase
+          .from('guest_hours_submissions')
+          .select('organization_id,duration_hours')
+          .range(from, from + 999)
+        if (error || !data || data.length === 0) break
+        data.forEach(r => {
+          if (!totals[r.organization_id]) totals[r.organization_id] = { hours: 0, count: 0 }
+          totals[r.organization_id].hours += Number(r.duration_hours) || 0
+          totals[r.organization_id].count += 1
+        })
+        if (data.length < 1000) break
+        from += 1000
+      }
+      setGuestHoursTotals(totals)
+    } catch (e) {
+      console.error('loadGuestHoursTotals failed:', e)
+    }
+  }
+
+  async function handleToggleGuestOrg(org) {
+    setTogglingGuestOrgId(org.id)
+    const next = !org.is_active
+    const { error } = await supabase
+      .from('guest_organizations')
+      .update({ is_active: next })
+      .eq('id', org.id)
+    if (error) {
+      showMessage(error.message, 'error')
+    } else {
+      setGuestOrgs(prev => prev.map(o => (o.id === org.id ? { ...o, is_active: next } : o)))
+      await audit(next ? 'reactivated_guest_org' : 'deactivated_guest_org', 'guest_organization', org.id, org.name)
+      showMessage(`${org.name} ${next ? 'reactivated' : 'deactivated'}`, 'success')
+    }
+    setTogglingGuestOrgId(null)
   }
 
   // Active shifts: only the columns Live/stats actually need
@@ -1145,9 +1225,10 @@ export default function AdminPage() {
     setAddingRole(null)
     if (!loadedTabs.current.has(key)) {
       loadedTabs.current.add(key)
-      if (key === 'shifts') loadShiftsFirstPage()
+      if (key === 'shifts') { loadShiftsFirstPage(); loadGuestOrgs(); loadGuestHoursTotals() }
       if (key === 'hours')  loadPendingHours()
       if (key === 'audit')  loadAuditFirstPage()
+      if (key === 'volunteers') { loadGuestOrgs(); loadGuestHoursTotals() }
     }
   }
 
@@ -1172,6 +1253,9 @@ export default function AdminPage() {
       setProfile(p)
       if (p?.default_role === 'Credentialing') setTab('providers')
       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
+      // Guest orgs load best-effort (tables may not exist until migrations run).
+      loadGuestOrgs()
+      loadGuestHoursTotals()
       setLoading(false)
     }
     init()
@@ -2030,6 +2114,63 @@ export default function AdminPage() {
         {/* ── VOLUNTEERS LIST ────────────────────────────────────────────────── */}
         {tab === 'volunteers' && !selectedVolunteer && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Guest organizations — visible to ALL admins, not subject to the
+                volunteer filters / role scoping below. Deactivate hides an org
+                from the public /guest-hours form without deleting history. */}
+            <ExpandableSection label="Guest Organizations" isOpen={guestOrgsOpen} onToggle={() => setGuestOrgsOpen(o => !o)} loading={guestOrgsLoading} count={guestOrgs.length || undefined}>
+              {guestOrgs.length === 0 && !guestOrgsLoading ? (
+                <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.85rem' }}>
+                  No guest organizations yet — run supabase/migration1–3.sql, or check RLS policies.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {guestOrgs.map(org => {
+                    const totals = guestHoursTotals[org.id]
+                    const recent = guestHoursRecent.filter(r => r.organization_id === org.id).slice(0, 10)
+                    const expanded = expandedGuestOrgId === org.id
+                    const inactive = !org.is_active
+                    return (
+                      <div key={org.id} style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: inactive ? 'rgba(156,163,175,0.06)' : 'var(--bg)', opacity: inactive ? 0.75 : 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <button onClick={() => setExpandedGuestOrgId(expanded ? null : org.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', padding: 0 }}>
+                            <span style={{ fontWeight: 600 }}>{org.name}</span>
+                            <span style={{ color: 'var(--muted)', fontSize: '0.8rem', marginLeft: '0.6rem', fontFamily: 'DM Mono, monospace' }}>
+                              {totals ? `${Number(totals.hours).toFixed(1)}h · ${totals.count} ${totals.count === 1 ? 'entry' : 'entries'}` : '—'}
+                            </span>
+                            <span style={{ color: 'var(--muted)', fontSize: '0.8rem', marginLeft: '0.4rem' }}>{expanded ? '▾' : '›'}</span>
+                          </button>
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            {inactive && <span style={badgeStyle('#9ca3af')}>inactive</span>}
+                            <button
+                              onClick={() => handleToggleGuestOrg(org)}
+                              disabled={togglingGuestOrgId === org.id}
+                              style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 500, cursor: togglingGuestOrgId === org.id ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: inactive ? 'rgba(74,222,128,0.12)' : 'rgba(156,163,175,0.12)', color: inactive ? 'var(--accent)' : 'var(--muted)', border: '1px solid var(--border)' }}
+                            >
+                              {togglingGuestOrgId === org.id ? '…' : inactive ? 'Reactivate' : 'Deactivate'}
+                            </button>
+                          </div>
+                        </div>
+                        {expanded && (
+                          <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                            {recent.length === 0 ? (
+                              <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.82rem' }}>No submissions yet.</p>
+                            ) : recent.map(r => (
+                              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.82rem', padding: '0.4rem 0.6rem', background: 'var(--surface)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                                <span style={{ fontWeight: 500 }}>{r.guest_name} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>· {r.work_date} · {String(r.arrival_time).slice(0, 5)}–{String(r.exit_time).slice(0, 5)}</span></span>
+                                <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)', flexShrink: 0 }}>{Number(r.duration_hours).toFixed(2)}h</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  <p style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
+                    Public form: <span style={{ fontFamily: 'DM Mono, monospace' }}>/guest-hours</span> · Hours auto-submit (no approval). Guest hours are also merged into the Shifts tab and Data totals.
+                  </p>
+                </div>
+              )}
+            </ExpandableSection>
             <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
               <button onClick={() => setFiltersOpen(o => !o)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1.25rem', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                 <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Filters</span>
@@ -2371,6 +2512,37 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
+            {/* Guest one-time entries — self-contained table, merged here so
+                Shifts shows roster + guest hours together. Read-only; guest
+                rows are auto-final with no edit/delete in v1. */}
+            <ExpandableSection label="Guest Entries" isOpen={guestShiftsOpen} onToggle={() => setGuestShiftsOpen(o => !o)} loading={guestOrgsLoading} count={guestHoursRecent.length || undefined}>
+              {guestHoursRecent.length === 0 && !guestOrgsLoading ? (
+                <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.85rem' }}>No guest entries yet.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  {guestHoursRecent.map(r => {
+                    const orgName = guestOrgs.find(o => o.id === r.organization_id)?.name || 'Guest'
+                    return (
+                      <div key={r.id} style={{ padding: '0.85rem 1rem', background: 'var(--bg)', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '0.85rem', color: 'var(--accent)', flexShrink: 0 }}>{r.guest_name?.charAt(0)}</div>
+                            <div>
+                              <p style={{ fontWeight: 500, fontSize: '0.9rem' }}>{r.guest_name}</p>
+                              <p style={{ color: 'var(--muted)', fontSize: '0.8rem', fontFamily: 'DM Mono, monospace' }}>{r.work_date} · {String(r.arrival_time).slice(0, 5)}–{String(r.exit_time).slice(0, 5)}</p>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem', borderRadius: '100px', background: 'rgba(2,65,107,0.1)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.35)', fontWeight: 500 }}>{orgName}</span>
+                            <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.9rem', color: 'var(--accent)', fontWeight: 600 }}>{Number(r.duration_hours).toFixed(2)}h</span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </ExpandableSection>
           </div>
         )}
 

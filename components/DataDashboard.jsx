@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-const AFFILIATIONS = ['All', 'missionary', 'student', 'volunteer', 'provider', 'intern']
+const AFFILIATIONS = ['All', 'missionary', 'student', 'volunteer', 'provider', 'intern', 'guest']
 const CURRENT_YEAR = new Date().getFullYear()
 const YEARS = [{ value: 0, label: 'All years' }, ...Array.from({ length: 5 }, (_, i) => ({ value: CURRENT_YEAR - i, label: String(CURRENT_YEAR - i) }))]
 const MONTHS = [
@@ -337,6 +337,7 @@ const AFF_LINES = [
   { key: 'missionary', label: 'Missionary',             color: '#818cf8' },
   { key: 'student',    label: 'Student',                color: '#34d399' },
   { key: 'intern',     label: 'Intern',                 color: '#fb923c' },
+  { key: 'guest',      label: 'Guest',                  color: '#eab308' },
 ]
 
 function WeeklyLineChart({ data }) {
@@ -658,7 +659,7 @@ export default function DataDashboard({ supabase }) {
 
   // ── Weekly hours chart state ──────────────────────────────
   const [weeklyChartOpen,   setWeeklyChartOpen]   = useState(false)
-  const [weeklyChartData,   setWeeklyChartData]   = useState([])   // [{week, volunteer, provider, missionary, student, intern}]
+  const [weeklyChartData,   setWeeklyChartData]   = useState([])   // [{week, volunteer, provider, missionary, student, intern, guest}]
   const [weeklyChartYear,   setWeeklyChartYear]   = useState(CURRENT_YEAR)
   const [weeklyChartLoading, setWeeklyChartLoading] = useState(false)
 
@@ -679,6 +680,9 @@ export default function DataDashboard({ supabase }) {
   const [latePeople,      setLatePeople]      = useState([])
   const [topHours,        setTopHours]        = useState([])
   const [profiles,        setProfiles]        = useState([])
+  // Guest org id -> name map (self-contained guest_organizations table).
+  // Used to label guest rows merged into hours totals below.
+  const [guestOrgNames,   setGuestOrgNames]   = useState({})
 
   // ── Excuse / drawer state ─────────────────────────────────
   const [drawerPerson,     setDrawerPerson]     = useState(null)   // { id, name, records[] }
@@ -692,6 +696,46 @@ export default function DataDashboard({ supabase }) {
       .select('id, full_name, affiliation, sma_name, school, role, status')
       .then(({ data }) => setProfiles(data || []))
   }, [supabase])
+
+  // Load guest org names once (table may not exist until migrations run).
+  useEffect(() => {
+    supabase
+      .from('guest_organizations')
+      .select('id, name')
+      .then(({ data, error }) => {
+        if (error || !data) return
+        const map = {}
+        data.forEach(o => { map[o.id] = o.name })
+        setGuestOrgNames(map)
+      })
+      .catch(() => {})
+  }, [supabase])
+
+  // Guest hours in a work_date range. Returns [] if the table doesn't exist
+  // yet so the dashboard never breaks before migrations run.
+  async function fetchGuestHoursInRange(fromDateStr, toDateStr) {
+    try {
+      const rows = await fetchAllRows(supabase, 'guest_hours_submissions', (q) =>
+        q.select('organization_id, duration_hours, work_date')
+          .gte('work_date', fromDateStr.slice(0, 10))
+          .lte('work_date', toDateStr.slice(0, 10))
+      )
+      return rows || []
+    } catch {
+      return []
+    }
+  }
+
+  // Week key matching the roster week-numbering below, from a YYYY-MM-DD date.
+  function guestWeekKey(workDate) {
+    if (!workDate) return null
+    const [y, m, d] = workDate.split('-').map(Number)
+    if ([y, m, d].some(v => Number.isNaN(v))) return null
+    const dt = new Date(y, m - 1, d)
+    const jan1 = new Date(dt.getFullYear(), 0, 1)
+    const weekNum = Math.ceil(((dt - jan1) / 86400000 + jan1.getDay() + 1) / 7)
+    return `W${String(weekNum).padStart(2, '0')}`
+  }
 
   // ── Hours query — paginated ────────────────────────────────
   const loadHours = useCallback(async () => {
@@ -710,7 +754,10 @@ export default function DataDashboard({ supabase }) {
     }
 
     const affFilter = hoursAff
-    const shiftsData = await fetchAllRows(supabase, 'shifts', (q) => {
+    const isGuestOnly = affFilter === 'guest'
+    // Guests live only in guest_hours_submissions, so skip the shifts query
+    // when the guest pseudo-affiliation is selected.
+    const shiftsData = isGuestOnly ? [] : await fetchAllRows(supabase, 'shifts', (q) => {
       let query = q
         .select('volunteer_id, clock_in, clock_out, profiles!inner(affiliation)')
         .not('clock_out', 'is', null)
@@ -725,8 +772,17 @@ export default function DataDashboard({ supabase }) {
       totalMs += asUTC(s.clock_out) - asUTC(s.clock_in)
     })
 
+    // Guest one-time hours behave like an affiliation: included in the
+    // unfiltered total, and alone when 'guest' is selected.
+    let guestCount = 0
+    if (affFilter === 'All' || isGuestOnly) {
+      const guestRows = await fetchGuestHoursInRange(fromDate, toDate)
+      guestRows.forEach(g => { totalMs += (Number(g.duration_hours) || 0) * 3600000 })
+      guestCount = guestRows.length
+    }
+
     setTotalHoursVal((totalMs / 3600000).toFixed(1))
-    setShiftCount((shiftsData || []).length)
+    setShiftCount((shiftsData || []).length + guestCount)
   }, [supabase, hoursMonth, hoursYear, hoursAff])
 
   // ── Top hours — paginated, independent filters ─────────────
@@ -746,7 +802,8 @@ export default function DataDashboard({ supabase }) {
     }
 
     const affFilter = topAff
-    const shiftsData = await fetchAllRows(supabase, 'shifts', (q) => {
+    const isGuestOnly = affFilter === 'guest'
+    const shiftsData = isGuestOnly ? [] : await fetchAllRows(supabase, 'shifts', (q) => {
       const joinType = affFilter !== 'All' ? 'profiles!inner' : 'profiles'
       let query = q
         .select(`volunteer_id, clock_in, clock_out, ${joinType}(full_name, affiliation)`)
@@ -768,13 +825,27 @@ export default function DataDashboard({ supabase }) {
       byVol[s.volunteer_id].ms += dur
     })
 
+    // Guest orgs behave like an affiliation: ranked alongside volunteers
+    // when unfiltered (one row per org), and alone when 'guest' is selected.
+    if (affFilter === 'All' || isGuestOnly) {
+      const guestRows = await fetchGuestHoursInRange(fromDate, toDate)
+      const byOrg = {}
+      guestRows.forEach(g => {
+        if (!byOrg[g.organization_id]) byOrg[g.organization_id] = 0
+        byOrg[g.organization_id] += (Number(g.duration_hours) || 0) * 3600000
+      })
+      Object.entries(byOrg).forEach(([orgId, ms]) => {
+        byVol[`guest:${orgId}`] = { ms, name: `${guestOrgNames[orgId] || 'Guest'} (Guest)` }
+      })
+    }
+
     const sorted = Object.entries(byVol)
       .map(([id, { ms, name }]) => ({ id, name, hours: (ms / 3600000).toFixed(1) }))
       .sort((a, b) => b.hours - a.hours)
       .slice(0, topCount)
 
     setTopHours(sorted)
-  }, [supabase, topMonth, topYear, topAff, topCount, profiles])
+  }, [supabase, topMonth, topYear, topAff, topCount, profiles, guestOrgNames])
 
   // ── Attendance (no-shows + late) ──────────────────────────
   const loadAttendance = useCallback(async () => {
@@ -933,6 +1004,10 @@ export default function DataDashboard({ supabase }) {
     )
     // Group by ISO week number
     const weekMap = {}
+    const ensureWeek = (key) => {
+      if (!weekMap[key]) weekMap[key] = { week: key, volunteer: 0, provider: 0, missionary: 0, student: 0, intern: 0, guest: 0 }
+      return weekMap[key]
+    }
     ;(shiftsData || []).forEach(s => {
       const d = asUTC(s.clock_in)
       if (!d) return
@@ -941,9 +1016,16 @@ export default function DataDashboard({ supabase }) {
       const key = `W${String(weekNum).padStart(2, '0')}`
       const aff = s.profiles?.affiliation || 'volunteer'
       const hrs = (asUTC(s.clock_out) - d) / 3600000
-      if (!weekMap[key]) weekMap[key] = { week: key, volunteer: 0, provider: 0, missionary: 0, student: 0, intern: 0 }
       const bucket = ['provider','missionary','student','intern'].includes(aff) ? aff : 'volunteer'
-      weekMap[key][bucket] += hrs
+      ensureWeek(key)[bucket] += hrs
+    })
+    // Guest one-time hours join the chart as their own affiliation line,
+    // bucketed by work_date week.
+    const guestRows = await fetchGuestHoursInRange(fromDate, toDate)
+    ;(guestRows || []).forEach(g => {
+      const key = guestWeekKey(g.work_date)
+      if (!key) return
+      ensureWeek(key).guest += Number(g.duration_hours) || 0
     })
     const weeks = Object.keys(weekMap).sort()
     setWeeklyChartData(weeks.map(w => ({
@@ -953,6 +1035,7 @@ export default function DataDashboard({ supabase }) {
       missionary: +weekMap[w].missionary.toFixed(1),
       student:    +weekMap[w].student.toFixed(1),
       intern:     +weekMap[w].intern.toFixed(1),
+      guest:      +weekMap[w].guest.toFixed(1),
     })))
     setWeeklyChartLoading(false)
   }, [supabase, weeklyChartYear])
@@ -1126,7 +1209,7 @@ export default function DataDashboard({ supabase }) {
                 {YEARS.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
               </select>
               <select value={hoursAff} onChange={e => setHoursAff(e.target.value)} style={sel}>
-                {AFFILIATIONS.map(a => <option key={a} value={a}>{a === 'All' ? 'All affiliations' : a === 'provider' ? 'Clinical Care Volunteer' : a}</option>)}
+                {AFFILIATIONS.map(a => <option key={a} value={a}>{a === 'All' ? 'All affiliations' : a === 'provider' ? 'Clinical Care Volunteer' : a === 'guest' ? 'Guest' : a}</option>)}
               </select>
             </div>
           </div>
@@ -1312,7 +1395,7 @@ export default function DataDashboard({ supabase }) {
                 {YEARS.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
               </select>
               <select value={topAff} onChange={e => setTopAff(e.target.value)} style={sel}>
-                {AFFILIATIONS.map(a => <option key={a} value={a}>{a === 'All' ? 'All affiliations' : a === 'provider' ? 'Clinical Care Volunteer' : a}</option>)}
+                {AFFILIATIONS.map(a => <option key={a} value={a}>{a === 'All' ? 'All affiliations' : a === 'provider' ? 'Clinical Care Volunteer' : a === 'guest' ? 'Guest' : a}</option>)}
               </select>
             </div>
           </div>
