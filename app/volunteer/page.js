@@ -1019,6 +1019,10 @@ function VolunteerPageInner() {
       }
       if (rows.length === 0) { showToast('No scheduled shifts found in that date range.', 'error'); return }
       const { error } = await supabase.from('callouts').insert(rows)
+      setMyCallouts(prev => 
+        [...prev, ...rows].sort((a, b) => new Date(a.callout_date) - new Date(b.callout_date))
+      );
+
       if (error) showToast(error.message, 'error')
       else { showToast(`${rows.length} call-out${rows.length !== 1 ? 's' : ''} submitted!`, 'success'); setCalloutStartDate(''); setCalloutEndDate(''); setCalloutReason('') }
     } finally {
