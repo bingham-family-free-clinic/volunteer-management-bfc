@@ -13,6 +13,7 @@ import VolunteerTasks from '../../components/VolunteerTasks'
 import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
+import { useConfirm } from '../../lib/ConfirmDialog'
 
 
 export const dynamic = 'force-dynamic'
@@ -1042,6 +1043,13 @@ function VolunteerPageInner() {
   }
 
   async function handleCancelCallout(calloutId) {
+    const ok = await confirm({
+      label: 'Delete Call-out?',
+      confirmText: 'yes',
+      cancelText: 'no',
+      danger: true,
+    })
+    if (!ok) return
     const { data, error } = await supabase
       .from('callouts')
       .update({ status: 'denied' })
