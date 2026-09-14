@@ -1108,7 +1108,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setLoading(true); setLoadError(null)
     const [appRes, compRes] = await Promise.all([
       supabase.from('volunteer_applications').select('*').in('stage', STAGES).order('created_at', { ascending: false }),
-      supabase.from('volunteer_applications').select('*').eq('stage', 'completed').order('stage_updated_at', { ascending: false }),
+      // Recently Added shows anyone who has finished onboarding: those currently
+      // in training (just onboarded) as well as those who finished training
+      // (moved to the waitlist, or rejected out of training).
+      supabase.from('volunteer_applications').select('*').in('stage', ['training', 'completed']).order('stage_updated_at', { ascending: false }),
     ])
     if (appRes.error)  { setLoadError(appRes.error.message); setApplicants([]) }
     else setApplicants(appRes.data || [])
@@ -1129,7 +1132,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   async function loadCompleted() {
     const { data, error } = await supabase
-      .from('volunteer_applications').select('*').eq('stage', 'completed').order('stage_updated_at', { ascending: false })
+      .from('volunteer_applications').select('*').in('stage', ['training', 'completed']).order('stage_updated_at', { ascending: false })
     if (!error && data) {
       setCompleted(data)
       if (data.length > 0) {
