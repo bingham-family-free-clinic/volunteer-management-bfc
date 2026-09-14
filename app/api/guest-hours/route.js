@@ -23,9 +23,17 @@ function isRateLimited(ip) {
 }
 
 function getMountainDateStr(offsetDays = 0) {
-  const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000)
-  return d.toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+  // Calendar-day math: resolve today's date in Mountain first, then shift by
+  // whole days. (Adding 24h in UTC before converting breaks on 23h/25h DST
+  // changeover days.)
+  const todayMt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+  const [y, m, d] = todayMt.split('-').map(Number)
+  const utc = Date.UTC(y, m - 1, d) + offsetDays * 24 * 60 * 60 * 1000
+  return new Date(utc).toISOString().slice(0, 10)
 }
+
+// How far back guests may log hours. Future dates are never allowed.
+const MAX_BACKDATE_DAYS = 30
 
 function toMinutes(t) {
   const [h, m] = t.split(':').map(Number)
@@ -40,7 +48,9 @@ export async function GET() {
     .eq('is_active', true)
     .order('name')
   if (error) return Response.json({ error: error.message }, { status: 500 })
-  return Response.json({ organizations: data || [] })
+  // Expose the server's Mountain today so the client can validate against
+  // server time instead of the device clock (which may be wrong).
+  return Response.json({ organizations: data || [], today: getMountainDateStr(0) })
 }
 
 export async function POST(req) {
@@ -75,10 +85,17 @@ export async function POST(req) {
     return Response.json({ error: 'Please enter arrival and exit times.' }, { status: 400 })
   }
 
-  // Date must be yesterday, today, or tomorrow (Mountain) — prevents backdating abuse.
-  const allowed = new Set([getMountainDateStr(-1), getMountainDateStr(0), getMountainDateStr(1)])
-  if (!allowed.has(work_date)) {
-    return Response.json({ error: 'Date must be today (or yesterday if after midnight).' }, { status: 400 })
+  // No future dates; generous backdating window (Mountain). Guest hours are
+  // auto-final (no approval), so future logging would inflate totals with
+  // hours never worked. The server clock is the source of truth — never the
+  // device clock. YYYY-MM-DD strings compare lexicographically.
+  const todayMt = getMountainDateStr(0)
+  if (work_date > todayMt) {
+    return Response.json({ error: `You can't log hours for a future date. Today is ${todayMt} (Mountain).` }, { status: 400 })
+  }
+  const earliestAllowed = getMountainDateStr(-MAX_BACKDATE_DAYS)
+  if (work_date < earliestAllowed) {
+    return Response.json({ error: 'That date is too far back — please see staff.' }, { status: 400 })
   }
 
   const arrMin = toMinutes(arrival_time)
@@ -95,7 +112,6 @@ export async function POST(req) {
   }
 
   // No future exit when submitting for today (Mountain wall-clock compare).
-  const todayMt = getMountainDateStr(0)
   if (work_date === todayMt) {
     const nowMt = new Date().toLocaleTimeString('en-GB', { timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit' })
     if (toMinutes(exit_time.slice(0, 5)) > toMinutes(nowMt) + 5) {

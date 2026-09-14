@@ -20,10 +20,23 @@ const labelStyle = {
   marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em',
 }
 
-function mountainDateStr(offsetDays = 0) {
-  const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000)
-  return d.toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+function addDaysStr(ymd, n) {
+  const [y, m, d] = ymd.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d) + n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 }
+
+// Calendar-day math in Mountain time: resolve today's date first, then shift
+// by whole days. (Adding 24h in UTC before converting breaks on 23h/25h DST
+// changeover days.) Used only for the initial default — the server's date,
+// fetched on load, is the source of truth for validation.
+function mountainDateStr(offsetDays = 0) {
+  const todayMt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+  return addDaysStr(todayMt, offsetDays)
+}
+
+// Must match the server (app/api/guest-hours/route.js). The server enforces
+// this; the client copy is only for instant inline feedback.
+const MAX_BACKDATE_DAYS = 30
 
 function durationPreview(arrival, exit) {
   if (!arrival || !exit) return ''
@@ -43,6 +56,10 @@ export default function GuestHoursPage() {
   const [orgId, setOrgId] = useState('')
   const [name, setName] = useState('')
   const [workDate, setWorkDate] = useState(() => mountainDateStr(0))
+  // Server's Mountain today (source of truth — the device clock may be wrong
+  // and prerendered markup may be stale). Null until the orgs fetch resolves.
+  const [serverToday, setServerToday] = useState(null)
+  const [dateTouched, setDateTouched] = useState(false)
   const [arrival, setArrival] = useState('')
   const [exit, setExit] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -52,10 +69,19 @@ export default function GuestHoursPage() {
   useEffect(() => {
     fetch('/api/guest-hours')
       .then(r => r.json())
-      .then(d => setOrgs(d.organizations || []))
+      .then(d => {
+        setOrgs(d.organizations || [])
+        if (d.today && /^\d{4}-\d{2}-\d{2}$/.test(d.today)) setServerToday(d.today)
+      })
       .catch(() => setOrgs([]))
       .finally(() => setOrgsLoading(false))
   }, [])
+
+  // Correct a stale/wrong-clock default to server time — but never clobber a
+  // date the user picked themselves.
+  useEffect(() => {
+    if (serverToday && !dateTouched) setWorkDate(serverToday)
+  }, [serverToday, dateTouched])
 
   const mins = arrival && exit
     ? (() => {
@@ -71,6 +97,17 @@ export default function GuestHoursPage() {
     : mins !== null && mins > 12 * 60 ? 'Shifts over 12 hours cannot be submitted here — please see staff.'
     : ''
 
+  // Advisory range check against server time (the server re-validates on
+  // submit). Deliberately no min/max attributes on the input: native
+  // min/max validation freezes to whatever markup was served/cached and to
+  // the device clock, which caused false "Value must be … or earlier" bubbles.
+  const effectiveToday = serverToday || mountainDateStr(0)
+  const earliestAllowed = addDaysStr(effectiveToday, -MAX_BACKDATE_DAYS)
+  const rangeError =
+    workDate && workDate > effectiveToday ? `You can't log hours for a future date. Today is ${effectiveToday} (Mountain).`
+    : workDate && workDate < earliestAllowed ? 'That date is too far back — please see staff.'
+    : ''
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
@@ -80,6 +117,7 @@ export default function GuestHoursPage() {
       return
     }
     if (invalidReason) { setError(invalidReason); return }
+    if (rangeError) { setError(rangeError); return }
     setSubmitting(true)
     try {
       const res = await fetch('/api/guest-hours', {
@@ -113,7 +151,8 @@ export default function GuestHoursPage() {
     setName('')
     setArrival('')
     setExit('')
-    setWorkDate(mountainDateStr(0))
+    setWorkDate(serverToday || mountainDateStr(0))
+    setDateTouched(false)
     setError('')
   }
 
@@ -153,8 +192,14 @@ export default function GuestHoursPage() {
             </div>
             <div style={{ minWidth: 0, width: '100%' }}>
               <label style={labelStyle}>Date</label>
-              <input type="date" value={workDate} onChange={e => setWorkDate(e.target.value)} required min={mountainDateStr(-1)} max={mountainDateStr(1)} style={pickerStyle} />
+              {/* No min/max: native date validation enforces whatever stale
+                  markup was served/cached and trusts the device clock. Range
+                  is validated in JS (above) and on the server instead. */}
+              <input type="date" value={workDate} onChange={e => { setWorkDate(e.target.value); setDateTouched(true) }} required style={pickerStyle} />
             </div>
+            {rangeError && (
+              <p style={{ fontSize: '0.85rem', color: '#ef4444' }}>{rangeError}</p>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: '0.75rem' }}>
               <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>Arrival Time</label>
@@ -180,7 +225,7 @@ export default function GuestHoursPage() {
               </div>
             )}
 
-            <button type="submit" disabled={submitting || !orgId || !name.trim() || !arrival || !exit || !!invalidReason} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: submitting ? 0.7 : 1 }}>
+            <button type="submit" disabled={submitting || !orgId || !name.trim() || !arrival || !exit || !!invalidReason || !!rangeError} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: submitting ? 0.7 : 1 }}>
               {submitting ? 'Submitting…' : 'Submit Hours'}
             </button>
           </form>
