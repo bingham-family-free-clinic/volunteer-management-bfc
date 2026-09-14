@@ -1034,7 +1034,7 @@ function VolunteerPageInner() {
     if (error) showToast(error.message, 'error')
     else {
       showToast('Call-out cancelled.', 'success')
-      setMyCallouts(prev => prev.map(c => c.id === calloutId ? { ...c, status: 'cancelled' } : c))
+      setMyCallouts(prev => prev.map(c => c.id === calloutId ? { ...c, status: 'denied' } : c))
     }
   }
 
@@ -1562,8 +1562,8 @@ function VolunteerPageInner() {
                         <span style={{
                           fontFamily: 'DM Mono, monospace',
                           fontSize: '0.8rem',
-                          color: c.status === 'approved' ? '#02416B' : '#5a5a5a',
-                          background: c.status === 'approved' ? '#92a6b9' : '#979797',
+                          color: c.status === 'approved' ? '#02416B' : '#000000',
+                          background: c.status === 'approved' ? '#92a6b9' : '#bdbdbd',
                           padding: '0.2rem 0.6rem',
                           borderRadius: '6px',
                           whiteSpace: 'nowrap',
@@ -1572,11 +1572,11 @@ function VolunteerPageInner() {
                         </span>
 
                         <button
-                              onClick={() => handleCancelCallout(c.id)}
-                              style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
-                              onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
-                              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-                            >✕</button>
+                          onClick={() => handleCancelCallout(c.id)}
+                          style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+                        >✕</button>
 
                       </div>
                     </div>
