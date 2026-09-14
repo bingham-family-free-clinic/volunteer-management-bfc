@@ -637,7 +637,29 @@ function VolunteerPageInner() {
   const [internHours, setInternHours]         = useState('')
   const [internRole, setInternRole]           = useState('')
   const [internProgress, setInternProgress]   = useState('')
-  const [submittingInternReport, setSubmittingInternReport] = useState(false)
+  
+  // Auto size textboxes if browser supports it
+  const internProgressRef = useRef(null)
+  const [internProgressFieldSizingSupported] = useState(() =>
+    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+  )
+
+  useEffect(() => {
+    if (tab !== 'internreport') return
+    const el = internProgressRef.current
+    if (!el) return
+
+    if (internProgressFieldSizingSupported) return
+    const computed = window.getComputedStyle(el)
+    const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
+    const paddingTop = parseFloat(computed.paddingTop) || 0
+    const paddingBottom = parseFloat(computed.paddingBottom) || 0
+    const minHeight = lineHeight * 5 + paddingTop + paddingBottom
+    el.style.height = 'auto'
+    const contentHeight = el.scrollHeight
+    el.style.height = Math.max(contentHeight, minHeight) + 'px'
+  }, [tab, internProgressFieldSizingSupported])
+
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [toast, setToast]         = useState(null)
@@ -1723,7 +1745,7 @@ function VolunteerPageInner() {
                   </div>
                   <p style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.5 }}>A call-out will be submitted for each of your scheduled shifts within this range. Weekends are skipped automatically.</p>
                 </>}
-                <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea ref={calloutReasonRef} value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." required style={{ ...S.input, resize: calloutFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content' }} /></div>
+                <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea ref={calloutReasonRef} value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." required style={{ ...S.input, resize: calloutFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '3lh' }} /></div>
                 <button type="submit" disabled={calloutSubmitDisabled || calloutSubmitting} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: (calloutSubmitDisabled || calloutSubmitting) ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: (calloutSubmitDisabled || calloutSubmitting) ? 0.5 : 1 }}>{calloutSubmitting ? 'Submitting…' : 'Submit Call-Out'}</button>
               </form>
             </div>
@@ -1789,7 +1811,7 @@ function VolunteerPageInner() {
                 <div><label style={S.label}>Hours Worked This Week</label><input type="number" min="0.5" max="60" step="0.5" value={internHours} onChange={e => setInternHours(e.target.value)} required placeholder="e.g. 20" style={S.input} /></div>
                 <div>
                   <label style={S.label}>Weekly Progress <span style={{ textTransform: 'none', color: '#ef4444' }}>*</span></label>
-                  <textarea value={internProgress} onChange={e => setInternProgress(e.target.value)} rows={5} required placeholder="Describe what you worked on this week, any challenges, and goals for next week..." style={{ ...S.input, resize: 'vertical', minBlockSize: '3lh' }} />
+                  <textarea ref={internProgressRef} value={internProgress} onChange={e => setInternProgress(e.target.value)} rows={5} required placeholder="Describe what you worked on this week, any challenges, and goals for next week..." style={{ ...S.input, resize: internProgressFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '5lh' }} />
                   <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.35rem' }}>This will be sent directly to your internship coordinator.</p>
                 </div>
                 <button type="submit" disabled={submittingInternReport || !internHours || !internRole || !internProgress.trim()} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: submittingInternReport ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: (!internHours || !internRole || !internProgress.trim()) ? 0.5 : 1 }}>
