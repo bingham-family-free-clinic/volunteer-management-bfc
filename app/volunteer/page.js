@@ -594,6 +594,28 @@ function VolunteerPageInner() {
   const [calloutSubmitting, setCalloutSubmitting] = useState(false)
   const [openShifts, setOpenShifts]             = useState([])
   const [myCoverRequests, setMyCoverRequests]   = useState([])
+
+  // Auto size textboxes if browser supports it
+  const calloutReasonRef = useRef(null)
+  const [calloutFieldSizingSupported] = useState(() =>
+    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+  )
+
+  useEffect(() => {
+    if (tab !== 'callout') return
+    const el = calloutReasonRef.current
+    if (!el) return
+
+    if (calloutFieldSizingSupported) return
+    const computed = window.getComputedStyle(el)
+    const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
+    const paddingTop = parseFloat(computed.paddingTop) || 0
+    const paddingBottom = parseFloat(computed.paddingBottom) || 0
+    const minHeight = lineHeight * 3 + paddingTop + paddingBottom
+    el.style.height = 'auto'
+    const contentHeight = el.scrollHeight
+    el.style.height = Math.max(contentHeight, minHeight) + 'px'
+  }, [tab, calloutFieldSizingSupported])
   const [requestingCoverId, setRequestingCoverId] = useState(null)
 
   const [unreadCount, setUnreadCount] = useState(0)
@@ -1701,7 +1723,7 @@ function VolunteerPageInner() {
                   </div>
                   <p style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.5 }}>A call-out will be submitted for each of your scheduled shifts within this range. Weekends are skipped automatically.</p>
                 </>}
-                <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." required style={{ ...S.input, resize: 'vertical' }} /></div>
+                <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea ref={calloutReasonRef} value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." required style={{ ...S.input, resize: calloutFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content' }} /></div>
                 <button type="submit" disabled={calloutSubmitDisabled || calloutSubmitting} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: (calloutSubmitDisabled || calloutSubmitting) ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: (calloutSubmitDisabled || calloutSubmitting) ? 0.5 : 1 }}>{calloutSubmitting ? 'Submitting…' : 'Submit Call-Out'}</button>
               </form>
             </div>
