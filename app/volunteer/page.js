@@ -1034,7 +1034,7 @@ function VolunteerPageInner() {
     if (error) showToast(error.message, 'error')
     else {
       showToast('Call-out cancelled.', 'success')
-      setMyCallouts(prev => prev.map(c => c.id === calloutId ? { ...c, status: 'denied' } : c))
+      setMyCallouts(prev => prev.filter(c => c.id !== calloutId));
     }
   }
 
