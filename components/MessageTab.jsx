@@ -369,6 +369,7 @@ function ReplyThread({
                 overflowY: 'auto',
                 overflowX: 'hidden',
                 fieldSizing: 'content',
+                minBlockSize: '3lh',
                 fontSize: '0.82rem',
                 padding: '0.6rem 0.75rem',
               }}
@@ -1091,7 +1092,7 @@ export function MessageTab({
                 onChange={e => setMsgBody(e.target.value)}
                 rows={4}
                 placeholder="Write your message…"
-                style={{ ...S.input, resize: msgBodyFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content' }}
+                style={{ ...S.input, resize: msgBodyFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '5lh' }}
               />
             </div>
 

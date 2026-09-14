@@ -298,7 +298,7 @@ export default function WeeklyTraining({ supabase, profile }) {
               onChange={e => setGeneralTraining(e.target.value)}
               rows={5}
               placeholder="This week's general training content…"
-              style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', lineHeight: 1.55 }}
+              style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '5lh', lineHeight: 1.55 }}
             />
           </div>
 
@@ -318,7 +318,7 @@ export default function WeeklyTraining({ supabase, profile }) {
               onChange={e => setLastWeekResult(e.target.value)}
               rows={3}
               placeholder="How did last week's goal go?"
-              style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', lineHeight: 1.55 }}
+              style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '4lh', lineHeight: 1.55 }}
             />
           </div>
 
@@ -361,7 +361,7 @@ export default function WeeklyTraining({ supabase, profile }) {
                           onChange={e => updateRoleTraining(role, e.target.value)}
                           rows={3}
                           placeholder="No specific weekly training for this role"
-                          style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', lineHeight: 1.5 }}
+                          style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '3lh', lineHeight: 1.5 }}
                         />
                       </div>
                     )}
