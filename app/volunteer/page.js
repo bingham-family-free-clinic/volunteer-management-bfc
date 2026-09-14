@@ -633,6 +633,9 @@ function VolunteerPageInner() {
   const [trainingAvailable, setTrainingAvailable]     = useState(false)
   const [trainingAcknowledged, setTrainingAcknowledged] = useState(false)
 
+  // ── Confirmation modal hook ─────────────────────────────────────────────
+  const confirmAction = useConfirm()
+
   // Check Supabase for this week's training and whether this volunteer has
   // already acknowledged it, so the banner/badge stay correct on refresh.
   useEffect(() => {
@@ -1043,7 +1046,7 @@ function VolunteerPageInner() {
   }
 
   async function handleCancelCallout(calloutId) {
-    const ok = await confirm({
+    const ok = await confirmAction({
       label: 'Delete Call-out?',
       confirmText: 'yes',
       cancelText: 'no',
