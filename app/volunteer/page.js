@@ -991,12 +991,19 @@ function VolunteerPageInner() {
       const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
       if (calloutMode === 'single') {
         const derivedDay = calloutDate ? dayNames[new Date(calloutDate + 'T12:00:00').getDay()] : null
-        const { error } = await supabase.from('callouts').insert({
+        const { data, error } = await supabase.from('callouts').insert({
           volunteer_id: user.id, callout_date: calloutDate, day_of_week: derivedDay,
           shift_time: calloutShift || null, reason: calloutReason, role: calloutRole || null,
-        })
+        }).select('id, callout_date, day_of_week, shift_time, role, reason, status').single()
+
         if (error) showToast(error.message, 'error')
-        else { showToast('Call-out submitted!', 'success'); setCalloutDate(''); setCalloutShift(''); setCalloutReason(''); setCalloutRole('') }
+        else {
+          setMyCallouts(prev =>
+            [...prev, data].sort((a, b) => new Date(a.callout_date) - new Date(b.callout_date))
+          )
+          showToast('Call-out submitted!', 'success')
+          setCalloutDate(''); setCalloutShift(''); setCalloutReason(''); setCalloutRole('')
+        }
         return
       }
       if (!calloutStartDate || !calloutEndDate) return
@@ -1025,6 +1032,17 @@ function VolunteerPageInner() {
 
       if (error) showToast(error.message, 'error')
       else { showToast(`${rows.length} call-out${rows.length !== 1 ? 's' : ''} submitted!`, 'success'); setCalloutStartDate(''); setCalloutEndDate(''); setCalloutReason('') }
+      const { data, error } = await supabase.from('callouts').insert(rows)
+        .select('id, callout_date, day_of_week, shift_time, role, reason, status')
+
+      if (error) showToast(error.message, 'error')
+      else {
+        setMyCallouts(prev =>
+          [...prev, ...data].sort((a, b) => new Date(a.callout_date) - new Date(b.callout_date))
+        )
+        showToast(`${rows.length} call-out${rows.length !== 1 ? 's' : ''} submitted!`, 'success')
+        setCalloutStartDate(''); setCalloutEndDate(''); setCalloutReason('')
+      }
     } finally {
       setCalloutSubmitting(false)
     }
