@@ -1029,7 +1029,7 @@ function VolunteerPageInner() {
   async function handleCancelCallout(calloutId) {
     const { data, error } = await supabase
       .from('callouts')
-      .update({ status: 'cancelled' })
+      .update({ status: 'denied' })
       .eq('id', calloutId)
     if (error) showToast(error.message, 'error')
     else {
