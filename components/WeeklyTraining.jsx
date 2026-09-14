@@ -316,7 +316,7 @@ export default function WeeklyTraining({ supabase, profile }) {
               ref={lastWeekResultRef}
               value={lastWeekResult}
               onChange={e => setLastWeekResult(e.target.value)}
-              rows={3}
+              rows={4}
               placeholder="How did last week's goal go?"
               style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '4lh', lineHeight: 1.55 }}
             />

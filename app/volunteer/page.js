@@ -637,7 +637,7 @@ function VolunteerPageInner() {
   const [internHours, setInternHours]         = useState('')
   const [internRole, setInternRole]           = useState('')
   const [internProgress, setInternProgress]   = useState('')
-  
+
   // Auto size textboxes if browser supports it
   const internProgressRef = useRef(null)
   const [internProgressFieldSizingSupported] = useState(() =>
@@ -1745,7 +1745,7 @@ function VolunteerPageInner() {
                   </div>
                   <p style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.5 }}>A call-out will be submitted for each of your scheduled shifts within this range. Weekends are skipped automatically.</p>
                 </>}
-                <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea ref={calloutReasonRef} value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={3} placeholder="Let the team know why..." required style={{ ...S.input, resize: calloutFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '3lh' }} /></div>
+                <div><label style={S.label}>Reason <span style={{ color: 'var(--accent)' }}>*</span></label><textarea ref={calloutReasonRef} value={calloutReason} onChange={e => setCalloutReason(e.target.value)} rows={4} placeholder="Let the team know why..." required style={{ ...S.input, resize: calloutFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '4lh' }} /></div>
                 <button type="submit" disabled={calloutSubmitDisabled || calloutSubmitting} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: (calloutSubmitDisabled || calloutSubmitting) ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: (calloutSubmitDisabled || calloutSubmitting) ? 0.5 : 1 }}>{calloutSubmitting ? 'Submitting…' : 'Submit Call-Out'}</button>
               </form>
             </div>

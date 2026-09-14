@@ -1090,7 +1090,7 @@ export function MessageTab({
                 ref={msgBodyRef}
                 value={msgBody}
                 onChange={e => setMsgBody(e.target.value)}
-                rows={4}
+                rows={5}
                 placeholder="Write your message…"
                 style={{ ...S.input, resize: msgBodyFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '5lh' }}
               />
