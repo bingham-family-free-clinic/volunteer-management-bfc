@@ -68,9 +68,17 @@ function ReplyThread({
   // Auto size textboxes if browser supports it
   const replyRef = useRef(null)
   const replyScrollPosRef = useRef(null)
+  const mostRecentReplyRef = useRef(null)
   const [replyFieldSizingSupported] = useState(() =>
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
   )
+
+  // Auto-scroll to most recent reply when expanded
+  useEffect(() => {
+    if (expanded && mostRecentReplyRef.current) {
+      mostRecentReplyRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [expanded])
 
   useEffect(() => {
     if (!replyOpen || replyScrollPosRef.current === null) return
@@ -295,11 +303,13 @@ function ReplyThread({
           flexDirection: 'column',
           gap: '0.5rem',
         }}>
-          {replies.map(reply => {
+          {replies.map((reply, idx) => {
             const replyIsAdmin = reply.sender?.role === 'admin' || false
             const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
+            const isMostRecent = idx === replies.length - 1
+            const isMostRecentReply = reply.sender_id !== message.sender_id
             return (
-              <div key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
+              <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                   {/* Admin-replied indicator pill */}
                   {reply.sender_id !== message.sender_id && (
@@ -325,6 +335,9 @@ function ReplyThread({
                     user={user}
                     setLightboxUrl={setLightboxUrl}
                     isHighlighted={isReplyHighlighted}
+                    canReply={canReply && isMostRecent && isMostRecentReply}
+                    replyOpen={replyOpen}
+                    onReply={() => { replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
                   />
                 </div>
               </div>
