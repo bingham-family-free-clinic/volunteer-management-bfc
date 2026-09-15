@@ -619,8 +619,8 @@ export function MessageTab({
     })
     const topLevel = msgs.filter(m => !m.parent_message_id)
       .sort((a, b) => {
-        const aLatest = Math.max(new Date(a.created_at), ...repliesMap[a.id].map(r => new Date(r.created_at)))
-        const bLatest = Math.max(new Date(b.created_at), ...repliesMap[b.id].map(r => new Date(r.created_at)))
+        const aLatest = Math.max(new Date(a.created_at), ...(repliesMap[a.id] || []).map(r => new Date(r.created_at)))
+        const bLatest = Math.max(new Date(b.created_at), ...(repliesMap[b.id] || []).map(r => new Date(r.created_at)))
         return bLatest - aLatest
       })
     return { topLevel, repliesMap }
