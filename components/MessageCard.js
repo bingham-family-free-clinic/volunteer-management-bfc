@@ -87,7 +87,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {isUnread && (
+          {isUnread || isHighlighted ? (
             <div
               style={{
                 width: '7px',
@@ -97,10 +97,10 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                 flexShrink: 0,
               }}
             />
-          )}
+          ) : null}
           <span
             style={{
-              fontWeight: isUnread ? 700 : 600,
+              fontWeight: isUnread || isHighlighted ? 700 : 600,
               fontSize: '0.8rem',
             }}
           >

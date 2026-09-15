@@ -191,21 +191,22 @@ function ReplyThread({
         {/* Clickable two-line content */}
         <div
           onClick={() => {
-            setLocallyHighlightedReplies(new Set(replies.map(r => r.id)))
+            const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
+            setLocallyHighlightedReplies(new Set(unreadReplyIds))
             setExpanded(true)
             onMarkRead(message.id, replies.map(r => r.id))
           }}
           style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
         >
-          {/* Line 1: sender + timestamp */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
-              {latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName}
-            </span>
-            <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
-              {formatDateTime(previewSource.created_at)}
-            </span>
-          </div>
+{/* Line 1: sender + timestamp */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.5rem' }}>
+              <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem' }}>
+                {latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName}
+              </span>
+              <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
+                {formatDateTime(previewSource.created_at)}
+              </span>
+            </div>
           {/* Line 2: reply count + snippet (only rendered if there is content) */}
           {(replyCount > 0 || bodySnippet) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
@@ -227,7 +228,8 @@ function ReplyThread({
             onClick={e => {
               e.stopPropagation()
               replyScrollPosRef.current = window.scrollY
-              setLocallyHighlightedReplies(new Set(replies.map(r => r.id)))
+              const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
+              setLocallyHighlightedReplies(new Set(unreadReplyIds))
               setExpanded(true)
               onMarkRead(message.id, replies.map(r => r.id))
               setReplyOpen(true)
@@ -298,9 +300,6 @@ function ReplyThread({
             const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
             return (
               <div key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
-                {isReplyHighlighted && (
-                  <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: '0.35rem' }} />
-                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                   {/* Admin-replied indicator pill */}
                   {reply.sender_id !== message.sender_id && (
