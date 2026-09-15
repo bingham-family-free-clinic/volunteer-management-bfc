@@ -53,6 +53,14 @@ function joinWithOther(values, otherValue) {
   return parts.join(', ')
 }
 
+// Combines a reference's name + contact info into one display string,
+// e.g. "Jane Doe — (801) 555-0100". Returns null if both are empty.
+function formatReference(name, contact) {
+  if (!name && !contact) return null
+  if (name && contact) return `${name} — ${contact}`
+  return name || contact
+}
+
 const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
 const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', training: 'Training', rejected: 'Rejected' }
 
@@ -2679,21 +2687,29 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const skillsStr     = joinWithOther(applicant.skills_selected, applicant.skills_other)
     const rolesStr      = applicant.roles_interested?.length ? applicant.roles_interested.join(', ') : null
     const availabilityStr = formatStatedAvailability(applicant)
+    const ref1Str       = formatReference(applicant.ref1_name, applicant.ref1_contact)
+    const ref2Str       = formatReference(applicant.ref2_name, applicant.ref2_contact)
 
     const fields = [
       { label: 'Email',                value: applicant.email },
       { label: 'Phone',                value: applicant.phone },
       { label: 'School / Program',     value: schoolProgram || null },
+      { label: 'Educational Background', value: applicant.educational_background },
       { label: 'Languages',            value: languagesStr },
+      { label: 'Additional Languages', value: applicant.languages },
       { label: 'Language Proficiency', value: applicant.language_proficiency },
       { label: 'Role Interest',        value: rolesStr },
       { label: 'Certifications',       value: certsStr },
+      { label: 'Credentials',          value: applicant.credentials },
       { label: 'Skills',               value: skillsStr },
+      { label: 'Additional Skills',    value: applicant.skills },
       { label: 'Shift Availability',   value: availabilityStr },
       { label: 'Expected Duration',    value: applicant.expected_duration },
       { label: 'Patient Care Hours',   value: applicant.patient_care_hours != null ? String(applicant.patient_care_hours) : null },
       { label: 'Referral Source',      value: applicant.referral_source },
       { label: 'Experience Notes',     value: applicant.experience_notes },
+      { label: 'Reference 1',          value: ref1Str },
+      { label: 'Reference 2',          value: ref2Str },
     ].filter(f => f.value)
 
     const checklistCount    = CHECKLIST_ITEMS.filter(i => checklist[i.key]).length
