@@ -722,9 +722,6 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
                       : <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', borderRadius: '100px', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)', fontStyle: 'italic' }}>no open slots</span>
                     }
                     <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <button onClick={() => openAssign(entry)} style={{ padding: '0.35rem 0.85rem', borderRadius: '7px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.green + '14', color: C.green, border: `1px solid ${C.green}55` }}>
-                        Assign Slot →
-                      </button>
                       <button onClick={() => openEdit(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}55` }}>Edit</button>
                       <button onClick={() => removeFromWaitlist(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Remove</button>
                     </div>

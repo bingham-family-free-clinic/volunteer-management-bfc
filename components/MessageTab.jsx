@@ -64,6 +64,38 @@ function ReplyThread({
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
 
+  // Auto size textboxes if browser supports it
+  const replyRef = useRef(null)
+  const replyScrollPosRef = useRef(null)
+  const [replyFieldSizingSupported] = useState(() =>
+    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+  )
+
+  useEffect(() => {
+    if (!replyOpen || replyScrollPosRef.current === null) return
+    const savedScrollY = replyScrollPosRef.current
+    replyScrollPosRef.current = null
+    requestAnimationFrame(() => {
+      window.scrollTo(0, savedScrollY)
+    })
+  }, [replyOpen])
+
+  useEffect(() => {
+    if (!replyOpen) return
+    const el = replyRef.current
+    if (!el) return
+    if (replyFieldSizingSupported) return
+    const computed = window.getComputedStyle(el)
+    const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
+    const paddingTop = parseFloat(computed.paddingTop) || 0
+    const paddingBottom = parseFloat(computed.paddingBottom) || 0
+    const minHeight = lineHeight * 2 + paddingTop + paddingBottom
+
+    el.style.height = 'auto'
+    const contentHeight = el.scrollHeight
+    el.style.height = Math.max(contentHeight, minHeight) + 'px'
+  }, [replyOpen, replyFieldSizingSupported])
+
   // Fix #2: if the thread auto-expanded on mount because it was unread,
   // write the message_reads rows immediately — don't wait for a click.
   useEffect(() => {
@@ -200,6 +232,7 @@ function ReplyThread({
           <button
             onClick={e => {
               e.stopPropagation()
+              replyScrollPosRef.current = window.scrollY
               setExpanded(true)
               onMarkRead(message.id, replies.map(r => r.id))
               setReplyOpen(true)
@@ -250,7 +283,7 @@ function ReplyThread({
           senderLabel={senderLabel}
           canReply={canReply}
           replyOpen={replyOpen}
-          onReply={() => setReplyOpen(true)}
+          onReply={() => { replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
         />
       </div>
 
@@ -320,6 +353,7 @@ function ReplyThread({
             borderRadius: '10px',
           }}>
             <textarea
+              ref={replyRef}
               autoFocus
               value={replyBody}
               onChange={e => setReplyBody(e.target.value)}
@@ -331,7 +365,11 @@ function ReplyThread({
               rows={2}
               style={{
                 ...S.input,
-                resize: 'vertical',
+                resize: replyFieldSizingSupported ? 'none' : 'vertical',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                fieldSizing: 'content',
+                minBlockSize: '3lh',
                 fontSize: '0.82rem',
                 padding: '0.6rem 0.75rem',
               }}
@@ -417,6 +455,33 @@ export function MessageTab({
   const [comboOpen, setComboOpen]             = useState(false)
   const fileInputRef = useRef(null)
   const comboRef     = useRef(null)
+  const msgBodyRef = useRef(null)
+  const [msgBodyFieldSizingSupported] = useState(() =>
+    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+  )
+
+  useEffect(() => {
+    if (msgView !== 'compose') return
+    const el = msgBodyRef.current
+    if (!el) return
+
+    // Browsers that natively support field-sizing: content grow/shrink the
+    // textarea themselves — no JS needed, no scroll-jump risk.
+    if (msgBodyFieldSizingSupported) return
+
+    // Failsafe for browsers without field-sizing support: size the box once,
+    // when the compose view becomes visible, using its own default height
+    // (rows=4) as the floor, rather than resizing on every keystroke.
+    const computed = window.getComputedStyle(el)
+    const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
+    const paddingTop = parseFloat(computed.paddingTop) || 0
+    const paddingBottom = parseFloat(computed.paddingBottom) || 0
+    const minHeight = lineHeight * 4 + paddingTop + paddingBottom
+
+    el.style.height = 'auto'
+    const contentHeight = el.scrollHeight
+    el.style.height = Math.max(contentHeight, minHeight) + 'px'
+  }, [msgView, msgBodyFieldSizingSupported])
 
   const isAdmin    = profile?.role === 'admin'
   const isProvider = profile?.default_role === 'Provider'
@@ -1088,11 +1153,12 @@ export function MessageTab({
             <div>
               <label style={S.label}>Message</label>
               <textarea
+                ref={msgBodyRef}
                 value={msgBody}
                 onChange={e => setMsgBody(e.target.value)}
-                rows={4}
+                rows={5}
                 placeholder="Write your message…"
-                style={{ ...S.input, resize: 'vertical' }}
+                style={{ ...S.input, resize: msgBodyFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '5lh' }}
               />
             </div>
 
