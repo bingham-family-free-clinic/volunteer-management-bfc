@@ -81,6 +81,15 @@ function ReplyThread({
     }
   }, [expanded])
 
+  // Auto-scroll to textbox when reply opens
+  useEffect(() => {
+    if (replyOpen && replyRef.current) {
+      const elementTop = replyRef.current.getBoundingClientRect().top + window.pageYOffset
+      window.scrollTo({ top: elementTop - 350, behavior: 'smooth' })
+      replyScrollPosRef.current = null
+    }
+  }, [replyOpen])
+
   useEffect(() => {
     if (!replyOpen || replyScrollPosRef.current === null) return
     const savedScrollY = replyScrollPosRef.current
@@ -88,6 +97,7 @@ function ReplyThread({
     requestAnimationFrame(() => {
       window.scrollTo(0, savedScrollY)
     })
+  }, [replyOpen])
   }, [replyOpen])
 
   useEffect(() => {
@@ -208,11 +218,11 @@ function ReplyThread({
           style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
         >
 {/* Line 1: sender + timestamp */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.5rem' }}>
-              <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.5rem', minWidth: 0 }}>
+              <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName}
               </span>
-              <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
+              <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
                 {formatDateTime(previewSource.created_at)}
               </span>
             </div>
@@ -311,7 +321,7 @@ function ReplyThread({
             const isMostRecentReply = reply.sender_id !== message.sender_id
             return (
               <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1 }}>
                   {/* Admin-replied indicator pill */}
                   {reply.sender_id !== message.sender_id && (
                     <span style={{
