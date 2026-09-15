@@ -76,7 +76,8 @@ function ReplyThread({
   // Auto-scroll to most recent reply when expanded
   useEffect(() => {
     if (expanded && mostRecentReplyRef.current) {
-      mostRecentReplyRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      const elementTop = mostRecentReplyRef.current.getBoundingClientRect().top + window.pageYOffset
+      window.scrollTo({ top: elementTop - 350, behavior: 'smooth' })
     }
   }, [expanded])
 
