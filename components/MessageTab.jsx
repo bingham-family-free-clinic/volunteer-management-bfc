@@ -317,12 +317,12 @@ function ReplyThread({
             const replyIsAdmin = reply.sender?.role === 'admin' || false
             const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
             const isMostRecent = idx === replies.length - 1
-            const isMostRecentReply = reply.sender_id !== message.sender_id
+            const isMostRecentReply = true
             return (
               <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1 }}>
-                  {/* Admin-replied indicator pill */}
-                  {reply.sender_id !== message.sender_id && (
+                  {/* Sender name pill — shown above each group of replies from the same sender */}
+                  {(idx === 0 || replies[idx - 1].sender_id !== reply.sender_id) && (
                     <span style={{
                       alignSelf: 'flex-start',
                       fontSize: '0.65rem',
@@ -336,7 +336,7 @@ function ReplyThread({
                       padding: '0.1rem 0.5rem',
                       marginBottom: '0.1rem',
                     }}>
-                      {isOneOnOne ? (reply.sender?.full_name?.split(' ')[0] ?? 'Reply') : 'Admin replied'}
+                      {reply.sender?.full_name?.split(' ')[0] ?? 'Reply'}
                     </span>
                   )}
                   <MessageCard
