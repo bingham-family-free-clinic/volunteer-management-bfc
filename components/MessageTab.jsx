@@ -184,14 +184,14 @@ function ReplyThread({
       >
         {/* Unread blue dot */}
         {isUnread && (
-          <div style={{ width: '1rem', height: '1rem', borderRadius: '50%', background: '#3b82f6', flexShrink: 0, alignSelf: 'center' }} />
+          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, alignSelf: 'center' }} />
         )}
 
         {/* Clickable two-line content */}
         <div
           onClick={() => {
             setExpanded(true)
-            onMarkRead(message.id, replies.map(r => r.id))
+            onMarkRead(message.id, [])
           }}
           style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
         >
@@ -226,7 +226,7 @@ function ReplyThread({
               e.stopPropagation()
               replyScrollPosRef.current = window.scrollY
               setExpanded(true)
-              onMarkRead(message.id, replies.map(r => r.id))
+              onMarkRead(message.id, [])
               setReplyOpen(true)
             }}
             title="Reply"
@@ -291,36 +291,39 @@ function ReplyThread({
           gap: '0.5rem',
         }}>
           {replies.map(reply => {
-            const replyIsAdmin = reply.sender?.role === 'admin' ||
-              // fall back to checking if the sender name matches an admin — 
-              // MessageCard only gets sender.full_name, so we tag the label
-              false
+            const replyIsAdmin = reply.sender?.role === 'admin' || false
+            const isReplyUnread = readMessageIds && !readMessageIds.has(reply.id) && reply.sender_id !== user?.id
             return (
-              <div key={reply.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                {/* Admin-replied indicator pill */}
-                {reply.sender_id !== message.sender_id && (
-                  <span style={{
-                    alignSelf: 'flex-start',
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    color: 'var(--accent)',
-                    background: 'rgba(2,65,107,0.08)',
-                    border: '1px solid rgba(2,65,107,0.2)',
-                    borderRadius: '100px',
-                    padding: '0.1rem 0.5rem',
-                    marginBottom: '0.1rem',
-                  }}>
-                    {isOneOnOne ? (reply.sender?.full_name?.split(' ')[0] ?? 'Reply') : 'Admin replied'}
-                  </span>
+              <div key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
+                {isReplyUnread && (
+                  <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: '0.35rem' }} />
                 )}
-                <MessageCard
-                  m={reply}
-                  readMessageIds={readMessageIds}
-                  user={user}
-                  setLightboxUrl={setLightboxUrl}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  {/* Admin-replied indicator pill */}
+                  {reply.sender_id !== message.sender_id && (
+                    <span style={{
+                      alignSelf: 'flex-start',
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.06em',
+                      textTransform: 'uppercase',
+                      color: 'var(--accent)',
+                      background: 'rgba(2,65,107,0.08)',
+                      border: '1px solid rgba(2,65,107,0.2)',
+                      borderRadius: '100px',
+                      padding: '0.1rem 0.5rem',
+                      marginBottom: '0.1rem',
+                    }}>
+                      {isOneOnOne ? (reply.sender?.full_name?.split(' ')[0] ?? 'Reply') : 'Admin replied'}
+                    </span>
+                  )}
+                  <MessageCard
+                    m={reply}
+                    readMessageIds={readMessageIds}
+                    user={user}
+                    setLightboxUrl={setLightboxUrl}
+                  />
+                </div>
               </div>
             )
           })}
