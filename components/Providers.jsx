@@ -303,6 +303,7 @@ function ProviderScheduleView({ supabase, providers }) {
       shift_date:  date,
       shift_time:  shift,
       day_of_week: dayOfWeek,
+      affiliation: providers.find(p => p.id === assigningId)?.affiliation || null,
     })
 
     if (error) {

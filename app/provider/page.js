@@ -351,7 +351,7 @@ export default function ProviderPage() {
     }
 
     const { error } = await supabase.from('provider_shifts').insert({
-      provider_id: user.id, shift_date: date, shift_time: shift, day_of_week: day,
+      provider_id: user.id, shift_date: date, shift_time: shift, day_of_week: day, affiliation: profile?.affiliation || null,
     })
     if (error) showToast(error.message, 'error')
     else {

@@ -1476,7 +1476,7 @@ export default function AdminPage() {
     setApprovingHoursId(sub.id)
     const clockInUTC  = fromMountainInputValue(`${sub.work_date}T09:00`)
     const clockOutUTC = new Date(new Date(clockInUTC).getTime() + sub.hours * 3600000).toISOString()
-    const { error: shiftErr } = await supabase.from('shifts').insert({ volunteer_id: sub.volunteer_id, clock_in: clockInUTC, clock_out: clockOutUTC, role: sub.role })
+    const { error: shiftErr } = await supabase.from('shifts').insert({ volunteer_id: sub.volunteer_id, clock_in: clockInUTC, clock_out: clockOutUTC, role: sub.role, affiliation: volunteers.find(v => v.id === sub.volunteer_id)?.affiliation || null })
     if (shiftErr) { showMessage(shiftErr.message, 'error'); setApprovingHoursId(null); return }
     await supabase.from('hours_submissions').update({ status: 'approved', reviewed_at: new Date().toISOString() }).eq('id', sub.id)
     showMessage('Hours approved and shift created!', 'success')
@@ -1513,8 +1513,8 @@ export default function AdminPage() {
     const vol = volunteers.find(v => v.id === newShiftForm.volunteer_id)
     const { data: inserted, error } = await supabase
       .from('shifts')
-      .insert({ volunteer_id: newShiftForm.volunteer_id, clock_in: clockIn, clock_out: clockOut, role: newShiftForm.role || null })
-      .select('id,volunteer_id,clock_in,clock_out,role,profiles(id,full_name)')
+      .insert({ volunteer_id: newShiftForm.volunteer_id, clock_in: clockIn, clock_out: clockOut, role: newShiftForm.role || null, affiliation: vol?.affiliation || null })
+      .select('id,volunteer_id,clock_in,clock_out,role,affiliation,profiles(id,full_name)')
       .single()
     if (error) { showMessage(error.message, 'error'); setCreatingShift(false); return }
     showMessage('Shift entry created!', 'success')

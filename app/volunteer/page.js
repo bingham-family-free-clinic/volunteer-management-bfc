@@ -995,8 +995,8 @@ function VolunteerPageInner() {
     if (!resolvedRole && profile?.default_role) resolvedRole = profile.default_role
     const { data, error } = await supabase
       .from('shifts')
-      .insert({ volunteer_id: user.id, clock_in: new Date().toISOString(), role: resolvedRole })
-      .select('id, clock_in, role')
+      .insert({ volunteer_id: user.id, clock_in: new Date().toISOString(), role: resolvedRole, affiliation: profile?.affiliation || null })
+      .select('id, clock_in, role, affiliation')
       .single()
     if (error) showToast(error.message, 'error')
     else { setActiveShift(data); showToast('Clocked in successfully!', 'success') }
@@ -1107,7 +1107,7 @@ function VolunteerPageInner() {
       const clockOut = new Date()
       const clockIn  = new Date(clockOut.getTime() - hours * 3600000)
       const { error: shiftError } = await supabase.from('shifts').insert({
-        volunteer_id: user.id, clock_in: clockIn.toISOString(), clock_out: clockOut.toISOString(), role: internRole,
+        volunteer_id: user.id, clock_in: clockIn.toISOString(), clock_out: clockOut.toISOString(), role: internRole, affiliation: profile?.affiliation || null,
       })
       if (shiftError) throw shiftError
 
