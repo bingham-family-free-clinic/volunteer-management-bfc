@@ -63,6 +63,7 @@ function ReplyThread({
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
+  const [locallyHighlightedReplies, setLocallyHighlightedReplies] = useState(new Set())
 
   // Auto size textboxes if browser supports it
   const replyRef = useRef(null)
@@ -190,8 +191,9 @@ function ReplyThread({
         {/* Clickable two-line content */}
         <div
           onClick={() => {
+            setLocallyHighlightedReplies(new Set(replies.map(r => r.id)))
             setExpanded(true)
-            onMarkRead(message.id, [])
+            onMarkRead(message.id, replies.map(r => r.id))
           }}
           style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
         >
@@ -225,8 +227,9 @@ function ReplyThread({
             onClick={e => {
               e.stopPropagation()
               replyScrollPosRef.current = window.scrollY
+              setLocallyHighlightedReplies(new Set(replies.map(r => r.id)))
               setExpanded(true)
-              onMarkRead(message.id, [])
+              onMarkRead(message.id, replies.map(r => r.id))
               setReplyOpen(true)
             }}
             title="Reply"
@@ -265,7 +268,7 @@ function ReplyThread({
       {/* ── Original message (click to collapse) ── */}
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
-        onClick={() => { setExpanded(false); setReplyOpen(false); setReplyBody('') }}
+        onClick={() => { setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody('') }}
       >
         <MessageCard
           m={message}
@@ -292,10 +295,10 @@ function ReplyThread({
         }}>
           {replies.map(reply => {
             const replyIsAdmin = reply.sender?.role === 'admin' || false
-            const isReplyUnread = readMessageIds && !readMessageIds.has(reply.id) && reply.sender_id !== user?.id
+            const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
             return (
               <div key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
-                {isReplyUnread && (
+                {isReplyHighlighted && (
                   <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, marginTop: '0.35rem' }} />
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
@@ -322,6 +325,7 @@ function ReplyThread({
                     readMessageIds={readMessageIds}
                     user={user}
                     setLightboxUrl={setLightboxUrl}
+                    isHighlighted={isReplyHighlighted}
                   />
                 </div>
               </div>

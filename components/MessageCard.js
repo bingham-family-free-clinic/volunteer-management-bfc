@@ -61,7 +61,7 @@ function formatBody(text) {
   })
 }
 
-export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, replyOpen, onReply }) {
+export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, replyOpen, onReply, isHighlighted }) {
   const isUnread =
     readMessageIds &&
     !readMessageIds.has(m.id) &&
@@ -71,11 +71,9 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
     <div
       style={{
         padding: '0.75rem 1rem',
-        background: isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
+        background: isHighlighted ? 'rgba(2,65,107,0.06)' : isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
         borderRadius: '8px',
-        border: `1px solid ${
-          isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'
-        }`,
+        border: `1px solid ${isHighlighted ? 'rgba(2,65,107,0.35)' : isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'}`,
       }}
     >
       <div
@@ -95,7 +93,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                 width: '7px',
                 height: '7px',
                 borderRadius: '50%',
-                background: '#ef4444',
+                background: 'var(--accent)',
                 flexShrink: 0,
               }}
             />
