@@ -1,4 +1,5 @@
 import './globals.css'
+import { ConfirmDialogProvider } from '../lib/ConfirmDialog'
 
 const isNonProd = process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production'
 const logo = isNonProd ? '/logo4.png' : '/logo3.png'
@@ -35,7 +36,9 @@ export default function RootLayout({ children }) {
         <link rel="apple-touch-icon" href={logo} />
       </head>
       <body>
-        {children}
+        <ConfirmDialogProvider>
+          {children}
+        </ConfirmDialogProvider>
         <script
           dangerouslySetInnerHTML={{
             __html: `
