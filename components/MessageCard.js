@@ -71,9 +71,9 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
     <div
       style={{
         padding: '0.75rem 1rem',
-        background: isHighlighted ? 'rgba(2,65,107,0.06)' : isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
+        background: isUnread || isHighlighted ? 'rgba(2,65,107,0.1)' : 'var(--bg)',
         borderRadius: '8px',
-        border: `1px solid ${isHighlighted ? 'rgba(2,65,107,0.35)' : isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'}`,
+        border: `1px solid ${isUnread || isHighlighted ? 'rgba(2,65,107,0.5)' : 'var(--border)'}`,
       }}
     >
       <div
