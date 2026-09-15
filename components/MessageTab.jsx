@@ -98,7 +98,6 @@ function ReplyThread({
       window.scrollTo(0, savedScrollY)
     })
   }, [replyOpen])
-  }, [replyOpen])
 
   useEffect(() => {
     if (!replyOpen) return
