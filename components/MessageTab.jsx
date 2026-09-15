@@ -606,8 +606,6 @@ export function MessageTab({
   // ── Thread grouping ────────────────────────────────────────────────────────
   // Returns top-level messages with their replies keyed by parent id
   function buildThreadMap(msgs) {
-    const topLevel = msgs.filter(m => !m.parent_message_id)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     const repliesMap = {}
     msgs
       .filter(m => m.parent_message_id)
@@ -619,6 +617,12 @@ export function MessageTab({
     Object.keys(repliesMap).forEach(k => {
       repliesMap[k].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
     })
+    const topLevel = msgs.filter(m => !m.parent_message_id)
+      .sort((a, b) => {
+        const aLatest = Math.max(new Date(a.created_at), ...repliesMap[a.id].map(r => new Date(r.created_at)))
+        const bLatest = Math.max(new Date(b.created_at), ...repliesMap[b.id].map(r => new Date(r.created_at)))
+        return bLatest - aLatest
+      })
     return { topLevel, repliesMap }
   }
 
@@ -627,12 +631,18 @@ export function MessageTab({
     ? getInboxMessages(messages.filter(m => !m.parent_message_id), user, profile)
     : messages.filter(m => !m.parent_message_id && m.sender_id !== user?.id)
 
-  const sentMessages = messages.filter(m => m.sender_id === user?.id && !m.parent_message_id)
-
   const { topLevel: inboxTopLevel, repliesMap: inboxRepliesMap } = buildThreadMap(
     // For inbox: show all top-level messages the user received + sent top-levels that got replies
     messages
   )
+
+  const sentMessages = messages
+    .filter(m => m.sender_id === user?.id && !m.parent_message_id)
+    .sort((a, b) => {
+      const aLatest = Math.max(new Date(a.created_at), ...(inboxRepliesMap[a.id] || []).map(r => new Date(r.created_at)))
+      const bLatest = Math.max(new Date(b.created_at), ...(inboxRepliesMap[b.id] || []).map(r => new Date(r.created_at)))
+      return bLatest - aLatest
+    })
 
   // Inbox threads: messages sent to this user (or admin) that are top-level
   const inboxThreads = inboxTopLevel.filter(m => {
