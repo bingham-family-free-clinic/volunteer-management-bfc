@@ -1891,10 +1891,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isProvider = affil === 'provider'
     const affiliData = onboardForm
 
+    // profiles has no dedicated columns for educational_background, the raw
+    // `skills` text field, or reference contacts — fold them into
+    // admin_notes so this info isn't silently dropped when the applicant
+    // becomes a volunteer profile.
+    const extraInfo = [
+      selected.educational_background ? `Educational Background: ${selected.educational_background}` : null,
+      selected.skills ? `Additional Skills: ${selected.skills}` : null,
+      formatReference(selected.ref1_name, selected.ref1_contact) ? `Reference 1: ${formatReference(selected.ref1_name, selected.ref1_contact)}` : null,
+      formatReference(selected.ref2_name, selected.ref2_contact) ? `Reference 2: ${formatReference(selected.ref2_name, selected.ref2_contact)}` : null,
+    ].filter(Boolean).join('\n')
+
     const { error: profileErr } = await supabase.from('profiles').insert({
       id: uid, full_name: selected.full_name, email: selected.email,
       phone: selected.phone || null, role: 'volunteer', affiliation: affil || null,
-      languages: joinWithOther(selected.languages_spoken, selected.languages_other) || null,
+      languages: joinWithOther(selected.languages_spoken, selected.languages_other) || selected.languages || null,
       default_role: affiliData.default_role || null,
       status: 'active',
       avatar_url: applicantAvatarPath || null,
@@ -1906,13 +1917,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       intern_department: affil === 'intern' ? (affiliData.intern_department || null) : null,
       advisor_name:      affil === 'intern' ? (affiliData.advisor_name      || null) : null,
       advisor_contact:   affil === 'intern' ? (affiliData.advisor_contact   || null) : null,
-      credentials: isProvider ? (affiliData.credentials || null) : (joinWithOther(selected.certifications, selected.certifications_other) || null),
+      credentials: isProvider ? (affiliData.credentials || null) : (joinWithOther(selected.certifications, selected.certifications_other) || selected.credentials || null),
       license_exp: isProvider ? (affiliData.license_exp || null) : null,
       bls_exp:     isProvider ? (affiliData.bls_exp     || null) : null,
       dea_exp:     isProvider ? (affiliData.dea_exp     || null) : null,
       ftca_exp:    isProvider ? (affiliData.ftca_exp    || null) : null,
       tb_exp:      isProvider ? (affiliData.tb_exp      || null) : null,
-      admin_notes: notesDraft || selected.notes || null,
+      admin_notes: [notesDraft || selected.notes || null, extraInfo || null].filter(Boolean).join('\n\n') || null,
     })
     if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
 
