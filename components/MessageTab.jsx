@@ -59,7 +59,7 @@ function ReplyThread({
     // Sent message that has unread replies — exclude replies the user sent themselves (fix #3)
     (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
   )
-  const [expanded, setExpanded]     = useState(!!isUnread)
+  const [expanded, setExpanded]     = useState(false)
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
@@ -96,14 +96,6 @@ function ReplyThread({
     el.style.height = Math.max(contentHeight, minHeight) + 'px'
   }, [replyOpen, replyFieldSizingSupported])
 
-  // Fix #2: if the thread auto-expanded on mount because it was unread,
-  // write the message_reads rows immediately — don't wait for a click.
-  useEffect(() => {
-    if (isUnread && expanded) {
-      onMarkRead(message.id, replies.map(r => r.id))
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // intentionally runs once on mount only
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
   const replyCount = replies.length
 
@@ -190,9 +182,9 @@ function ReplyThread({
         onMouseEnter={e => e.currentTarget.style.background = 'var(--surface)'}
         onMouseLeave={e => e.currentTarget.style.background = isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)'}
       >
-        {/* Unread dot */}
+        {/* Unread blue dot */}
         {isUnread && (
-          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
+          <div style={{ width: '1rem', height: '1rem', borderRadius: '50%', background: '#3b82f6', flexShrink: 0, alignSelf: 'center' }} />
         )}
 
         {/* Clickable two-line content */}
