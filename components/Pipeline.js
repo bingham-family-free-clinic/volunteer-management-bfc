@@ -24,6 +24,35 @@ function parseSlotKey(key) {
   return { day, shift }
 }
 
+// ── Application shift-availability helpers ────────────────────────────────
+// The volunteer application form stores each shift as its own boolean
+// column (e.g. shift_mon_10_2, shift_tue_2_6 — abbreviated day + shift with
+// underscores), while the Training-stage SlotPicker/onboard_preferred_slots
+// use "monday-10-2" style keys (full day name + shift). These helpers
+// translate between the two so an applicant's stated availability can be
+// displayed and used to pre-fill the SlotPicker.
+function shiftColumnKey(day, shift) {
+  return `shift_${day.slice(0, 3)}_${shift.replace(/-/g, '_')}`
+}
+
+function getStatedAvailability(applicant) {
+  return ALL_SLOTS.filter(s => applicant?.[shiftColumnKey(s.day, s.shift)])
+}
+
+function formatStatedAvailability(applicant) {
+  const slots = getStatedAvailability(applicant)
+  return slots.length ? slots.map(s => s.label).join(', ') : null
+}
+
+// Joins a text[] application field into a readable string, appending the
+// free-text "Other" value (e.g. languages_other, certifications_other,
+// skills_other) when "Other" was one of the selections.
+function joinWithOther(values, otherValue) {
+  if (!values || values.length === 0) return null
+  const parts = values.map(v => (v === 'Other' && otherValue ? `Other (${otherValue})` : v))
+  return parts.join(', ')
+}
+
 const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
 const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', training: 'Training', rejected: 'Rejected' }
 
@@ -1393,8 +1422,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // saved on their application row, so callers always see the latest values
   // regardless of whether a given field has been touched yet.
   function getTrainingDraft(applicant) {
+    const savedSlots = applicant.onboard_preferred_slots
+    const statedSlots = getStatedAvailability(applicant).map(s => s.key)
     return {
-      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? applicant.onboard_preferred_slots ?? [],
+      // Fall back to what the applicant said on their application if staff
+      // haven't set/overridden availability yet, instead of starting blank.
+      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? (savedSlots?.length ? savedSlots : statedSlots),
       preferred_roles: trainingDrafts[applicant.id]?.preferred_roles ?? applicant.onboard_preferred_roles ?? [],
     }
   }
@@ -1853,7 +1886,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const { error: profileErr } = await supabase.from('profiles').insert({
       id: uid, full_name: selected.full_name, email: selected.email,
       phone: selected.phone || null, role: 'volunteer', affiliation: affil || null,
-      languages: selected.languages || null,
+      languages: joinWithOther(selected.languages_spoken, selected.languages_other) || null,
       default_role: affiliData.default_role || null,
       status: 'active',
       avatar_url: applicantAvatarPath || null,
@@ -1865,7 +1898,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       intern_department: affil === 'intern' ? (affiliData.intern_department || null) : null,
       advisor_name:      affil === 'intern' ? (affiliData.advisor_name      || null) : null,
       advisor_contact:   affil === 'intern' ? (affiliData.advisor_contact   || null) : null,
-      credentials: isProvider ? (affiliData.credentials || null) : (selected.credentials || null),
+      credentials: isProvider ? (affiliData.credentials || null) : (joinWithOther(selected.certifications, selected.certifications_other) || null),
       license_exp: isProvider ? (affiliData.license_exp || null) : null,
       bls_exp:     isProvider ? (affiliData.bls_exp     || null) : null,
       dea_exp:     isProvider ? (affiliData.dea_exp     || null) : null,
@@ -1923,6 +1956,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setChecklist(EMPTY_CHECKLIST)
     setNotesDraft(a.notes || '')
 
+    // Staff-entered values (affiliData) take priority if they've already
+    // been filled in; otherwise fall back to what the applicant told us on
+    // the application itself (School/Program), so nobody has to re-ask a
+    // question already answered.
     const affiliData = applicant.onboard_affil_data || {}
     setOnboardForm({
       affiliation:   applicant.onboard_affiliation   || '',
@@ -1931,8 +1968,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       preferred_roles: applicant.onboard_preferred_roles || [],
       sma_name:          affiliData.sma_name          || '',
       sma_contact:       affiliData.sma_contact        || '',
-      school:            affiliData.school             || '',
-      major:             affiliData.major              || '',
+      school:            affiliData.school             || applicant.school  || '',
+      major:             affiliData.major              || applicant.program || '',
       intern_school:     affiliData.intern_school      || '',
       intern_department: affiliData.intern_department  || '',
       advisor_name:      affiliData.advisor_name       || '',
@@ -2636,16 +2673,27 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isRejected   = applicant.stage === 'rejected'
     const trainingDraft = isTraining ? getTrainingDraft(applicant) : null
 
+    const schoolProgram = [applicant.school, applicant.program].filter(Boolean).join(' — ')
+    const languagesStr  = joinWithOther(applicant.languages_spoken, applicant.languages_other)
+    const certsStr      = joinWithOther(applicant.certifications, applicant.certifications_other)
+    const skillsStr     = joinWithOther(applicant.skills_selected, applicant.skills_other)
+    const rolesStr      = applicant.roles_interested?.length ? applicant.roles_interested.join(', ') : null
+    const availabilityStr = formatStatedAvailability(applicant)
+
     const fields = [
-      { label: 'Email',       value: applicant.email },
-      { label: 'Phone',       value: applicant.phone },
-      { label: 'Languages',   value: applicant.languages },
-      { label: 'Credentials', value: applicant.credentials },
-      { label: 'Skills',      value: applicant.skills },
-      { label: 'Education',   value: applicant.educational_background },
-      { label: 'Start Date',  value: applicant.start_date },
-      { label: 'Reference 1', value: applicant.ref1_name ? `${applicant.ref1_name} — ${applicant.ref1_contact}` : null },
-      { label: 'Reference 2', value: applicant.ref2_name ? `${applicant.ref2_name} — ${applicant.ref2_contact}` : null },
+      { label: 'Email',                value: applicant.email },
+      { label: 'Phone',                value: applicant.phone },
+      { label: 'School / Program',     value: schoolProgram || null },
+      { label: 'Languages',            value: languagesStr },
+      { label: 'Language Proficiency', value: applicant.language_proficiency },
+      { label: 'Role Interest',        value: rolesStr },
+      { label: 'Certifications',       value: certsStr },
+      { label: 'Skills',               value: skillsStr },
+      { label: 'Shift Availability',   value: availabilityStr },
+      { label: 'Expected Duration',    value: applicant.expected_duration },
+      { label: 'Patient Care Hours',   value: applicant.patient_care_hours != null ? String(applicant.patient_care_hours) : null },
+      { label: 'Referral Source',      value: applicant.referral_source },
+      { label: 'Experience Notes',     value: applicant.experience_notes },
     ].filter(f => f.value)
 
     const checklistCount    = CHECKLIST_ITEMS.filter(i => checklist[i.key]).length
@@ -2790,8 +2838,22 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             {onboardStep === 2 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Default Position</p>
+                {applicant.roles_interested?.length > 0 && (
+                  <p style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '-0.5rem' }}>
+                    {applicant.full_name} expressed interest in: {applicant.roles_interested.join(', ')}
+                  </p>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.6rem' }}>
-                  {ROLES.map(role => { const active = onboardForm.default_role === role; return <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>{role}</button> })}
+                  {ROLES.map(role => {
+                    const active    = onboardForm.default_role === role
+                    const suggested = applicant.roles_interested?.includes(role)
+                    return (
+                      <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ position: 'relative', padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : suggested ? C.light + '88' : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>
+                        {role}
+                        {suggested && !active && <span style={{ marginLeft: '0.4rem', fontSize: '0.65rem', color: C.light, fontWeight: 700 }}>★ suggested</span>}
+                      </button>
+                    )
+                  })}
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                   <button onClick={() => setOnboardStep(1)} style={ghostBtn()}>Back</button>
@@ -3037,6 +3099,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{a.email}</p>
                             {a.resume_url && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontWeight: 600 }}>resume</span>}
+                            {a.roles_interested?.length > 0 && (
+                              <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.light + '14', color: C.light, border: `1px solid ${C.light}33`, fontWeight: 600 }}>
+                                {a.roles_interested[0]}{a.roles_interested.length > 1 ? ` +${a.roles_interested.length - 1}` : ''}
+                              </span>
+                            )}
                             {a.stage === 'onboarding' && (
                               <span style={{ display: 'flex', gap: '0.2rem' }}>
                                 {[a.onboard_affiliation, a.onboard_default_role].map((v, i) => (
