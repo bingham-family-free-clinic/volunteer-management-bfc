@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   getMonday,
   toWeekKey,
@@ -38,6 +38,21 @@ const S = {
 
 const BLANK_ROLE_TRAININGS = Object.fromEntries(TRAINING_ROLES.map(r => [r, '']))
 
+// Sizes a textarea once to fit its current content, floored at a minimum
+// number of lines (matching its original `rows`), for browsers that don't
+// support the native `field-sizing: content` CSS property.
+function applyFallbackSizing(el, minLines) {
+  const computed = window.getComputedStyle(el)
+  const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
+  const paddingTop = parseFloat(computed.paddingTop) || 0
+  const paddingBottom = parseFloat(computed.paddingBottom) || 0
+  const minHeight = lineHeight * minLines + paddingTop + paddingBottom
+
+  el.style.height = 'auto'
+  const contentHeight = el.scrollHeight
+  el.style.height = Math.max(contentHeight, minHeight) + 'px'
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 // Lets an admin create or edit the training content for a given week.
 // Defaults to next week, since that's the primary workflow ("prep next
@@ -57,6 +72,35 @@ export default function WeeklyTraining({ supabase, profile }) {
   const [lastWeekResult, setLastWeekResult]   = useState('')
   const [roleTrainings, setRoleTrainings]     = useState(BLANK_ROLE_TRAININGS)
   const [openRoles, setOpenRoles]             = useState(new Set())
+
+  // Auto size textboxes if browser supports it
+  const [supportsFieldSizing] = useState(() =>
+    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
+  )
+  const generalTrainingRef = useRef(null)
+  const lastWeekResultRef  = useRef(null)
+  const roleTextareaRefs   = useRef({})
+  const roleRefFns         = useRef({})
+
+  function getRoleRefFn(role) {
+    if (!roleRefFns.current[role]) {
+      roleRefFns.current[role] = (el) => {
+        if (el) {
+          roleTextareaRefs.current[role] = el
+          if (!supportsFieldSizing) applyFallbackSizing(el, 3)
+        } else {
+          delete roleTextareaRefs.current[role]
+        }
+      }
+    }
+    return roleRefFns.current[role]
+  }
+
+  useEffect(() => {
+    if (loading || supportsFieldSizing) return
+    if (generalTrainingRef.current) applyFallbackSizing(generalTrainingRef.current, 5)
+    if (lastWeekResultRef.current) applyFallbackSizing(lastWeekResultRef.current, 3)
+  }, [loading, supportsFieldSizing])
 
   // Load whatever exists for the selected week (or reset to blank)
   useEffect(() => {
@@ -249,11 +293,12 @@ export default function WeeklyTraining({ supabase, profile }) {
           <div style={card}>
             <label style={{ ...S.label, marginBottom: '0.5rem' }}>General Training</label>
             <textarea
+              ref={generalTrainingRef}
               value={generalTraining}
               onChange={e => setGeneralTraining(e.target.value)}
               rows={5}
               placeholder="This week's general training content…"
-              style={{ ...S.input, resize: 'vertical', lineHeight: 1.55 }}
+              style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '5lh', lineHeight: 1.55 }}
             />
           </div>
 
@@ -268,11 +313,12 @@ export default function WeeklyTraining({ supabase, profile }) {
             />
             <label style={{ ...S.label, marginBottom: '0.5rem' }}>Result of Last Week's Goal <span style={{ textTransform: 'none', fontWeight: 400 }}>(leave blank to hide)</span></label>
             <textarea
+              ref={lastWeekResultRef}
               value={lastWeekResult}
               onChange={e => setLastWeekResult(e.target.value)}
-              rows={3}
+              rows={4}
               placeholder="How did last week's goal go?"
-              style={{ ...S.input, resize: 'vertical', lineHeight: 1.55 }}
+              style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '4lh', lineHeight: 1.55 }}
             />
           </div>
 
@@ -310,11 +356,12 @@ export default function WeeklyTraining({ supabase, profile }) {
                     {open && (
                       <div style={{ padding: '0.9rem' }}>
                         <textarea
+                          ref={getRoleRefFn(role)}
                           value={roleTrainings[role] || ''}
                           onChange={e => updateRoleTraining(role, e.target.value)}
                           rows={3}
                           placeholder="No specific weekly training for this role"
-                          style={{ ...S.input, resize: 'vertical', lineHeight: 1.5 }}
+                          style={{ ...S.input, resize: supportsFieldSizing ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '3lh', lineHeight: 1.5 }}
                         />
                       </div>
                     )}
