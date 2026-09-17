@@ -263,7 +263,7 @@ export default function ProviderPage() {
         .select('provider_id, day_of_week, shift_time, week_pattern, start_date, end_date'),
       // Fetch all callouts in range so called-out recurring providers are excluded
       // from coverage counts and from the current provider's "my slots" set.
-      supabase.from('provider_callouts')
+      supabase.from('provider_callout_coverage')
         .select('provider_id, shift_date, shift_time')
         .gte('shift_date', today).lte('shift_date', horizon),
     ])
@@ -338,7 +338,7 @@ export default function ProviderPage() {
         .eq('shift_date', date).eq('shift_time', shift),
       supabase.from('provider_recurring_schedule')
         .select('provider_id, day_of_week, shift_time, week_pattern, start_date, end_date'),
-      supabase.from('provider_callouts')
+      supabase.from('provider_callout_coverage')
         .select('provider_id, shift_date, shift_time')
         .eq('shift_date', date).eq('shift_time', shift),
     ])
