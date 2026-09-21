@@ -21,7 +21,7 @@ export async function POST(req) {
   const token = authHeader.replace('Bearer ', '')
   if (!token) {
     return Response.json(
-      { error: 'Your session has expired. Please refresh the page and sign in again.', code: 'NO_TOKEN' },
+      { error: 'Session expired. Refresh the page or sign out and sign in again.', code: 'NO_TOKEN' },
       { status: 401 }
     )
   }
@@ -35,7 +35,7 @@ export async function POST(req) {
   const { data: { user }, error: authError } = await supabaseUser.auth.getUser()
   if (authError || !user) {
     return Response.json(
-      { error: 'Session expired. Refresh page to continue.', code: 'SESSION_EXPIRED' },
+      { error: 'Session expired. Refresh the page or sign out and sign in again.', code: 'SESSION_EXPIRED' },
       { status: 401 }
     )
   }

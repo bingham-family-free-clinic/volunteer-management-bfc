@@ -8,23 +8,23 @@ import { ROLES } from '../lib/constants'
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
 
-// Grabs a fresh access token before an authenticated request. getSession()
-// can occasionally return a null session — after a long idle/backgrounded
-// tab, or before the client has finished hydrating auth state on load —
-// which previously caused random "Unauthorized" errors on send. This
-// explicitly triggers a refresh in that case, and throws a clear error
-// (rather than crashing on `session.access_token` of null) if the user
-// truly needs to sign in again.
+// Refreshes Supabase token if expired, missing, or about to expire
 async function getFreshAccessToken(supabase) {
   let { data: { session } } = await supabase.auth.getSession()
 
-  if (!session) {
+  const EXPIRY_BUFFER_SECONDS = 30
+  const isExpiredOrExpiring =
+    !session ||
+    !session.expires_at ||
+    session.expires_at - Date.now() / 1000 < EXPIRY_BUFFER_SECONDS
+
+  if (isExpiredOrExpiring) {
     const { data: refreshed } = await supabase.auth.refreshSession()
     session = refreshed?.session ?? null
   }
 
   if (!session?.access_token) {
-    throw new Error('Your session has expired. Please refresh the page and sign in again.')
+    throw new Error('Session expired. Refresh the page or sign out and sign in again.')
   }
 
   return session.access_token
