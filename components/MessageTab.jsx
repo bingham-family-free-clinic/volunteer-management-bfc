@@ -151,7 +151,7 @@ function ReplyThread({
     }
     onMarkRead(message.id, replies.map(r => r.id))
     return () => setLocallyHighlightedReplies(new Set())
-  }, [startExpanded])
+  }, [startExpanded, replies])
 
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
   const isHighlighted = locallyHighlightedReplies.size > 0
