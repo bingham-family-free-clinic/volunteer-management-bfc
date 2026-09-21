@@ -661,9 +661,9 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
         <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>Filter by</span>
           <select value={wlRole} onChange={e => setWlRole(e.target.value)} style={{ ...inputStyle, width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.82rem' }}>
+            <option value={ALL_EMAILS}>All emails</option>
             <option value="all">All roles</option>
             {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-            <option value={ALL_EMAILS}>All emails</option>
           </select>
           {hasFilters && (
             <button onClick={() => setWlRole('all')} style={{ fontSize: '0.78rem', color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: '2px' }}>Clear</button>
