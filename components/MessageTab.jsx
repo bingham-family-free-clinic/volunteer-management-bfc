@@ -145,16 +145,23 @@ function ReplyThread({
   // and mark as read. Highlight persists until user collapses or navigates away.
   useEffect(() => {
     if (!startExpanded) return
-    const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
-    if (unreadReplyIds.length > 0) {
-      setLocallyHighlightedReplies(new Set(unreadReplyIds))
+    const idsToHighlight = replies
+      .filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)
+      .map(r => r.id)
+    // The deep-linked message itself may be the top-level message (no unread
+    // replies at all) — highlight it too when it's the unread thing being opened.
+    if (!readMessageIds.has(message.id) && message.sender_id !== user?.id) {
+      idsToHighlight.push(message.id)
+    }
+    if (idsToHighlight.length > 0) {
+      setLocallyHighlightedReplies(new Set(idsToHighlight))
     }
     onMarkRead(message.id, replies.map(r => r.id))
     return () => setLocallyHighlightedReplies(new Set())
   }, [startExpanded, replies])
 
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
-  const isHighlighted = locallyHighlightedReplies.size > 0
+  const isHighlighted = locallyHighlightedReplies.has(message.id)
   const replyCount = replies.length
 
   // Surface the latest unread reply in the collapsed preview so admins
