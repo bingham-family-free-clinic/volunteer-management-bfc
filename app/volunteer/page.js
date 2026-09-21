@@ -817,11 +817,10 @@ function VolunteerPageInner() {
     initCriticalPath()
   }, [])
 
-  // ── Poll unread count every 30s so the badge stays current
-  // even when the messages tab is not open ──
-  useEffect(() => {
+  // ── Unread count fetcher ────────────────────────────────────────
+  async function pollUnread() {
     if (!user) return
-    async function pollUnread() {
+    try {
       const [{ data: msgs }, { data: reads }] = await Promise.all([
         supabase.from('messages')
           .select('id, sender_id, recipient_type, recipient_volunteer_id, parent_message_id')
@@ -844,10 +843,28 @@ function VolunteerPageInner() {
         return !readSet.has(m.id)
       }).length
       setUnreadCount(count)
-    }
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Poll unread count every 30s so the badge stays current ──
+  useEffect(() => {
     pollUnread()
     const id = setInterval(pollUnread, 30000)
     return () => clearInterval(id)
+  }, [user])
+
+  // ── Real-time subscription: update badge immediately when new messages arrive ──
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel('messages-unread')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, () => { pollUnread() })
+    channel.subscribe()
+    return () => { supabase.removeChannel(channel) }
   }, [user])
 
   async function initCriticalPath() {

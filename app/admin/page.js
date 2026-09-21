@@ -1374,6 +1374,20 @@ export default function AdminPage() {
     setUnreadCount(Math.max(unreadCount, count))
   }
 
+  // ── Real-time subscription: update badge immediately when new messages arrive ──
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel('messages-unread')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, () => { fetchMessages(user.id) })
+    channel.subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [user])
+
   // ── Audit helper ────────────────────────────────────────────────────────────
   async function audit(action, target_type, target_id, target_name, details) {
     try {
