@@ -172,7 +172,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
   const [availableSlotsMap, setAvailableSlotsMap] = useState({})
 
   // Filters
-  const [wlSlot, setWlSlot] = useState('all')
+  // wlRole: 'all' = full list, '__emails__' = every email, or a specific role name
   const [wlRole, setWlRole] = useState('all')
 
   // Assign modal
@@ -406,13 +406,35 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
   const waitlistVolIds = new Set(waitlist.map(w => w.volunteer_id))
   const notOnWaitlist  = allVolunteers.filter(v => !waitlistVolIds.has(v.id) && (v.status ?? 'active') === 'active')
 
+  const ALL_EMAILS = '__emails__'
+
+  // Entries with no role preference are flexible, so they match any role filter
   const filteredWaitlist = waitlist.filter(entry => {
-    if (wlSlot !== 'all' && entry.preferred_slots.length > 0 && !entry.preferred_slots.includes(wlSlot)) return false
-    if (wlRole !== 'all' && entry.preferred_roles.length > 0 && !entry.preferred_roles.includes(wlRole)) return false
+    if (wlRole !== 'all' && wlRole !== ALL_EMAILS && entry.preferred_roles?.length > 0 && !entry.preferred_roles.includes(wlRole)) return false
     return true
   })
 
-  const hasFilters = wlSlot !== 'all' || wlRole !== 'all'
+  const hasFilters = wlRole !== 'all'
+  const emailMode  = wlRole !== 'all'
+
+  // Unique, non-empty emails for the current filter (all entries when "All emails")
+  const emailSource = wlRole === ALL_EMAILS ? waitlist : filteredWaitlist
+  const emailList   = [...new Set(emailSource.map(e => e.profiles?.email?.trim()).filter(Boolean))]
+  const emailText   = emailList.join('\n')
+
+  async function copyEmails() {
+    try {
+      await navigator.clipboard.writeText(emailText)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = emailText
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    msg(`Copied ${emailList.length} email${emailList.length !== 1 ? 's' : ''}`)
+  }
 
   // ─── Assign Modal ──────────────────────────────────────────────────────────
 
@@ -648,16 +670,13 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
       <div style={{ ...card, padding: '0.85rem 1.25rem' }}>
         <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>Filter by</span>
-          <select value={wlSlot} onChange={e => setWlSlot(e.target.value)} style={{ ...inputStyle, width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.82rem' }}>
-            <option value="all">All slots</option>
-            {ALL_SLOTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-          </select>
           <select value={wlRole} onChange={e => setWlRole(e.target.value)} style={{ ...inputStyle, width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.82rem' }}>
             <option value="all">All roles</option>
             {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+            <option value={ALL_EMAILS}>All emails</option>
           </select>
           {hasFilters && (
-            <button onClick={() => { setWlSlot('all'); setWlRole('all') }} style={{ fontSize: '0.78rem', color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: '2px' }}>Clear</button>
+            <button onClick={() => setWlRole('all')} style={{ fontSize: '0.78rem', color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: '2px' }}>Clear</button>
           )}
         </div>
       </div>
@@ -665,86 +684,62 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
       {/* List */}
       {waitlistLoading ? (
         <p style={{ color: 'var(--muted)', padding: '0.5rem' }}>Loading...</p>
+      ) : emailMode ? (
+        /* Email list view — role filter or "All emails" */
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+            <p style={{ ...secLabel, marginBottom: 0 }}>
+              {wlRole === ALL_EMAILS ? 'All emails' : `${wlRole} emails`} · {emailList.length}
+            </p>
+            {emailList.length > 0 && (
+              <button onClick={copyEmails} style={{ padding: '0.35rem 0.85rem', borderRadius: '7px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: '#fff', color: '#000', border: '1px solid #000' }}>Copy all</button>
+            )}
+          </div>
+          {emailList.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontStyle: 'italic', textAlign: 'center', padding: '1.5rem 0' }}>No emails to show.</p>
+          ) : (
+            <textarea
+              readOnly
+              value={emailText}
+              onFocus={e => e.target.select()}
+              rows={Math.min(Math.max(emailList.length, 3), 20)}
+              style={{ ...inputStyle, fontFamily: 'DM Mono, monospace', fontSize: '0.85rem', lineHeight: 1.6, resize: 'vertical' }}
+            />
+          )}
+        </div>
       ) : filteredWaitlist.length === 0 ? (
         <div style={{ ...card, textAlign: 'center', padding: '2.5rem' }}>
-          <p style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No one on the waitlist{hasFilters ? ' matching these filters' : ''}.</p>
+          <p style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No one on the waitlist.</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
           {filteredWaitlist.map((entry, idx) => {
             const vol      = entry.profiles
-            const slots    = availableSlotsMap[entry.id] || []
-            const hasSlots = slots.length > 0
             const waitDays = Math.floor((Date.now() - new Date(entry.added_at).getTime()) / 86400000)
-            const flexible = !entry.preferred_slots || entry.preferred_slots.length === 0
 
             return (
-              <div key={entry.id} style={{ padding: '1rem 1.25rem', borderRadius: '12px', border: `1px solid ${hasSlots ? 'rgba(34,197,94,0.3)' : 'var(--border)'}`, background: hasSlots ? 'rgba(34,197,94,0.025)' : 'var(--surface)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div key={entry.id} style={{ padding: '1rem 1.25rem', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
 
                   {/* Left — volunteer info */}
-                  <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'center' }}>
                     <div style={{ width: 32, height: 32, borderRadius: '8px', background: 'var(--bg)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'DM Mono, monospace', fontSize: '0.78rem', fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>{idx + 1}</div>
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.3rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>{vol?.full_name}</span>
-                        {entry.source === 'manual' && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem', borderRadius: '4px', background: C.purple + '12', color: C.purple, border: `1px solid ${C.purple}33`, fontWeight: 600 }}>manual</span>}
+                        {entry.source === 'manual' && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem', borderRadius: '4px', background: '#fff', color: '#000', border: '1px solid #000', fontWeight: 600 }}>manual</span>}
                         <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{waitDays === 0 ? 'today' : `${waitDays}d`}</span>
                       </div>
-                      {vol?.email && <p style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>{vol.email}</p>}
-
-                      {/* Slot chips */}
-                      <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
-                        {flexible
-                          ? <span style={{ padding: '0.15rem 0.55rem', borderRadius: '100px', fontSize: '0.7rem', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)', fontStyle: 'italic' }}>flexible — any slot</span>
-                          : entry.preferred_slots.map(k => {
-                              const s = ALL_SLOTS.find(x => x.key === k)
-                              return <span key={k} style={{ padding: '0.15rem 0.5rem', borderRadius: '100px', fontSize: '0.7rem', background: C.blue + '12', color: C.blue, border: `1px solid ${C.blue}30`, fontFamily: 'DM Mono, monospace' }}>{s?.label || k}</span>
-                            })
-                        }
-                      </div>
-
-                      {/* Role chips */}
-                      {entry.preferred_roles && entry.preferred_roles.length > 0 && (
-                        <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.3rem' }}>
-                          {entry.preferred_roles.map(r => <span key={r} style={{ padding: '0.15rem 0.5rem', borderRadius: '100px', fontSize: '0.7rem', background: C.green + '12', color: C.green, border: `1px solid ${C.green}30` }}>{r}</span>)}
-                        </div>
-                      )}
-
-                      {entry.notes && <p style={{ fontSize: '0.78rem', color: 'var(--muted)', fontStyle: 'italic', marginTop: '0.4rem' }}>{entry.notes}</p>}
+                      {vol?.email && <p style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.2rem' }}>{vol.email}</p>}
                     </div>
                   </div>
 
                   {/* Right — actions */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-end' }}>
-                    {hasSlots
-                      ? <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', borderRadius: '100px', background: C.green + '12', color: C.green, border: `1px solid ${C.green}44`, fontWeight: 600 }}>{slots.length} slot{slots.length !== 1 ? 's' : ''} open</span>
-                      : <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', borderRadius: '100px', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)', fontStyle: 'italic' }}>no open slots</span>
-                    }
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <button onClick={() => openEdit(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}55` }}>Edit</button>
-                      <button onClick={() => removeFromWaitlist(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Remove</button>
-                    </div>
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button onClick={() => openEdit(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: '#fff', color: '#000', border: '1px solid #000' }}>Edit</button>
+                    <button onClick={() => removeFromWaitlist(entry)} style={{ padding: '0.35rem 0.7rem', borderRadius: '7px', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Remove</button>
                   </div>
                 </div>
-
-                {/* Available slots preview */}
-                {hasSlots && (
-                  <div style={{ marginTop: '0.85rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border)' }}>
-                    <p style={{ ...secLabel, marginBottom: '0.5rem' }}>Available matching slots</p>
-                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                      {slots.slice(0, 10).map((s, i) => (
-                        <span key={i} style={{ padding: '0.22rem 0.6rem', borderRadius: '7px', fontSize: '0.7rem', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'DM Mono, monospace', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                          {ALL_SLOTS.find(x => x.key === s.key)?.label || s.key}
-                          <span style={{ color: 'var(--muted)' }}>·</span>
-                          <span style={{ color: 'var(--accent)', fontSize: '0.65rem' }}>{s.role}</span>
-                          {s.filled > 0 && <span style={{ color: 'var(--muted)', fontSize: '0.62rem' }}>({s.filled})</span>}
-                        </span>
-                      ))}
-                      {slots.length > 10 && <span style={{ padding: '0.22rem 0.6rem', borderRadius: '7px', fontSize: '0.7rem', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)', fontStyle: 'italic' }}>+{slots.length - 10} more</span>}
-                    </div>
-                  </div>
-                )}
               </div>
             )
           })}
