@@ -1303,7 +1303,7 @@ export default function AdminPage() {
       if (key === 'hours')  loadPendingHours()
       if (key === 'audit')  loadAuditFirstPage()
       if (key === 'volunteers') { loadGuestOrgs(); loadGuestHoursTotals() }
-      if (key === 'messages') fetchMessages()
+      if (key === 'messages') fetchMessages(user?.id)
     }
   }
 
@@ -1326,10 +1326,11 @@ export default function AdminPage() {
         setLoading(false)
         return
       }
-      setProfile(p)
-      if (p?.default_role === 'Credentialing') setTab('providers')
-      await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
-      // Guest orgs load best-effort (tables may not exist until migrations run).
+       setProfile(p)
+       if (p?.default_role === 'Credentialing') setTab('providers')
+       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
+       fetchMessages(user.id)
+       // Guest orgs load best-effort (tables may not exist until migrations run).
       loadGuestOrgs()
       loadGuestHoursTotals()
       setLoading(false)
@@ -1340,9 +1341,8 @@ export default function AdminPage() {
   }, [])
 
   // ── Messages data fetcher ───────────────────────────────────────────
-  async function fetchMessages() {
-    if (!user) return
-    const MSG_PAGE_SIZE = 10
+  async function fetchMessages(userId) {
+    if (!userId) return
     const [{ data: msgs }, { data: reads }, { data: usersData }] = await Promise.all([
       supabase.from('messages')
         .select(`
@@ -1352,14 +1352,13 @@ export default function AdminPage() {
           sender:profiles!messages_sender_id_fkey(full_name, role)
         `)
         .order('created_at', { ascending: false })
-        .limit(MSG_PAGE_SIZE * 5),
-      supabase.from('message_reads').select('message_id').eq('user_id', user.id),
+        .limit(10 * 5),
+      supabase.from('message_reads').select('message_id').eq('user_id', userId),
       supabase.from('profiles').select('id, full_name, default_role, status').order('full_name'),
     ])
     const fetched = msgs || []
     const readSet = new Set((reads || []).map(r => r.message_id))
-    setUnreadCount(fetched.filter(m => !readSet.has(m.id) && m.sender_id !== user.id).length)
-    // Re-fetch unread count more accurately (count threads with unread)
+    setUnreadCount(fetched.filter(m => !readSet.has(m.id) && m.sender_id !== userId).length)
     const topLevel = fetched.filter(m => !m.parent_message_id)
     const repliesMap = {}
     fetched.filter(m => m.parent_message_id).forEach(r => {
@@ -1367,8 +1366,8 @@ export default function AdminPage() {
       repliesMap[r.parent_message_id].push(r)
     })
     const count = topLevel.filter(m => {
-      if (m.sender_id === user.id) {
-        return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
+      if (m.sender_id === userId) {
+        return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== userId)
       }
       return !readSet.has(m.id)
     }).length
