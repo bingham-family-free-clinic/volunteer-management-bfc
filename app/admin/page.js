@@ -356,6 +356,7 @@ function AdminDesktopHeader({
   showVolunteers, showProviders,
   openMenu, onToggleMenu, onCloseMenu,
   onSwitchView, onSignOut,
+  messagesTab,
 }) {
   const otherMenuActive = otherItems.some(([key]) => key === activeTab)
 
@@ -386,6 +387,35 @@ function AdminDesktopHeader({
             onClose={onCloseMenu}
             onSelectTab={onSelectTab}
           />
+        )}
+
+        {messagesTab && (
+          <button
+            onClick={() => onSelectTab(messagesTab.key)}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '0.95rem',
+              fontWeight: activeTab === messagesTab.key ? 600 : 500,
+              color: activeTab === messagesTab.key ? 'var(--text)' : 'var(--muted)',
+              position: 'relative',
+            }}
+          >
+            {messagesTab.label}
+            {messagesTab.badge > 0 && (
+              <span style={{
+                position: 'absolute', top: '-8px', right: '-14px',
+                background: '#ef4444', color: '#fff', borderRadius: '50%',
+                width: '16px', height: '16px', fontSize: '0.6rem', fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+              }}>
+                {messagesTab.badge > 9 ? '9+' : messagesTab.badge}
+              </span>
+            )}
+          </button>
         )}
 
         {/* "Other" always renders — it's also home to Volunteer View / Sign out */}
@@ -801,6 +831,9 @@ export default function AdminPage() {
     tabItems.splice(2, 0, ['messages', 'Messages'])
   }
 
+  const messagesTabEntry = tabItems.find(([key]) => key === 'messages')
+  const messagesTab = messagesTabEntry ? { key: 'messages', label: 'Messages', badge: unreadCount } : null
+
   // Insert Language Coverage right after Volunteers, but only for the three
   // roles allowed to see it. Works regardless of which branch above produced
   // tabItems, since every branch that could match these roles includes 'volunteers'.
@@ -818,7 +851,7 @@ export default function AdminPage() {
     .map(k => tabItems.find(([key]) => key === k))
     .filter(Boolean)
   const groupedKeySet = new Set([...VOLUNTEER_GROUP_KEYS, ...PROVIDER_GROUP_KEYS])
-  const otherMenuItems = tabItems.filter(([key]) => !groupedKeySet.has(key))
+  const otherMenuItems = tabItems.filter(([key]) => !groupedKeySet.has(key) && key !== 'messages')
 
   const showVolunteersMenu = volunteerMenuItems.length > 0
   const showProvidersMenu  = providerMenuItems.some(([key]) => PROVIDER_GROUP_CORE_KEYS.includes(key))
@@ -2078,6 +2111,7 @@ export default function AdminPage() {
             onCloseMenu={closeHeaderMenu}
             onSwitchView={() => { window.location.href = '/volunteer' }}
             onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
+            messagesTab={messagesTab}
           />
         )}
 
