@@ -314,8 +314,7 @@ function ReplyThread({
             onClick={e => {
               e.stopPropagation()
               replyScrollPosRef.current = window.scrollY
-              const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
-              setLocallyHighlightedReplies(new Set(unreadReplyIds))
+              setLocallyHighlightedReplies(new Set())
               setExpanded(true)
               onMarkRead(message.id, replies.map(r => r.id))
               clearNotificationForMessage(message.id)
@@ -367,7 +366,7 @@ function ReplyThread({
           senderLabel={senderLabel}
           canReply={canReply}
           replyOpen={replyOpen}
-          onReply={() => { replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
+          onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
           isHighlighted={isHighlighted}
         />
       </div>
@@ -417,7 +416,7 @@ function ReplyThread({
                     isHighlighted={isReplyHighlighted}
                     canReply={canReply && isMostRecent && isMostRecentReply}
                     replyOpen={replyOpen}
-                    onReply={() => { replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
+                    onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
                   />
                 </div>
               </div>
