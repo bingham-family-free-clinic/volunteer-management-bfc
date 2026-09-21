@@ -559,15 +559,10 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
 
           <div style={{ marginBottom: '1.25rem' }}>
             <h3 style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.25rem' }}>Edit Waitlist Entry</h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Editing <strong style={{ color: 'var(--text)' }}>{editModal.profiles?.full_name}</strong>'s availability and role preferences.</p>
+            <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Editing <strong style={{ color: 'var(--text)' }}>{editModal.profiles?.full_name}</strong>'s role preferences.</p>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
-
-            <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22`, overflowX: 'auto' }}>
-              <p style={{ ...labelStyle, marginBottom: '0.85rem' }}>Preferred Shifts <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(leave blank for flexible — any slot)</span></p>
-              <SlotPicker selected={editSlots} onChange={setEditSlots} />
-            </div>
 
             <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22` }}>
               <p style={{ ...labelStyle, marginBottom: '0.75rem' }}>Preferred Roles <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(leave blank for any role)</span></p>
