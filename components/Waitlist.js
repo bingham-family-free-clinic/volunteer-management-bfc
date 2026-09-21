@@ -638,11 +638,6 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
               {notOnWaitlist.length === 0 && <p style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.4rem', fontStyle: 'italic' }}>All active volunteers are already on the waitlist.</p>}
             </div>
 
-            <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22`, overflowX: 'auto' }}>
-              <p style={{ ...labelStyle, marginBottom: '0.85rem' }}>Preferred Shifts <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(optional — leave blank for flexible)</span></p>
-              <SlotPicker selected={manualSlots} onChange={setManualSlots} />
-            </div>
-
             <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22` }}>
               <p style={{ ...labelStyle, marginBottom: '0.75rem' }}>Preferred Roles <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></p>
               <RolePicker selected={manualRoles} onChange={setManualRoles} />
