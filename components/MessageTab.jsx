@@ -141,7 +141,20 @@ function ReplyThread({
     el.style.height = Math.max(contentHeight, minHeight) + 'px'
   }, [replyOpen, replyFieldSizingSupported])
 
+  // Deep-link highlight: when auto-expanded via notification, highlight unread replies
+  // and mark as read. Highlight persists until user collapses or navigates away.
+  useEffect(() => {
+    if (!startExpanded) return
+    const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
+    if (unreadReplyIds.length > 0) {
+      setLocallyHighlightedReplies(new Set(unreadReplyIds))
+    }
+    onMarkRead(message.id, replies.map(r => r.id))
+    return () => setLocallyHighlightedReplies(new Set())
+  }, [startExpanded])
+
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
+  const isHighlighted = locallyHighlightedReplies.size > 0
   const replyCount = replies.length
 
   // Surface the latest unread reply in the collapsed preview so admins
@@ -325,6 +338,7 @@ function ReplyThread({
           canReply={canReply}
           replyOpen={replyOpen}
           onReply={() => { replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
+          isHighlighted={isHighlighted}
         />
       </div>
 
