@@ -79,8 +79,8 @@ function ReplyThread({
   const isUnread = readMessageIds && (
     // Received message not yet read
     (!readMessageIds.has(message.id) && message.sender_id !== user?.id) ||
-    // Sent message that has unread replies — exclude replies the user sent themselves (fix #3)
-    (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
+    // Thread has an unread reply from someone else — regardless of who started the thread
+    replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)
   )
   const [expanded, setExpanded]     = useState(startExpanded)
   // Sync expanded with startExpanded so deep-linked threads expand
