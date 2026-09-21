@@ -130,6 +130,335 @@ const MISSIONARY_REQUIRED = ['id_check']
 
 const TOTAL_STEPS = 3
 
+// ─── Preparedness scoring ─────────────────────────────────────────────────────
+// Hard-coded 100-pt "preparedness" score for each of the six scored roles,
+// computed from the volunteer application. Only roles the applicant listed in
+// roles_interested are scored. Every category is capped at its stated maximum,
+// and each role's category maximums add up to exactly 100.
+//
+//   • Certifications / Skills — additive per matched item, then capped
+//   • Patient care hours      — linear, full points at PREP_HOURS_FULL_AT hrs
+//   • Shift availability      — linear, 1 of 10 shifts = 1/10 of the points,
+//                               10 of 10 = all of the points
+//   • Language proficiency    — non-English language(s) × proficiency level
+//
+// Application values are matched by keyword rather than exact string, so
+// "Registered Nurse (RN)" and "RN" both count, "AEMT" never counts as "EMT",
+// and minor wording changes in the application form won't silently zero a score.
+
+const PREP_HOURS_FULL_AT = 300
+
+// Language: share of the language points earned per proficiency level. The
+// highest level found in language_proficiency wins. If a non-English language
+// is listed but no level can be read, PREP_LANG_DEFAULT_FACTOR is used.
+const PREP_LANG_LEVELS = [
+  { factor: 1,    label: 'Native / fluent', re: /\b(native|fluen\w*|bilingual|mother tongue)\b/ },
+  { factor: 0.75, label: 'Advanced',        re: /\b(advanced|proficient|professional|fully)\b/ },
+  { factor: 0.5,  label: 'Conversational',  re: /\b(conversation\w*|intermediate)\b/ },
+  { factor: 0.25, label: 'Basic',           re: /\b(basic|beginner|elementary|limited|novice)\b/ },
+]
+const PREP_LANG_DEFAULT_FACTOR = 0.5
+
+// Matched against normText() output (lowercase, punctuation → spaces).
+const PREP_CERT_MATCHERS = {
+  RN:   /\brn\b|registered nurse/,
+  LPN:  /\blpn\b|licensed practical/,
+  MA:   /\b[cr]?ma\b|medical assistant/,
+  AEMT: /\baemt\b|advanced emt|advanced emergency medical/,
+  EMT:  /\bemt\b|emergency medical tech/,
+  CNA:  /\bcna\b|nursing assistant/,
+  ACLS: /\bacls\b|advanced cardiac|advanced cardiovascular/,
+  BLS:  /\bbls\b|basic life support/,
+  CPR:  /\bcpr\b/,
+}
+
+const PREP_SKILL_MATCHERS = {
+  vitalSigns:     /vital/,
+  patientIntake:  /intake/,
+  phlebotomy:     /phlebotom|venipuncture/,
+  emr:            /\bemr\b|\behr\b|electronic (medical|health) record/,
+  medTerminology: /medical terminology|med terminology/,
+  medTranslation: /translat|interpret/,
+  scheduling:     /schedul|front desk/,
+  office:         /microsoft|google workspace|google suite|g suite|office suite/,
+  scribing:       /scrib/,
+  lab:            /laborator|\blab\b/,
+}
+
+const PREP_SKILL_LABELS = {
+  vitalSigns:     'Vital Signs',
+  patientIntake:  'Patient Intake',
+  phlebotomy:     'Phlebotomy/Venipuncture',
+  emr:            'EMR',
+  medTerminology: 'Medical Terminology',
+  medTranslation: 'Medical Translation',
+  scheduling:     'Scheduling/Front Desk',
+  office:         'Microsoft Office/Google Workspace',
+  scribing:       'Medical Scribing',
+  lab:            'Laboratory Skills',
+}
+
+// Category kinds: 'certs' | 'skills' (pts table + cap), 'hours' | 'shifts' |
+// 'language' (max only). Categories are listed in the same order as the spec.
+const PREP_ROLES = [
+  {
+    key: 'clinical', role: 'Clinical Staff', short: 'Clinical', aliases: ['clinical staff'],
+    categories: [
+      { kind: 'certs', label: 'Certifications', cap: 35, pts: { RN: 35, LPN: 28, MA: 24, AEMT: 21, EMT: 17, CNA: 14, ACLS: 10, BLS: 7, CPR: 5, Other: 3 } },
+      { kind: 'skills', label: 'Skills', cap: 25, pts: { vitalSigns: 8, patientIntake: 6, phlebotomy: 6, emr: 5, medTerminology: 4 } },
+      { kind: 'hours', label: 'Patient care hours', cap: 20 },
+      { kind: 'shifts', label: 'Shift availability', cap: 10 },
+      { kind: 'language', label: 'Language proficiency', cap: 10 },
+    ],
+  },
+  {
+    key: 'navigator', role: 'Patient Navigator', short: 'Navigator', aliases: ['patient nav', 'patient navigator', 'patient navigators'],
+    categories: [
+      { kind: 'language', label: 'Language proficiency', cap: 50 },
+      { kind: 'skills', label: 'Skills', cap: 30, pts: { medTranslation: 18, patientIntake: 6, scheduling: 6 } },
+      { kind: 'shifts', label: 'Shift availability', cap: 10 },
+      { kind: 'certs', label: 'Certifications', cap: 10, pts: { CPR: 5, BLS: 5 } },
+    ],
+  },
+  {
+    key: 'support', role: 'Support Center', short: 'Support Ctr', aliases: ['support center', 'support centre'],
+    categories: [
+      { kind: 'shifts', label: 'Shift availability', cap: 40 },
+      { kind: 'skills', label: 'Skills', cap: 40, pts: { scheduling: 25, office: 10, patientIntake: 5 } },
+      { kind: 'language', label: 'Language proficiency', cap: 15 },
+      { kind: 'certs', label: 'Certifications', cap: 5, pts: { CPR: 3, BLS: 2 } },
+    ],
+  },
+  {
+    key: 'scribe', role: 'Scribe', short: 'Scribe', aliases: ['scribe', 'medical scribe'],
+    categories: [
+      { kind: 'skills', label: 'Skills', cap: 45, pts: { scribing: 28, emr: 11, medTerminology: 6 } },
+      { kind: 'shifts', label: 'Shift availability', cap: 20 },
+      { kind: 'hours', label: 'Patient care hours', cap: 15 },
+      { kind: 'certs', label: 'Certifications', cap: 10, pts: { CPR: 5, BLS: 5 } },
+      { kind: 'language', label: 'Language proficiency', cap: 10 },
+    ],
+  },
+  {
+    key: 'lab', role: 'Lab', short: 'Lab', aliases: ['lab', 'laboratory'],
+    categories: [
+      { kind: 'skills', label: 'Skills', cap: 32, pts: { phlebotomy: 32, lab: 22 } },
+      { kind: 'certs', label: 'Certifications', cap: 33, pts: { MA: 19, CNA: 14, EMT: 14, RN: 14, LPN: 14, AEMT: 14 } },
+      { kind: 'hours', label: 'Patient care hours', cap: 15 },
+      { kind: 'shifts', label: 'Shift availability', cap: 10 },
+      { kind: 'language', label: 'Language proficiency', cap: 10 },
+    ],
+  },
+  {
+    key: 'receptionist', role: 'Receptionist', short: 'Reception', aliases: ['receptionist'],
+    categories: [
+      { kind: 'shifts', label: 'Shift availability', cap: 40 },
+      { kind: 'skills', label: 'Skills', cap: 45, pts: { scheduling: 29, office: 16 } },
+      { kind: 'certs', label: 'Certifications', cap: 5, pts: { CPR: 3, BLS: 2 } },
+      { kind: 'language', label: 'Language proficiency', cap: 10 },
+    ],
+  },
+]
+
+function normText(s) {
+  return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+// text[] columns normally arrive as arrays; tolerate a delimited string too.
+function prepToList(v) {
+  if (Array.isArray(v)) return v
+  if (typeof v === 'string') return v.split(/[,;\n]/)
+  return []
+}
+
+function prepClassifyCerts(applicant) {
+  const found = new Set()
+  for (const raw of prepToList(applicant?.certifications)) {
+    const t = normText(raw)
+    if (!t) continue
+    if (t === 'other') { found.add('Other'); continue }
+    let hits = Object.keys(PREP_CERT_MATCHERS).filter(k => PREP_CERT_MATCHERS[k].test(t))
+    if (hits.includes('AEMT')) hits = hits.filter(k => k !== 'EMT')   // "Advanced EMT" is AEMT only
+    if (hits.length === 0) found.add('Other')   // a real cert we don't have a tier for
+    hits.forEach(k => found.add(k))
+  }
+  if (normText(applicant?.certifications_other)) found.add('Other')
+  return found
+}
+
+function prepClassifySkills(applicant) {
+  const found = new Set()
+  for (const raw of prepToList(applicant?.skills_selected)) {
+    const t = normText(raw)
+    if (!t) continue
+    Object.keys(PREP_SKILL_MATCHERS).forEach(k => { if (PREP_SKILL_MATCHERS[k].test(t)) found.add(k) })
+  }
+  return found
+}
+
+function prepPatientHours(applicant) {
+  const n = parseFloat(String(applicant?.patient_care_hours ?? '').replace(/[^0-9.]/g, ''))
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+// Non-English languages spoken + the proficiency level read from
+// language_proficiency. English alone earns nothing.
+function prepLanguageContext(applicant) {
+  const names = []
+  for (const l of prepToList(applicant?.languages_spoken)) {
+    const t = normText(l)
+    if (!t || t === 'english') continue
+    if (t === 'other') { if (!normText(applicant?.languages_other)) names.push('Other') }
+    else names.push(String(l).trim())
+  }
+  if (normText(applicant?.languages_other)) names.push(String(applicant.languages_other).trim())
+  if (names.length === 0) {
+    for (const l of prepToList(applicant?.languages)) {
+      const t = normText(l)
+      if (t && t !== 'english') names.push(String(l).trim())
+    }
+  }
+  if (names.length === 0) return { factor: 0, note: 'No non-English language listed' }
+
+  const text = normText(applicant?.language_proficiency)
+  const levels = PREP_LANG_LEVELS.filter(lv => lv.re.test(text))
+  const best = levels.reduce((a, b) => (!a || b.factor > a.factor ? b : a), null)
+  const list = names.join(', ')
+  return best
+    ? { factor: best.factor, note: `${list} — ${best.label}` }
+    : { factor: PREP_LANG_DEFAULT_FACTOR, note: `${list} — level not stated (counted as conversational)` }
+}
+
+function prepTrim(n) {
+  const r = Math.round(n * 10) / 10
+  return Number.isInteger(r) ? String(r) : r.toFixed(1)
+}
+
+// Returns one entry per scored role the applicant is interested in, in the
+// order they listed them: { key, role, short, total, max, categories: [...] }.
+function getPreparednessScores(applicant) {
+  const interested = prepToList(applicant?.roles_interested).map(normText)
+  if (interested.length === 0) return []
+
+  const ctx = {
+    certs:  prepClassifyCerts(applicant),
+    skills: prepClassifySkills(applicant),
+    hours:  prepPatientHours(applicant),
+    shifts: getStatedAvailability(applicant).length,
+    lang:   prepLanguageContext(applicant),
+  }
+
+  const results = []
+  const seen = new Set()
+  for (const label of interested) {
+    const cfg = PREP_ROLES.find(r => r.aliases.includes(label))
+    if (!cfg || seen.has(cfg.key)) continue
+    seen.add(cfg.key)
+
+    const categories = cfg.categories.map(cat => {
+      let earned = 0, note = ''
+      if (cat.kind === 'certs') {
+        const matched = Object.keys(cat.pts).filter(k => ctx.certs.has(k))
+        earned = Math.min(matched.reduce((s, k) => s + cat.pts[k], 0), cat.cap)
+        note = matched.length ? matched.join(', ') : 'None'
+      } else if (cat.kind === 'skills') {
+        const matched = Object.keys(cat.pts).filter(k => ctx.skills.has(k))
+        earned = Math.min(matched.reduce((s, k) => s + cat.pts[k], 0), cat.cap)
+        note = matched.length ? matched.map(k => PREP_SKILL_LABELS[k]).join(', ') : 'None'
+      } else if (cat.kind === 'hours') {
+        earned = cat.cap * Math.min(ctx.hours, PREP_HOURS_FULL_AT) / PREP_HOURS_FULL_AT
+        note = ctx.hours ? `${prepTrim(ctx.hours)} hrs (full points at ${PREP_HOURS_FULL_AT})` : 'None reported'
+      } else if (cat.kind === 'shifts') {
+        earned = cat.cap * Math.min(ctx.shifts, ALL_SLOTS.length) / ALL_SLOTS.length
+        note = `${ctx.shifts} of ${ALL_SLOTS.length} shifts`
+      } else if (cat.kind === 'language') {
+        earned = cat.cap * ctx.lang.factor
+        note = ctx.lang.note
+      }
+      return { label: cat.label, earned, max: cat.cap, note }
+    })
+
+    results.push({
+      key: cfg.key, role: cfg.role, short: cfg.short,
+      total: categories.reduce((s, c) => s + c.earned, 0),
+      max: categories.reduce((s, c) => s + c.max, 0),
+      categories,
+    })
+  }
+  return results
+}
+
+// Blue-palette tiers so a score reads at a glance.
+function prepTierColor(total) {
+  if (total >= 70) return C.primary
+  if (total >= 40) return C.blue
+  return C.light
+}
+
+// Compact row of per-role scores for the applicant banner (Applied stage).
+function PreparednessChips({ applicant }) {
+  const scores = getPreparednessScores(applicant)
+  if (scores.length === 0) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.35rem' }}>
+      <span style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--muted)', marginRight: '0.1rem' }}>Prep</span>
+      {scores.map(s => {
+        const color = prepTierColor(s.total)
+        const tip = [`${s.role} — ${Math.round(s.total)}/${s.max}`, ...s.categories.map(c => `${c.label}: ${prepTrim(c.earned)}/${c.max}`)].join('\n')
+        return (
+          <span key={s.key} title={tip} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.68rem', padding: '0.1rem 0.5rem', borderRadius: '100px', fontWeight: 600, background: color + '14', color, border: `1px solid ${color}44`, whiteSpace: 'nowrap' }}>
+            {s.short}
+            <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700 }}>{Math.round(s.total)}</span>
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+// Full per-category breakdown for the applicant detail view.
+function PreparednessBreakdown({ applicant, card, secLabel }) {
+  const scores = getPreparednessScores(applicant)
+  if (scores.length === 0) return null
+  return (
+    <div style={{ ...card, padding: '1rem 1.25rem' }}>
+      <p style={secLabel}>Preparedness</p>
+      <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
+        Scored out of 100 for each interested role, from the application. Only roles with a scoring guide are shown.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem' }}>
+        {scores.map(s => {
+          const color = prepTierColor(s.total)
+          return (
+            <div key={s.key} style={{ padding: '0.75rem 0.9rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.6rem' }}>
+                <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{s.role}</p>
+                <p style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700, fontSize: '1rem', color }}>
+                  {Math.round(s.total)}<span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 500 }}>/{s.max}</span>
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {s.categories.map(c => (
+                  <div key={c.label}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                      <span>{c.label}</span>
+                      <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)' }}>{prepTrim(c.earned)}/{c.max}</span>
+                    </div>
+                    <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', marginTop: '0.2rem', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${c.max ? (c.earned / c.max) * 100 : 0}%`, background: color, borderRadius: 2 }} />
+                    </div>
+                    <p style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '0.15rem', lineHeight: 1.4 }}>{c.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Slot picker ──────────────────────────────────────────────────────────────
 function SlotPicker({ selected, onChange }) {
   const toggle = (key) =>
@@ -2782,6 +3111,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           }
         </div>
 
+        {/* Preparedness breakdown — Applied stage */}
+        {isApplied && PreparednessBreakdown({ applicant, card, secLabel })}
+
         {/* Applied */}
         {isApplied && (
           <div style={{ ...card, padding: '1rem 1.25rem', borderColor: C.warn + '55', background: C.warn + '06' }}>
@@ -3134,6 +3466,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                               </span>
                             )}
                           </div>
+                          {a.stage === 'applied' && <PreparednessChips applicant={a} />}
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
