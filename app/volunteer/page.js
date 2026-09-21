@@ -837,10 +837,9 @@ function VolunteerPageInner() {
         repliesMap[r.parent_message_id].push(r)
       })
       const count = topLevel.filter(m => {
-        if (m.sender_id === user.id) {
-          return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
-        }
-        return !readSet.has(m.id)
+        const isUnreadMsg = m.sender_id !== user.id && !readSet.has(m.id)
+        const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
+        return isUnreadMsg || hasUnreadReplies
       }).length
       setUnreadCount(count)
     } catch (e) { /* ignore */ }
@@ -929,10 +928,9 @@ function VolunteerPageInner() {
       repliesMap[r.parent_message_id].push(r)
     })
     const count = topLevel.filter(m => {
-      if (m.sender_id === user.id) {
-        return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
-      }
-      return !readSet.has(m.id)
+      const isUnreadMsg = m.sender_id !== user.id && !readSet.has(m.id)
+      const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
+      return isUnreadMsg || hasUnreadReplies
     }).length
     setUnreadCount(count)
 

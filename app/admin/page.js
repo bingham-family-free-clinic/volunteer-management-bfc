@@ -1358,7 +1358,6 @@ export default function AdminPage() {
     ])
     const fetched = msgs || []
     const readSet = new Set((reads || []).map(r => r.message_id))
-    const unreadCount = fetched.filter(m => !readSet.has(m.id) && m.sender_id !== userId).length
     const topLevel = fetched.filter(m => !m.parent_message_id)
     const repliesMap = {}
     fetched.filter(m => m.parent_message_id).forEach(r => {
@@ -1366,12 +1365,11 @@ export default function AdminPage() {
       repliesMap[r.parent_message_id].push(r)
     })
     const count = topLevel.filter(m => {
-      if (m.sender_id === userId) {
-        return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== userId)
-      }
-      return !readSet.has(m.id)
+      const isUnreadMsg = m.sender_id !== userId && !readSet.has(m.id)
+      const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== userId)
+      return isUnreadMsg || hasUnreadReplies
     }).length
-    setUnreadCount(Math.max(unreadCount, count))
+    setUnreadCount(count)
   }
 
   // ── Real-time subscription: update badge immediately when new messages arrive ──
