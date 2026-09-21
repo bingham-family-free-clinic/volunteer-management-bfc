@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS } from '../../lib/constants'
+import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
+import { getInboxMessages } from '../../lib/messageUtils'
 import DataDashboard from '../../components/DataDashboard'
 import ClinicOpenings from '../../components/ClinicOpenings'
 import Pipeline from '../../components/Pipeline'
@@ -14,6 +15,7 @@ import Live, { computeExpectedNotClockedIn } from '../../components/Live'
 import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
+import { MessageTab } from '../../components/MessageTab'
 
 export const dynamic = 'force-dynamic'
 
@@ -567,6 +569,7 @@ function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitc
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const [profile, setProfile] = useState(null)
+  const [user, setUser] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
 
   const [volunteers, setVolunteers]     = useState([])
@@ -577,6 +580,7 @@ export default function AdminPage() {
   const [loading, setLoading]           = useState(true)
   const [toast, setToast]               = useState(null)
   const [currentTime, setCurrentTime]   = useState(getMountainNow())
+  const [unreadCount, setUnreadCount]   = useState(0)
 
   const loadedTabs = useRef(new Set(['dashboard']))
 
@@ -788,6 +792,14 @@ export default function AdminPage() {
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'],
         ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
       ]
+
+  // Insert Messages as the 3rd tab (just like the volunteer page)
+  const schedIdx = tabItems.findIndex(([key]) => key === 'schedule')
+  if (schedIdx !== -1) {
+    tabItems.splice(schedIdx + 1, 0, ['messages', 'Messages'])
+  } else if (tabItems.length >= 2) {
+    tabItems.splice(2, 0, ['messages', 'Messages'])
+  }
 
   // Insert Language Coverage right after Volunteers, but only for the three
   // roles allowed to see it. Works regardless of which branch above produced
@@ -1258,6 +1270,7 @@ export default function AdminPage() {
       if (key === 'hours')  loadPendingHours()
       if (key === 'audit')  loadAuditFirstPage()
       if (key === 'volunteers') { loadGuestOrgs(); loadGuestHoursTotals() }
+      if (key === 'messages') fetchMessages()
     }
   }
 
@@ -1266,6 +1279,7 @@ export default function AdminPage() {
     async function init() {
       const { data: { session } } = await supabase.auth.getSession()
       const user = session?.user
+      setUser(user)
       if (!user) { window.location.href = '/'; return }
       // Fetch only the admin profile fields we actually use
       const { data: p } = await supabase
@@ -1291,6 +1305,42 @@ export default function AdminPage() {
     const interval = setInterval(() => setCurrentTime(getMountainNow()), 60000)
     return () => clearInterval(interval)
   }, [])
+
+  // ── Messages data fetcher ───────────────────────────────────────────
+  async function fetchMessages() {
+    if (!user) return
+    const MSG_PAGE_SIZE = 10
+    const [{ data: msgs }, { data: reads }, { data: usersData }] = await Promise.all([
+      supabase.from('messages')
+        .select(`
+          id, created_at, body, image_url,
+          recipient_type, recipient_shift, recipient_day, recipient_role,
+          recipient_volunteer_id, sender_id, parent_message_id,
+          sender:profiles!messages_sender_id_fkey(full_name, role)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(MSG_PAGE_SIZE * 5),
+      supabase.from('message_reads').select('message_id').eq('user_id', user.id),
+      supabase.from('profiles').select('id, full_name, default_role, status').order('full_name'),
+    ])
+    const fetched = msgs || []
+    const readSet = new Set((reads || []).map(r => r.message_id))
+    setUnreadCount(fetched.filter(m => !readSet.has(m.id) && m.sender_id !== user.id).length)
+    // Re-fetch unread count more accurately (count threads with unread)
+    const topLevel = fetched.filter(m => !m.parent_message_id)
+    const repliesMap = {}
+    fetched.filter(m => m.parent_message_id).forEach(r => {
+      if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
+      repliesMap[r.parent_message_id].push(r)
+    })
+    const count = topLevel.filter(m => {
+      if (m.sender_id === user.id) {
+        return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
+      }
+      return !readSet.has(m.id)
+    }).length
+    setUnreadCount(count)
+  }
 
   // ── Audit helper ────────────────────────────────────────────────────────────
   async function audit(action, target_type, target_id, target_name, details) {
@@ -2477,6 +2527,21 @@ export default function AdminPage() {
               />
             </div>
           </div>
+        )}
+
+        {/* ── MESSAGES TAB ──────────────────────────────────────────── */}
+        {tab === 'messages' && (
+          <MessageTab
+            user={user}
+            profile={profile}
+            supabase={supabase}
+            showToast={(text, type) => { setToast({ text, type }); setTimeout(() => setToast(null), 3500) }}
+            isMobile={isMobile}
+            getInboxMessages={getInboxMessages}
+            MAX_FILE_SIZE={MAX_FILE_SIZE}
+            schedule={schedule}
+            onUnreadCountChange={setUnreadCount}
+          />
         )}
 
         {/* ── PIPELINE ──────────────────────────────────────────────────────── */}
