@@ -817,6 +817,39 @@ function VolunteerPageInner() {
     initCriticalPath()
   }, [])
 
+  // ── Poll unread count every 30s so the badge stays current
+  // even when the messages tab is not open ──
+  useEffect(() => {
+    if (!user) return
+    async function pollUnread() {
+      const [{ data: msgs }, { data: reads }] = await Promise.all([
+        supabase.from('messages')
+          .select('id, sender_id, recipient_type, recipient_volunteer_id, parent_message_id')
+          .order('created_at', { ascending: false })
+          .limit(10 * 5),
+        supabase.from('message_reads').select('message_id').eq('user_id', user.id),
+      ])
+      const fetched = msgs || []
+      const readSet = new Set((reads || []).map(r => r.message_id))
+      const topLevel = fetched.filter(m => !m.parent_message_id)
+      const repliesMap = {}
+      fetched.filter(m => m.parent_message_id).forEach(r => {
+        if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
+        repliesMap[r.parent_message_id].push(r)
+      })
+      const count = topLevel.filter(m => {
+        if (m.sender_id === user.id) {
+          return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
+        }
+        return !readSet.has(m.id)
+      }).length
+      setUnreadCount(count)
+    }
+    pollUnread()
+    const id = setInterval(pollUnread, 30000)
+    return () => clearInterval(id)
+  }, [user])
+
   async function initCriticalPath() {
     const { data: { session } } = await supabase.auth.getSession()
     const user = session?.user

@@ -1358,7 +1358,7 @@ export default function AdminPage() {
     ])
     const fetched = msgs || []
     const readSet = new Set((reads || []).map(r => r.message_id))
-    setUnreadCount(fetched.filter(m => !readSet.has(m.id) && m.sender_id !== userId).length)
+    const unreadCount = fetched.filter(m => !readSet.has(m.id) && m.sender_id !== userId).length
     const topLevel = fetched.filter(m => !m.parent_message_id)
     const repliesMap = {}
     fetched.filter(m => m.parent_message_id).forEach(r => {
@@ -1371,7 +1371,7 @@ export default function AdminPage() {
       }
       return !readSet.has(m.id)
     }).length
-    setUnreadCount(count)
+    setUnreadCount(Math.max(unreadCount, count))
   }
 
   // ── Audit helper ────────────────────────────────────────────────────────────

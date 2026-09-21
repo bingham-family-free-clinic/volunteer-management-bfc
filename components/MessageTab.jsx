@@ -83,6 +83,9 @@ function ReplyThread({
     (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
   )
   const [expanded, setExpanded]     = useState(startExpanded)
+  // Sync expanded with startExpanded so deep-linked threads expand
+  // even if MessageTab mounts before openMessageId is set
+  useEffect(() => { setExpanded(startExpanded) }, [startExpanded])
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
@@ -539,6 +542,14 @@ export function MessageTab({
     }
     document.addEventListener('mousedown', handleMouseDown)
     return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [user])
+
+  // ── Poll unread count every 30s so the badge stays current
+  // even when the messages tab is not open ──
+  useEffect(() => {
+    if (!user) return
+    const id = setInterval(fetchMessages, 30000)
+    return () => clearInterval(id)
   }, [user])
 
   // ── Unlock pinch-to-zoom when lightbox is open on mobile ───────────────────
