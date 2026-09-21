@@ -143,8 +143,17 @@ function ReplyThread({
 
   // Deep-link highlight: when auto-expanded via notification, highlight unread replies
   // and mark as read. Highlight persists until user collapses or navigates away.
+  const latestRef = useRef({ replies, readMessageIds, message, user, onMarkRead })
   useEffect(() => {
-    if (!startExpanded) return
+    latestRef.current = { replies, readMessageIds, message, user, onMarkRead }
+  })
+
+  useEffect(() => {
+    if (!startExpanded) {
+      setLocallyHighlightedReplies(new Set())
+      return
+    }
+    const { replies, readMessageIds, message, user, onMarkRead } = latestRef.current
     const idsToHighlight = replies
       .filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)
       .map(r => r.id)
@@ -157,8 +166,7 @@ function ReplyThread({
       setLocallyHighlightedReplies(new Set(idsToHighlight))
     }
     onMarkRead(message.id, replies.map(r => r.id))
-    return () => setLocallyHighlightedReplies(new Set())
-  }, [startExpanded, replies])
+  }, [startExpanded])
 
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
   const isHighlighted = locallyHighlightedReplies.has(message.id)
