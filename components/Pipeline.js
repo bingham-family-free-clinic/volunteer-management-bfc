@@ -138,7 +138,8 @@ const TOTAL_STEPS = 3
 //
 //   • Certifications / Skills — additive per matched item, then capped
 //   • Patient care hours      — linear, full points at PREP_HOURS_FULL_AT hrs
-//   • Shift availability      — linear, 1 of 10 shifts = 1/10 of the points,
+//   • Shift availability      — worth PREP_SHIFT_MAX (20) pts for EVERY role;
+//                               linear, 1 of 10 shifts = 1/10 of the points,
 //                               10 of 10 = all of the points
 //   • Language proficiency    — non-English language(s) × proficiency level
 //
@@ -147,6 +148,7 @@ const TOTAL_STEPS = 3
 // and minor wording changes in the application form won't silently zero a score.
 
 const PREP_HOURS_FULL_AT = 300
+const PREP_SHIFT_MAX = 20   // same weight for every role
 
 // Language: share of the language points earned per proficiency level. The
 // application's dropdown offers None / Basic / Conversational / Fluent /
@@ -207,36 +209,36 @@ const PREP_ROLES = [
   {
     key: 'clinical', role: 'Clinical Staff', short: 'Clinical', aliases: ['clinical staff'],
     categories: [
-      { kind: 'certs', label: 'Certifications', cap: 35, pts: { RN: 35, LPN: 28, MA: 24, AEMT: 21, EMT: 17, CNA: 14, ACLS: 10, BLS: 7, CPR: 5, Other: 3 } },
-      { kind: 'skills', label: 'Skills', cap: 25, pts: { vitalSigns: 8, patientIntake: 6, phlebotomy: 6, emr: 5, medTerminology: 4 } },
-      { kind: 'hours', label: 'Patient care hours', cap: 20 },
-      { kind: 'shifts', label: 'Shift availability', cap: 10 },
+      { kind: 'certs', label: 'Certifications', cap: 31, pts: { RN: 31, LPN: 25, MA: 21, AEMT: 19, EMT: 15, CNA: 12, ACLS: 9, BLS: 6, CPR: 4, Other: 3 } },
+      { kind: 'skills', label: 'Skills', cap: 22, pts: { vitalSigns: 7, patientIntake: 5, phlebotomy: 5, emr: 4, medTerminology: 4 } },
+      { kind: 'hours', label: 'Patient care hours', cap: 17 },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'language', label: 'Language proficiency', cap: 10 },
     ],
   },
   {
     key: 'navigator', role: 'Patient Navigator', short: 'Navigator', aliases: ['patient nav', 'patient navigator', 'patient navigators'],
     categories: [
-      { kind: 'language', label: 'Language proficiency', cap: 50 },
-      { kind: 'skills', label: 'Skills', cap: 30, pts: { medTranslation: 18, patientIntake: 6, scheduling: 6 } },
-      { kind: 'shifts', label: 'Shift availability', cap: 10 },
+      { kind: 'language', label: 'Language proficiency', cap: 44 },
+      { kind: 'skills', label: 'Skills', cap: 26, pts: { medTranslation: 16, patientIntake: 5, scheduling: 5 } },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'certs', label: 'Certifications', cap: 10, pts: { CPR: 5, BLS: 5 } },
     ],
   },
   {
     key: 'support', role: 'Support Center', short: 'Support Ctr', aliases: ['support center', 'support centre'],
     categories: [
-      { kind: 'shifts', label: 'Shift availability', cap: 40 },
-      { kind: 'skills', label: 'Skills', cap: 40, pts: { scheduling: 25, office: 10, patientIntake: 5 } },
-      { kind: 'language', label: 'Language proficiency', cap: 15 },
-      { kind: 'certs', label: 'Certifications', cap: 5, pts: { CPR: 3, BLS: 2 } },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
+      { kind: 'skills', label: 'Skills', cap: 53, pts: { scheduling: 33, office: 13, patientIntake: 7 } },
+      { kind: 'language', label: 'Language proficiency', cap: 20 },
+      { kind: 'certs', label: 'Certifications', cap: 7, pts: { CPR: 4, BLS: 3 } },
     ],
   },
   {
     key: 'scribe', role: 'Scribe', short: 'Scribe', aliases: ['scribe', 'medical scribe'],
     categories: [
       { kind: 'skills', label: 'Skills', cap: 45, pts: { scribing: 28, emr: 11, medTerminology: 6 } },
-      { kind: 'shifts', label: 'Shift availability', cap: 20 },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'hours', label: 'Patient care hours', cap: 15 },
       { kind: 'certs', label: 'Certifications', cap: 10, pts: { CPR: 5, BLS: 5 } },
       { kind: 'language', label: 'Language proficiency', cap: 10 },
@@ -245,20 +247,20 @@ const PREP_ROLES = [
   {
     key: 'lab', role: 'Lab', short: 'Lab', aliases: ['lab', 'laboratory'],
     categories: [
-      { kind: 'skills', label: 'Skills', cap: 32, pts: { phlebotomy: 32, lab: 22 } },
-      { kind: 'certs', label: 'Certifications', cap: 33, pts: { MA: 19, CNA: 14, EMT: 14, RN: 14, LPN: 14, AEMT: 14 } },
-      { kind: 'hours', label: 'Patient care hours', cap: 15 },
-      { kind: 'shifts', label: 'Shift availability', cap: 10 },
+      { kind: 'skills', label: 'Skills', cap: 28, pts: { phlebotomy: 28, lab: 19 } },
+      { kind: 'certs', label: 'Certifications', cap: 29, pts: { MA: 17, CNA: 12, EMT: 12, RN: 12, LPN: 12, AEMT: 12 } },
+      { kind: 'hours', label: 'Patient care hours', cap: 13 },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'language', label: 'Language proficiency', cap: 10 },
     ],
   },
   {
     key: 'receptionist', role: 'Receptionist', short: 'Reception', aliases: ['receptionist'],
     categories: [
-      { kind: 'shifts', label: 'Shift availability', cap: 40 },
-      { kind: 'skills', label: 'Skills', cap: 45, pts: { scheduling: 29, office: 16 } },
-      { kind: 'certs', label: 'Certifications', cap: 5, pts: { CPR: 3, BLS: 2 } },
-      { kind: 'language', label: 'Language proficiency', cap: 10 },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
+      { kind: 'skills', label: 'Skills', cap: 60, pts: { scheduling: 39, office: 21 } },
+      { kind: 'certs', label: 'Certifications', cap: 7, pts: { CPR: 4, BLS: 3 } },
+      { kind: 'language', label: 'Language proficiency', cap: 13 },
     ],
   },
 ]
