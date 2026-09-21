@@ -748,6 +748,15 @@ export function MessageTab({
     onUnreadCountChange?.(unreadThreadCount)
   }, [unreadThreadCount, onUnreadCountChange])
 
+  // Resolve a deep-linked message id (which may be a reply) to its thread's
+  // top-level id, so notifications for replies still expand the right thread.
+  const openThreadId = (() => {
+    if (!openMessageId) return null
+    const target = messages.find(m => m.id === openMessageId)
+    if (!target) return openMessageId // not loaded locally yet — fall back to raw id
+    return target.parent_message_id || target.id
+  })()
+
   const recentRecipients = sentMessages
     .filter(m => m.recipient_type === 'volunteer' && m.recipient_volunteer_id)
     .map(m => m.recipient_volunteer_id)
@@ -986,7 +995,7 @@ export function MessageTab({
                   allUsers={allUsers}
                   onReplySent={fetchMessages}
                   onMarkRead={markThreadRead}
-                  startExpanded={openMessageId === m.id}
+                  startExpanded={openThreadId === m.id}
                 />
               ))}
             </div>
@@ -1041,7 +1050,7 @@ export function MessageTab({
                     onReplySent={fetchMessages}
                     onMarkRead={markThreadRead}
                     senderLabel={toLabel}
-                    startExpanded={openMessageId === m.id}
+                    startExpanded={openThreadId === m.id}
                   />
                 )
               })}
