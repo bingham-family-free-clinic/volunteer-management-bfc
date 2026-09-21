@@ -934,7 +934,6 @@ export function MessageTab({
             key={key}
             onClick={() => setMsgView(key)}
             style={{
-              position: 'relative',
               padding: '0.45rem 0.9rem',
               borderRadius: '8px',
               fontSize: '0.85rem',
@@ -947,17 +946,6 @@ export function MessageTab({
             }}
           >
             {label}
-            {key === 'inbox' && unreadThreadCount > 0 && (
-              <span style={{
-                position: 'absolute', top: '-5px', right: '-5px',
-                background: '#ef4444', color: '#fff', borderRadius: '50%',
-                width: '17px', height: '17px', fontSize: '0.65rem', fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '2px solid var(--bg)', lineHeight: 1,
-              }}>
-                {unreadThreadCount > 9 ? '9+' : unreadThreadCount}
-              </span>
-            )}
           </button>
         ))}
       </div>
