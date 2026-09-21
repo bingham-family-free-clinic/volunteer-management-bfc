@@ -99,6 +99,18 @@ function ReplyThread({
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
   )
 
+  // Clear browser notifications for a specific message ID
+  async function clearNotificationForMessage(messageId) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration()
+      if (!reg) return
+      const notifications = await reg.getNotifications()
+      notifications.forEach(n => {
+        if (n.data?.url?.includes(messageId)) n.close()
+      })
+    } catch (e) { /* ignore */ }
+  }
+
   // Auto-scroll to most recent reply when expanded
   useEffect(() => {
     if (expanded && mostRecentReplyRef.current) {
@@ -166,6 +178,7 @@ function ReplyThread({
       setLocallyHighlightedReplies(new Set(idsToHighlight))
     }
     onMarkRead(message.id, replies.map(r => r.id))
+    clearNotificationForMessage(message.id)
   }, [startExpanded])
 
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
@@ -267,6 +280,7 @@ function ReplyThread({
             setLocallyHighlightedReplies(new Set(unreadReplyIds))
             setExpanded(true)
             onMarkRead(message.id, replies.map(r => r.id))
+            clearNotificationForMessage(message.id)
           }}
           style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
         >
@@ -304,6 +318,7 @@ function ReplyThread({
               setLocallyHighlightedReplies(new Set(unreadReplyIds))
               setExpanded(true)
               onMarkRead(message.id, replies.map(r => r.id))
+              clearNotificationForMessage(message.id)
               setReplyOpen(true)
             }}
             title="Reply"
