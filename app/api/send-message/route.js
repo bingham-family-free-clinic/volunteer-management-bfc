@@ -19,7 +19,12 @@ export async function POST(req) {
   // ── 1. Verify the caller is a logged-in user ─────────────────────────────
   const authHeader = req.headers.get('authorization') || ''
   const token = authHeader.replace('Bearer ', '')
-  if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!token) {
+    return Response.json(
+      { error: 'Your session has expired. Please refresh the page and sign in again.', code: 'NO_TOKEN' },
+      { status: 401 }
+    )
+  }
 
   // Use a per-request client with the user's JWT to verify identity
   const supabaseUser = createClient(
@@ -28,7 +33,12 @@ export async function POST(req) {
     { global: { headers: { Authorization: `Bearer ${token}` } } }
   )
   const { data: { user }, error: authError } = await supabaseUser.auth.getUser()
-  if (authError || !user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  if (authError || !user) {
+    return Response.json(
+      { error: 'Session expired. Refresh page to continue.', code: 'SESSION_EXPIRED' },
+      { status: 401 }
+    )
+  }
 
   // ── 2. Parse the request body ─────────────────────────────────────────────
   const {

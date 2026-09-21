@@ -8,6 +8,28 @@ import { ROLES } from '../lib/constants'
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
 
+// Grabs a fresh access token before an authenticated request. getSession()
+// can occasionally return a null session — after a long idle/backgrounded
+// tab, or before the client has finished hydrating auth state on load —
+// which previously caused random "Unauthorized" errors on send. This
+// explicitly triggers a refresh in that case, and throws a clear error
+// (rather than crashing on `session.access_token` of null) if the user
+// truly needs to sign in again.
+async function getFreshAccessToken(supabase) {
+  let { data: { session } } = await supabase.auth.getSession()
+
+  if (!session) {
+    const { data: refreshed } = await supabase.auth.refreshSession()
+    session = refreshed?.session ?? null
+  }
+
+  if (!session?.access_token) {
+    throw new Error('Your session has expired. Please refresh the page and sign in again.')
+  }
+
+  return session.access_token
+}
+
 // ── Shared style tokens (mirror page.js S object) ─────────────────────────────
 const S = {
   card: {
@@ -150,12 +172,12 @@ function ReplyThread({
     if (!replyBody.trim()) return
     setSending(true)
     try {
-      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = await getFreshAccessToken(supabase)
       const res = await fetch('/api/send-message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           recipient_type: isOneOnOne ? 'volunteer' : 'admin',
@@ -798,51 +820,56 @@ export function MessageTab({
     if (!msgBody.trim() && !msgImageFile) return
     setSendingMsg(true)
 
-    const imageUrl = await uploadImage(user.id)
-    if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
+    try {
+      const imageUrl = await uploadImage(user.id)
+      if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
 
-    const recipientType = msgRecipientType === 'user'      ? 'volunteer'
-                        : msgRecipientType === 'providers' ? 'role'
-                        : msgRecipientType
-    const { data: { session } } = await supabase.auth.getSession()
+      const recipientType = msgRecipientType === 'user'      ? 'volunteer'
+                          : msgRecipientType === 'providers' ? 'role'
+                          : msgRecipientType
+      const accessToken = await getFreshAccessToken(supabase)
 
-    const res = await fetch('/api/send-message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({
-        recipient_type: recipientType,
-        body: msgBody.trim(),
-        image_url: imageUrl || null,
-        recipient_shift:        msgRecipientType === 'shift' ? (msgSelectedShift?.shift_time || null) : null,
-        recipient_day:          msgRecipientType === 'shift' ? (msgSelectedShift?.day || null) : null,
-        recipient_role:         msgRecipientType === 'role'      ? (msgSelectedRole || null)
-                              : msgRecipientType === 'providers' ? 'Provider'
-                              : null,
-        recipient_volunteer_id: recipientType === 'volunteer' ? (msgRecipientVolId || null) : null,
-        parent_message_id: null, // always null for new top-level compose
-      }),
-    })
+      const res = await fetch('/api/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          recipient_type: recipientType,
+          body: msgBody.trim(),
+          image_url: imageUrl || null,
+          recipient_shift:        msgRecipientType === 'shift' ? (msgSelectedShift?.shift_time || null) : null,
+          recipient_day:          msgRecipientType === 'shift' ? (msgSelectedShift?.day || null) : null,
+          recipient_role:         msgRecipientType === 'role'      ? (msgSelectedRole || null)
+                                : msgRecipientType === 'providers' ? 'Provider'
+                                : null,
+          recipient_volunteer_id: recipientType === 'volunteer' ? (msgRecipientVolId || null) : null,
+          parent_message_id: null, // always null for new top-level compose
+        }),
+      })
 
-    const result = await res.json()
-    if (!res.ok) {
-      showToast(result.error || 'Failed to send', 'error')
-    } else {
-      showToast('Message sent!', 'success')
-      setMsgBody('')
-      clearImage()
-      setMsgRecipientType('admin')
-      setMsgSelectedShift(null)
-      setMsgSelectedRole(null)
-      setMsgRecipientVolId('')
-      setComboQuery('')
-      setComboOpen(false)
-      setMessages([])
-      setMsgCursor(null)
-      setHasMoreMsgs(false)
-      await fetchMessages()
-      setMsgView('inbox')
+      const result = await res.json()
+      if (!res.ok) {
+        showToast(result.error || 'Failed to send', 'error')
+      } else {
+        showToast('Message sent!', 'success')
+        setMsgBody('')
+        clearImage()
+        setMsgRecipientType('admin')
+        setMsgSelectedShift(null)
+        setMsgSelectedRole(null)
+        setMsgRecipientVolId('')
+        setComboQuery('')
+        setComboOpen(false)
+        setMessages([])
+        setMsgCursor(null)
+        setHasMoreMsgs(false)
+        await fetchMessages()
+        setMsgView('inbox')
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to send', 'error')
+    } finally {
+      setSendingMsg(false)
     }
-    setSendingMsg(false)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
