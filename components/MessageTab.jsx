@@ -74,6 +74,7 @@ function ReplyThread({
   onReplySent,
   onMarkRead,
   senderLabel,
+  startExpanded = false,
 }) {
   const isUnread = readMessageIds && (
     // Received message not yet read
@@ -81,7 +82,7 @@ function ReplyThread({
     // Sent message that has unread replies — exclude replies the user sent themselves (fix #3)
     (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
   )
-  const [expanded, setExpanded]     = useState(false)
+  const [expanded, setExpanded]     = useState(startExpanded)
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
@@ -471,6 +472,7 @@ export function MessageTab({
   MAX_FILE_SIZE,
   schedule = [],
   onUnreadCountChange,
+  openMessageId,
 }) {
   // ── Local state ────────────────────────────────────────────────────────────
   const [messages, setMessages]               = useState([])
@@ -973,6 +975,7 @@ export function MessageTab({
                   allUsers={allUsers}
                   onReplySent={fetchMessages}
                   onMarkRead={markThreadRead}
+                  startExpanded={openMessageId === m.id}
                 />
               ))}
             </div>
@@ -1027,6 +1030,7 @@ export function MessageTab({
                     onReplySent={fetchMessages}
                     onMarkRead={markThreadRead}
                     senderLabel={toLabel}
+                    startExpanded={openMessageId === m.id}
                   />
                 )
               })}

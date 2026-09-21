@@ -161,7 +161,7 @@ export async function POST(req) {
   const notifPayload = JSON.stringify({
     title: `Message from ${senderName}`,
     body:  (body?.trim() || '📎 Image').slice(0, 120),
-    url:   '/volunteer',
+    url:   `/volunteer?messageId=${message.id}`,
   })
 
   // Fire all pushes in parallel, collect stale endpoints to clean up

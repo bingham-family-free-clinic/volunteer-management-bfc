@@ -568,10 +568,11 @@ class DebugErrorBoundary extends Component {
 // ── Main component ────────────────────────────────────────────────────────────
 function VolunteerPageInner() {
   // ── Core auth/profile state (loaded immediately) ─────────────────────────
-  const [user, setUser]       = useState(null)
-  const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [tab, setTab]         = useState('clock')
+   const [user, setUser]       = useState(null)
+   const [profile, setProfile] = useState(null)
+   const [loading, setLoading] = useState(true)
+   const [tab, setTab]         = useState('clock')
+   const [messageId, setMessageId] = useState(null)
 
   // ── Clock tab state ───────────────────────────────────────────────────────
   const [activeShift, setActiveShift]   = useState(null)
@@ -838,15 +839,25 @@ function VolunteerPageInner() {
       })
     }
 
-      const { data: open } = await supabase
-          .from('shifts')
-          .select('id, clock_in, role')
-          .eq('volunteer_id', user.id)
-          .is('clock_out', null)
-          .maybeSingle()
-      setActiveShift(open || null)
+       const { data: open } = await supabase
+           .from('shifts')
+           .select('id, clock_in, role')
+           .eq('volunteer_id', user.id)
+           .is('clock_out', null)
+           .maybeSingle()
+       setActiveShift(open || null)
 
-    setLoading(false)
+      const params = new URLSearchParams(window.location.search)
+      const msgId = params.get('messageId')
+      if (msgId) {
+        setMessageId(msgId)
+        setTab('messages')
+        params.delete('messageId')
+        const cleanUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '')
+        window.history.replaceState({}, '', cleanUrl)
+      }
+
+     setLoading(false)
 
     // Seed the unread message count badge immediately on load
     const { data: allMsgs } = await supabase
@@ -1816,9 +1827,9 @@ function VolunteerPageInner() {
             isMobile={isMobile}
             getInboxMessages={getInboxMessages}
             MAX_FILE_SIZE={MAX_FILE_SIZE}
-            SHIFTS={SHIFTS}
             schedule={schedule}
             onUnreadCountChange={setUnreadCount}
+            openMessageId={messageId}
           />
         )}
 
