@@ -149,13 +149,16 @@ const TOTAL_STEPS = 3
 const PREP_HOURS_FULL_AT = 300
 
 // Language: share of the language points earned per proficiency level. The
-// highest level found in language_proficiency wins. If a non-English language
-// is listed but no level can be read, PREP_LANG_DEFAULT_FACTOR is used.
+// application's dropdown offers None / Basic / Conversational / Fluent /
+// Native; the highest level found in language_proficiency wins ("None"
+// scores 0 even if a language box was ticked). If a non-English language is
+// listed but no level was chosen, PREP_LANG_DEFAULT_FACTOR is used.
 const PREP_LANG_LEVELS = [
   { factor: 1,    label: 'Native / fluent', re: /\b(native|fluen\w*|bilingual|mother tongue)\b/ },
   { factor: 0.75, label: 'Advanced',        re: /\b(advanced|proficient|professional|fully)\b/ },
   { factor: 0.5,  label: 'Conversational',  re: /\b(conversation\w*|intermediate)\b/ },
   { factor: 0.25, label: 'Basic',           re: /\b(basic|beginner|elementary|limited|novice)\b/ },
+  { factor: 0,    label: 'None',            re: /\bnone\b/ },
 ]
 const PREP_LANG_DEFAULT_FACTOR = 0.5
 
@@ -166,7 +169,7 @@ const PREP_CERT_MATCHERS = {
   MA:   /\b[cr]?ma\b|medical assistant/,
   AEMT: /\baemt\b|advanced emt|advanced emergency medical/,
   EMT:  /\bemt\b|emergency medical tech/,
-  CNA:  /\bcna\b|nursing assistant/,
+  CNA:  /\bcna\b|\brna\b|nursing assistant/,   // the application also offers "RNA"; scored the same as CNA
   ACLS: /\bacls\b|advanced cardiac|advanced cardiovascular/,
   BLS:  /\bbls\b|basic life support/,
   CPR:  /\bcpr\b/,
@@ -395,66 +398,66 @@ function prepTierColor(total) {
   return C.light
 }
 
-// Compact row of per-role scores for the applicant banner (Applied stage).
-function PreparednessChips({ applicant }) {
+// Per-role scores for the applicant detail view (Applied stage only). Nothing
+// is shown on the pipeline list. Each role's score is a button; its category
+// breakdown stays hidden until that score is clicked (click again to hide).
+function PreparednessPanel({ applicant, card, secLabel }) {
+  const [openKeys, setOpenKeys] = useState([])
   const scores = getPreparednessScores(applicant)
   if (scores.length === 0) return null
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.35rem' }}>
-      <span style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--muted)', marginRight: '0.1rem' }}>Prep</span>
-      {scores.map(s => {
-        const color = prepTierColor(s.total)
-        const tip = [`${s.role} — ${Math.round(s.total)}/${s.max}`, ...s.categories.map(c => `${c.label}: ${prepTrim(c.earned)}/${c.max}`)].join('\n')
-        return (
-          <span key={s.key} title={tip} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.68rem', padding: '0.1rem 0.5rem', borderRadius: '100px', fontWeight: 600, background: color + '14', color, border: `1px solid ${color}44`, whiteSpace: 'nowrap' }}>
-            {s.short}
-            <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700 }}>{Math.round(s.total)}</span>
-          </span>
-        )
-      })}
-    </div>
-  )
-}
 
-// Full per-category breakdown for the applicant detail view.
-function PreparednessBreakdown({ applicant, card, secLabel }) {
-  const scores = getPreparednessScores(applicant)
-  if (scores.length === 0) return null
+  const toggle = key => setOpenKeys(keys => keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key])
+  const openScores = scores.filter(s => openKeys.includes(s.key))
+
   return (
     <div style={{ ...card, padding: '1rem 1.25rem' }}>
       <p style={secLabel}>Preparedness</p>
-      <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
-        Scored out of 100 for each interested role, from the application. Only roles with a scoring guide are shown.
-      </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
         {scores.map(s => {
-          const color = prepTierColor(s.total)
+          const color  = prepTierColor(s.total)
+          const isOpen = openKeys.includes(s.key)
           return (
-            <div key={s.key} style={{ padding: '0.75rem 0.9rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.6rem' }}>
-                <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{s.role}</p>
-                <p style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700, fontSize: '1rem', color }}>
-                  {Math.round(s.total)}<span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 500 }}>/{s.max}</span>
-                </p>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {s.categories.map(c => (
-                  <div key={c.label}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
-                      <span>{c.label}</span>
-                      <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)' }}>{prepTrim(c.earned)}/{c.max}</span>
-                    </div>
-                    <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', marginTop: '0.2rem', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${c.max ? (c.earned / c.max) * 100 : 0}%`, background: color, borderRadius: 2 }} />
-                    </div>
-                    <p style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '0.15rem', lineHeight: 1.4 }}>{c.note}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <button key={s.key} type="button" onClick={() => toggle(s.key)} aria-expanded={isOpen}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', padding: '0.25rem 0.7rem', borderRadius: '100px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: color + (isOpen ? '26' : '14'), color, border: `1px solid ${color}${isOpen ? '99' : '44'}`, whiteSpace: 'nowrap' }}>
+              {s.short}
+              <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700 }}>{Math.round(s.total)}</span>
+              <span style={{ fontSize: '0.6rem', opacity: 0.7 }}>{isOpen ? '▾' : '▸'}</span>
+            </button>
           )
         })}
       </div>
+
+      {openScores.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem', marginTop: '0.9rem' }}>
+          {openScores.map(s => {
+            const color = prepTierColor(s.total)
+            return (
+              <div key={s.key} style={{ padding: '0.75rem 0.9rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.6rem' }}>
+                  <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{s.role}</p>
+                  <p style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700, fontSize: '1rem', color }}>
+                    {Math.round(s.total)}<span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 500 }}>/{s.max}</span>
+                  </p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {s.categories.map(c => (
+                    <div key={c.label}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                        <span>{c.label}</span>
+                        <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)' }}>{prepTrim(c.earned)}/{c.max}</span>
+                      </div>
+                      <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', marginTop: '0.2rem', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${c.max ? (c.earned / c.max) * 100 : 0}%`, background: color, borderRadius: 2 }} />
+                      </div>
+                      <p style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '0.15rem', lineHeight: 1.4 }}>{c.note}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -3111,8 +3114,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           }
         </div>
 
-        {/* Preparedness breakdown — Applied stage */}
-        {isApplied && PreparednessBreakdown({ applicant, card, secLabel })}
+        {/* Preparedness — Applied stage; breakdown opens on click */}
+        {isApplied && <PreparednessPanel key={applicant.id} applicant={applicant} card={card} secLabel={secLabel} />}
 
         {/* Applied */}
         {isApplied && (
@@ -3205,11 +3208,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.6rem' }}>
                   {ROLES.map(role => {
                     const active    = onboardForm.default_role === role
-                    const suggested = applicant.roles_interested?.includes(role)
                     return (
-                      <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ position: 'relative', padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : suggested ? C.light + '88' : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>
+                      <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ position: 'relative', padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>
                         {role}
-                        {suggested && !active && <span style={{ marginLeft: '0.4rem', fontSize: '0.65rem', color: C.light, fontWeight: 700 }}>★ suggested</span>}
                       </button>
                     )
                   })}
@@ -3466,7 +3467,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                               </span>
                             )}
                           </div>
-                          {a.stage === 'applied' && <PreparednessChips applicant={a} />}
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
