@@ -487,6 +487,44 @@ function getPreparednessScores(applicant) {
   return results
 }
 
+// Same scoring math as getPreparednessScores, but returns every one of the
+// six core clinical roles regardless of roles_interested — used by the
+// Applied-stage "Compare Applicants" overlay so every applicant lines up
+// against the same six columns. `interested` flags roles the applicant
+// actually listed, so the overlay can distinguish "scored high because
+// they're genuinely prepared" from "scored high but never asked for this role".
+function getAllRoleScores(applicant) {
+  const ctx = {
+    certs:  prepClassifyCerts(applicant),
+    skills: prepClassifySkills(applicant),
+    hours:  prepPatientHours(applicant),
+    shifts: getStatedAvailability(applicant).length,
+    lang:   prepLanguageContext(applicant),
+  }
+  const interestedRoles = new Set(getApplicantStaffingRoles(applicant))
+
+  return PREP_ROLES.map(cfg => {
+    const total = cfg.categories.reduce((sum, cat) => {
+      let earned = 0
+      if (cat.kind === 'certs') {
+        const matched = Object.keys(cat.pts).filter(k => ctx.certs.has(k))
+        earned = Math.min(matched.reduce((s, k) => s + cat.pts[k], 0), cat.cap)
+      } else if (cat.kind === 'skills') {
+        const matched = Object.keys(cat.pts).filter(k => ctx.skills.has(k))
+        earned = Math.min(matched.reduce((s, k) => s + cat.pts[k], 0), cat.cap)
+      } else if (cat.kind === 'hours') {
+        earned = cat.cap * Math.min(ctx.hours, PREP_HOURS_FULL_AT) / PREP_HOURS_FULL_AT
+      } else if (cat.kind === 'shifts') {
+        earned = cat.cap * Math.min(ctx.shifts, ALL_SLOTS.length) / ALL_SLOTS.length
+      } else if (cat.kind === 'language') {
+        earned = cat.cap * ctx.lang.factor
+      }
+      return sum + earned
+    }, 0)
+    return { key: cfg.key, short: cfg.short, total: Math.round(total), interested: interestedRoles.has(cfg.role) }
+  })
+}
+
 // Blue-palette tiers so a score reads at a glance.
 function prepTierColor(total) {
   if (total >= 70) return C.primary
@@ -1433,6 +1471,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // Raw rows pulled once and recomputed into lookups via useMemo below.
   const [staffingSchedule, setStaffingSchedule] = useState([])
   const [staffingWaitlist, setStaffingWaitlist] = useState([])
+
+  // ── Applied-stage "Compare Applicants" overlay ──────────────────────────
+  const [compareOpen, setCompareOpen] = useState(false)
 
   // ── Applicant profile photo state ──────────────────────────────────────────
   const [applicantPhotoUrl,       setApplicantPhotoUrl]       = useState(null)
@@ -2919,6 +2960,81 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     )
   }
 
+  // Applied-stage-only: a plain black-and-white comparison table so several
+  // applicants can be scanned side by side — staffing need, a score for
+  // each of the six core clinical roles, and service-missionary status, all
+  // aligned into the same columns. No color coding is used, only bold vs.
+  // regular weight, so it stays scannable at a glance.
+  function CompareApplicantsOverlay() {
+    if (!compareOpen) return null
+
+    const rows = applicants
+      .filter(a => a.stage === 'applied')
+      .map(a => ({
+        id: a.id,
+        name: a.full_name || 'Unnamed',
+        level: getStaffingNeedLevel(a, staffingOpenSlots, staffingWaitlistCounts),
+        scores: getAllRoleScores(a),
+        missionary: !!a.is_service_missionary,
+      }))
+      .sort((x, y) => x.name.localeCompare(y.name))
+
+    const roleShorts  = PREP_ROLES.map(r => r.short)
+    const levelLabel  = { high: 'High', moderate: 'Moderate', low: 'Low' }
+
+    const thStyle = { textAlign: 'left', padding: '0.5rem 0.6rem', borderBottom: '2px solid #000', fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: '#fff' }
+    const tdStyle = { padding: '0.5rem 0.6rem', borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }
+
+    return (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 220, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}
+        onClick={e => { if (e.target === e.currentTarget) setCompareOpen(false) }}
+      >
+        <div style={{ background: '#fff', color: '#000', borderRadius: '10px', border: '1px solid #000', width: '100%', maxWidth: 1040, maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'DM Sans, sans-serif' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.9rem 1.25rem', borderBottom: '2px solid #000' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Compare Applicants — Applied ({rows.length})</span>
+            <button onClick={() => setCompareOpen(false)} style={{ background: 'none', border: 'none', color: '#000', cursor: 'pointer', fontSize: '1.3rem', lineHeight: 1, padding: '0.1rem 0.3rem' }} title="Close">×</button>
+          </div>
+          <div style={{ overflow: 'auto', padding: '0 1.25rem' }}>
+            {rows.length === 0 ? (
+              <p style={{ padding: '1.5rem 0', fontStyle: 'italic', color: '#555' }}>No applicants in the Applied stage.</p>
+            ) : (
+              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.8rem' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Name</th>
+                    <th style={thStyle}>Staffing Need</th>
+                    {roleShorts.map(s => <th key={s} style={thStyle}>{s}</th>)}
+                    <th style={thStyle}>Service Missionary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.id}>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{r.name}</td>
+                      <td style={{ ...tdStyle, fontWeight: r.level === 'high' ? 700 : 400, color: r.level ? '#000' : '#999' }}>
+                        {r.level ? levelLabel[r.level] : '—'}
+                      </td>
+                      {r.scores.map(s => (
+                        <td key={s.key} style={{ ...tdStyle, fontFamily: 'DM Mono, monospace', fontWeight: s.interested ? 700 : 400, color: s.interested ? '#000' : '#999' }}>
+                          {s.total}
+                        </td>
+                      ))}
+                      <td style={{ ...tdStyle, fontWeight: r.missionary ? 700 : 400 }}>{r.missionary ? 'Yes' : 'No'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div style={{ padding: '0.7rem 1.25rem', borderTop: '1px solid #ccc' }}>
+            <span style={{ fontSize: '0.68rem', color: '#555' }}>Bold role scores are roles the applicant listed interest in; gray scores are shown for comparison only. Staffing Need reflects current clinic openings and waitlist depth.</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   async function saveTemplate(stage) {
     const draft = templateDrafts[stage]
     if (!draft?.subject || !draft?.body) {
@@ -3563,16 +3679,23 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       {/* Pipeline tab */}
       {activeTab === 'pipeline' && (
         <>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {STAGES.map(stage => {
-              const color  = STAGE_COLORS[stage]
-              const active = stageFilter === stage
-              return (
-                <button key={stage} onClick={() => setStageFilter(stage)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: active ? color + '18' : 'var(--surface)', color: active ? color : 'var(--muted)', border: active ? `1px solid ${color}55` : '1px solid var(--border)' }}>
-                  {STAGE_LABELS[stage]} <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.78rem', opacity: 0.8 }}>({stageCounts[stage]})</span>
-                </button>
-              )
-            })}
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {STAGES.map(stage => {
+                const color  = STAGE_COLORS[stage]
+                const active = stageFilter === stage
+                return (
+                  <button key={stage} onClick={() => setStageFilter(stage)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: active ? color + '18' : 'var(--surface)', color: active ? color : 'var(--muted)', border: active ? `1px solid ${color}55` : '1px solid var(--border)' }}>
+                    {STAGE_LABELS[stage]} <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.78rem', opacity: 0.8 }}>({stageCounts[stage]})</span>
+                  </button>
+                )
+              })}
+            </div>
+            {stageFilter === 'applied' && (
+              <button onClick={() => setCompareOpen(true)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: '#000', color: '#fff', border: '1px solid #000' }}>
+                Compare Applicants
+              </button>
+            )}
           </div>
 
           {loadError && (
@@ -3676,6 +3799,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       <RejectModal />
       <ParkingPassModal />
       <ConfidentialityModal />
+      <CompareApplicantsOverlay />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
