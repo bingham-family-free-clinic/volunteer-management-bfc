@@ -1959,24 +1959,32 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       source:          'pipeline',
       added_by:        profile.id,
     })
+    // If the insert fails — most commonly because this volunteer was already
+    // added to the waitlist manually, outside this flow — don't leave them
+    // stuck in Training. Fall through to the stage update either way, and
+    // just flag that the waitlist insert didn't go through so staff can
+    // confirm the existing waitlist entry looks right.
     if (waitlistErr) {
-      msg(`Waitlist insert failed: ${waitlistErr.message}`, 'error')
-      setMovingToWaitlistId(null)
-      return
+      msg(`Waitlist insert failed (${waitlistErr.message}) — moving them to completed anyway since they may already be on the waitlist. Please double-check their waitlist entry.`, 'error')
     }
 
     const { error: appErr } = await supabase.from('volunteer_applications')
       .update({ stage: 'completed', stage_updated_at: new Date().toISOString() })
       .eq('id', applicant.id)
     if (appErr) {
-      msg(`Added to waitlist, but failed to update pipeline stage: ${appErr.message}`, 'error')
+      msg(`Failed to update pipeline stage: ${appErr.message}`, 'error')
       setMovingToWaitlistId(null)
       return
     }
 
-    await audit('moved_to_waitlist', 'volunteer', applicant.volunteer_id, applicant.full_name,
-      `preferred_roles: ${preferred_roles.join(', ') || 'none'}`)
-    msg(`${applicant.full_name} moved to the waitlist`)
+    await audit(
+      waitlistErr ? 'moved_to_waitlist_stage_only' : 'moved_to_waitlist',
+      'volunteer', applicant.volunteer_id, applicant.full_name,
+      waitlistErr
+        ? `waitlist insert failed (${waitlistErr.message}) — stage set to completed without creating a new waitlist row; verify existing waitlist entry`
+        : `preferred_roles: ${preferred_roles.join(', ') || 'none'}`
+    )
+    if (!waitlistErr) msg(`${applicant.full_name} moved to the waitlist`)
 
     setTrainingDrafts(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
     setSelected(null)
