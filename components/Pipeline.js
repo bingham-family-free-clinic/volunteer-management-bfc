@@ -210,7 +210,7 @@ const PREP_ROLES = [
     key: 'clinical', role: 'Clinical Staff', short: 'Clinical', aliases: ['clinical staff'],
     categories: [
       { kind: 'certs', label: 'Certifications', cap: 31, pts: { RN: 31, LPN: 25, MA: 21, AEMT: 19, EMT: 15, CNA: 12, ACLS: 9, BLS: 6, CPR: 4, Other: 3 } },
-      { kind: 'skills', label: 'Skills', cap: 22, pts: { vitalSigns: 7, patientIntake: 5, phlebotomy: 5, emr: 4, medTerminology: 4 } },
+      { kind: 'skills', label: 'Skills', cap: 22, pts: { vitalSigns: 9, patientIntake: 5, emr: 4, medTerminology: 4 } },
       { kind: 'hours', label: 'Patient care hours', cap: 17 },
       { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'language', label: 'Language proficiency', cap: 10 },
@@ -222,7 +222,7 @@ const PREP_ROLES = [
       { kind: 'language', label: 'Language proficiency', cap: 44 },
       { kind: 'skills', label: 'Skills', cap: 26, pts: { medTranslation: 16, patientIntake: 5, scheduling: 5 } },
       { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
-      { kind: 'certs', label: 'Certifications', cap: 10, pts: { CPR: 5, BLS: 5 } },
+      { kind: 'certs', label: 'Certifications', cap: 10, pts: { BLS: 6, CPR: 4 } },
     ],
   },
   {
@@ -231,16 +231,16 @@ const PREP_ROLES = [
       { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'skills', label: 'Skills', cap: 53, pts: { scheduling: 33, office: 13, patientIntake: 7 } },
       { kind: 'language', label: 'Language proficiency', cap: 20 },
-      { kind: 'certs', label: 'Certifications', cap: 7, pts: { CPR: 4, BLS: 3 } },
+      { kind: 'certs', label: 'Certifications', cap: 7, pts: { BLS: 4, CPR: 3 } },
     ],
   },
   {
     key: 'scribe', role: 'Scribe', short: 'Scribe', aliases: ['scribe', 'medical scribe'],
     categories: [
-      { kind: 'skills', label: 'Skills', cap: 45, pts: { scribing: 28, emr: 11, medTerminology: 6 } },
+      { kind: 'skills', label: 'Skills', cap: 45, pts: { scribing: 28, medTerminology: 11, emr: 6 } },
       { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'hours', label: 'Patient care hours', cap: 15 },
-      { kind: 'certs', label: 'Certifications', cap: 10, pts: { CPR: 5, BLS: 5 } },
+      { kind: 'certs', label: 'Certifications', cap: 10, pts: { BLS: 6, CPR: 4 } },
       { kind: 'language', label: 'Language proficiency', cap: 10 },
     ],
   },
@@ -248,7 +248,7 @@ const PREP_ROLES = [
     key: 'lab', role: 'Lab', short: 'Lab', aliases: ['lab', 'laboratory'],
     categories: [
       { kind: 'skills', label: 'Skills', cap: 28, pts: { phlebotomy: 28, lab: 19 } },
-      { kind: 'certs', label: 'Certifications', cap: 29, pts: { MA: 17, CNA: 12, EMT: 12, RN: 12, LPN: 12, AEMT: 12 } },
+      { kind: 'certs', label: 'Certifications', cap: 29, pts: { MA: 17, RN: 17, LPN: 17, AEMT: 17, CNA: 12, EMT: 12 } },
       { kind: 'hours', label: 'Patient care hours', cap: 13 },
       { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'language', label: 'Language proficiency', cap: 10 },
@@ -259,7 +259,7 @@ const PREP_ROLES = [
     categories: [
       { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'skills', label: 'Skills', cap: 60, pts: { scheduling: 39, office: 21 } },
-      { kind: 'certs', label: 'Certifications', cap: 7, pts: { CPR: 4, BLS: 3 } },
+      { kind: 'certs', label: 'Certifications', cap: 7, pts: { BLS: 4, CPR: 3 } },
       { kind: 'language', label: 'Language proficiency', cap: 13 },
     ],
   },
