@@ -205,17 +205,48 @@ function ReplyThread({
   const isThreadSender = message.sender_id === user?.id
   const isOneOnOne     = message.recipient_type === 'volunteer' || message.recipient_type === 'user'
 
-  // Admins can reply to admin-directed messages.
-  // Either party can reply in a one-on-one thread.
-  const isThreadParticipant = isOneOnOne && (
-    isThreadSender || message.recipient_volunteer_id === user?.id
-  )
-  const canReply = (message.recipient_type === 'admin' && (isAdmin || isThreadSender))
-                || isThreadParticipant
+  // Anyone viewing a thread can reply. Group replies inherit the parent's
+  // targeting so the whole group is notified (Reply All).
+  const canReply = Boolean(user?.id)
+  // Reply All when the reply would go to more than one person: any group
+  // thread, or an admin broadcast. A 1-1 reply — or an admin replying back
+  // to one specific volunteer — targets a single person.
+  const isReplyAll = !isOneOnOne && !(message.recipient_type === 'admin' && isAdmin && !isThreadSender)
+  const replyLabel = isReplyAll ? 'Reply All' : 'Reply'
 
   async function handleSendReply() {
     if (!replyBody.trim()) return
     setSending(true)
+    // Inherit the parent's targeting so group replies notify the whole group.
+    // Admin replying to someone else's admin-directed message still targets
+    // just that volunteer (server notifies them only, not all admins).
+    const replyTarget = (() => {
+      if (isOneOnOne) {
+        return {
+          recipient_type: message.recipient_type,
+          recipient_day: null,
+          recipient_shift: null,
+          recipient_role: null,
+          recipient_volunteer_id: isThreadSender ? message.recipient_volunteer_id : message.sender_id,
+        }
+      }
+      if (message.recipient_type === 'admin') {
+        return {
+          recipient_type: 'admin',
+          recipient_day: null,
+          recipient_shift: null,
+          recipient_role: null,
+          recipient_volunteer_id: (isAdmin && !isThreadSender) ? message.sender_id : null,
+        }
+      }
+      return {
+        recipient_type: message.recipient_type,
+        recipient_day: message.recipient_day ?? null,
+        recipient_shift: message.recipient_shift ?? null,
+        recipient_role: message.recipient_role ?? null,
+        recipient_volunteer_id: message.recipient_volunteer_id ?? null,
+      }
+    })()
     try {
       const accessToken = await getFreshAccessToken(supabase)
       const res = await fetch('/api/send-message', {
@@ -225,13 +256,10 @@ function ReplyThread({
           'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          recipient_type: isOneOnOne ? 'volunteer' : 'admin',
+          ...replyTarget,
           body: replyBody.trim(),
           image_url: null,
           parent_message_id: message.id,
-          recipient_volunteer_id: isOneOnOne
-            ? (isThreadSender ? message.recipient_volunteer_id : message.sender_id)
-            : (isAdmin && !isThreadSender ? message.sender_id : null),
         }),
       })
       const result = await res.json()
@@ -320,7 +348,7 @@ function ReplyThread({
               clearNotificationForMessage(message.id)
               setReplyOpen(true)
             }}
-            title="Reply"
+            title={replyLabel}
             style={{
               flexShrink: 0,
               display: 'flex',
@@ -344,7 +372,7 @@ function ReplyThread({
               <polyline points="9 14 4 9 9 4" />
               <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
             </svg>
-            Reply
+            {replyLabel}
           </button>
         )}
       </div>
@@ -368,6 +396,7 @@ function ReplyThread({
           replyOpen={replyOpen}
           onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
           isHighlighted={isHighlighted}
+          replyLabel={replyLabel}
         />
       </div>
 
@@ -417,6 +446,7 @@ function ReplyThread({
                     canReply={canReply && isMostRecent && isMostRecentReply}
                     replyOpen={replyOpen}
                     onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
+                    replyLabel={replyLabel}
                   />
                 </div>
               </div>

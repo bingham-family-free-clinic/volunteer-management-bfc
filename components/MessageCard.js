@@ -61,7 +61,7 @@ function formatBody(text) {
   })
 }
 
-export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, replyOpen, onReply, isHighlighted }) {
+export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, replyOpen, onReply, isHighlighted, replyLabel = 'Reply' }) {
   const isUnread =
     readMessageIds &&
     !readMessageIds.has(m.id) &&
@@ -157,7 +157,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                 <polyline points="9 14 4 9 9 4" />
                 <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
               </svg>
-              Reply
+              {replyLabel}
             </button>
           )}
         </div>
