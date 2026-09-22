@@ -213,6 +213,13 @@ function ReplyThread({
   const previewSenderName = latestUnreadReply
     ? (latestUnreadReply.sender?.full_name || 'HR')
     : (senderLabel || message.sender?.full_name || 'Unknown')
+  // Condensed view shows the previewed message's recipient, mirroring the
+  // expanded header format (timestamp, To: X). Skipped when it duplicates
+  // the collapsed label (sent reply threads already show To: X as the title).
+  const previewRecipientLabel = getRecipientLabel(previewSource)
+  const collapsedRecipientSuffix = previewRecipientLabel && previewRecipientLabel !== collapsedLabel
+    ? `, ${previewRecipientLabel}`
+    : ''
 
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
@@ -392,7 +399,7 @@ function ReplyThread({
                 {collapsedLabel ?? (latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName)}
               </span>
               <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
-                {formatDateTime(previewSource.created_at)}
+                {formatDateTime(previewSource.created_at)}{collapsedRecipientSuffix}
               </span>
             </div>
           {/* Line 2: reply count + snippet (only rendered if there is content) */}
