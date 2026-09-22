@@ -217,7 +217,7 @@ const PREP_ROLES = [
     ],
   },
   {
-    key: 'navigator', role: 'Patient Navigator', short: 'Navigator', aliases: ['patient nav', 'patient navigator', 'patient navigators'],
+    key: 'navigator', role: 'Patient Nav.', short: 'Navigator', aliases: ['patient nav', 'patient navigator', 'patient navigators'],
     categories: [
       { kind: 'language', label: 'Language proficiency', cap: 44 },
       { kind: 'skills', label: 'Skills', cap: 26, pts: { medTranslation: 16, patientIntake: 5, scheduling: 5 } },
