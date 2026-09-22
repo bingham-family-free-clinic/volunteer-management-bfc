@@ -3179,6 +3179,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       { label: 'Languages',            value: languagesStr },
       { label: 'Additional Languages', value: applicant.languages },
       { label: 'Language Proficiency', value: applicant.language_proficiency },
+      { label: 'Service Missionary',   value: applicant.is_service_missionary ? 'Yes' : 'No' },
       { label: 'Role Interest',        value: rolesStr },
       { label: 'Certifications',       value: certsStr },
       { label: 'Credentials',          value: applicant.credentials },
@@ -3597,6 +3598,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{a.email}</p>
                             {a.resume_url && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontWeight: 600 }}>resume</span>}
+                            {a.is_service_missionary && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.light + '14', color: C.light, border: `1px solid ${C.light}33`, fontWeight: 600 }}>service missionary</span>}
                             {a.stage === 'onboarding' && (
                               <span style={{ display: 'flex', gap: '0.2rem' }}>
                                 {[a.onboard_affiliation, a.onboard_default_role].map((v, i) => (
