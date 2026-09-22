@@ -94,6 +94,7 @@ function ReplyThread({
   const [sending, setSending]       = useState(false)
   const [replyToId, setReplyToId]     = useState(null)
   const [isReplyAll, setIsReplyAll]   = useState(false)
+  const [followUpId, setFollowUpId]   = useState(null)
   const [locallyHighlightedReplies, setLocallyHighlightedReplies] = useState(new Set())
 
   const isGroupMessageSender = message.sender_id === user?.id && message.recipient_type !== 'volunteer'
@@ -233,6 +234,7 @@ function ReplyThread({
     if (!replyBody.trim()) return
     setSending(true)
     const targetReply = replies.find(r => r.id === replyToId)
+    const followUpReply = followUpId ? replies.find(r => r.id === followUpId) : null
     const abort = (msg) => { showToast(msg, 'error'); setSending(false) }
     let replyTarget
     if (isReplyAll) {
@@ -242,6 +244,23 @@ function ReplyThread({
         recipient_shift: message.recipient_shift,
         recipient_role: message.recipient_role,
         recipient_volunteer_id: message.recipient_volunteer_id,
+      }
+    } else if (followUpReply && followUpReply.sender_id === user?.id) {
+      // Follow-up on own reply: reply to that reply's recipient, not yourself.
+      if (followUpReply.recipient_type !== 'volunteer') {
+        replyTarget = {
+          recipient_type: followUpReply.recipient_type,
+          recipient_day: followUpReply.recipient_day,
+          recipient_shift: followUpReply.recipient_shift,
+          recipient_role: followUpReply.recipient_role,
+          recipient_volunteer_id: followUpReply.recipient_volunteer_id,
+        }
+      } else {
+        if (!followUpReply.recipient_volunteer_id || followUpReply.recipient_volunteer_id === user?.id) return abort("Could not determine who to follow up with")
+        replyTarget = {
+          recipient_type: 'volunteer',
+          recipient_volunteer_id: followUpReply.recipient_volunteer_id,
+        }
       }
     } else if (isDirectThread) {
       // 1-on-1: always reply to the other person in the string, never yourself.
@@ -296,6 +315,7 @@ function ReplyThread({
         setReplyOpen(false)
         setReplyToId(null)
         setIsReplyAll(false)
+        setFollowUpId(null)
         onReplySent()
       }
     } catch (err) {
@@ -308,9 +328,17 @@ function ReplyThread({
   const hasReplies = replies.length > 0
 
   // Display name for the reply composer: in 1-on-1 threads always the
-  // other person, otherwise the sender of the message being replied to.
+  // other person, for follow-ups the recipient of your own reply,
+  // otherwise the sender of the message being replied to.
   const replyTargetName = (() => {
     if (isReplyAll) return null
+    if (followUpId) {
+      const f = replies.find(r => r.id === followUpId)
+      if (f?.sender_id === user?.id && f?.recipient_type === 'volunteer') {
+        if (f.recipient_volunteer_id === user?.id) return 'User'
+        return allUsers.find(u => u.id === f.recipient_volunteer_id)?.full_name ?? 'User'
+      }
+    }
     if (isDirectThread) {
       const other = allUsers.find(u => u.id === otherParticipantId)
       if (other?.full_name) return other.full_name
@@ -396,6 +424,7 @@ function ReplyThread({
               clearNotificationForMessage(message.id)
               setReplyToId(null)
               setIsReplyAll(isGroupMessageSender)
+              setFollowUpId(null)
               setReplyOpen(true)
             }}
             title={isGroupMessageSender ? "Reply All" : "Reply"}
@@ -434,7 +463,7 @@ function ReplyThread({
       {/* ── Original message (click to collapse) ── */}
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
-         onClick={() => { setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false) }}
+          onClick={() => { setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
       >
         <MessageCard
           m={message}
@@ -445,8 +474,8 @@ function ReplyThread({
           canReply={canReply && !isGroupMessageSender}
           canReplyAll={isGroupMessageSender}
           replyOpen={replyOpen}
-          onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(false); setReplyOpen(true) }}
-          onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(true); setReplyOpen(true) }}
+          onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(false); setFollowUpId(null); setReplyOpen(true) }}
+          onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(true); setFollowUpId(null); setReplyOpen(true) }}
           isHighlighted={isHighlighted}
           recipientLabel={getRecipientLabel(message)}
         />
@@ -468,38 +497,34 @@ function ReplyThread({
             const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
             const isMostRecent = idx === replies.length - 1
             const isMostRecentReply = true
+            const isOwnReply = reply.sender_id === user?.id
+            // Group sender's own replies get a button matching that reply's
+            // audience: Reply All for group-targeted replies, follow-up Reply
+            // for replies sent to a specific person.
+            const ownReplyIsGroup = isOwnReply && reply.recipient_type !== 'volunteer'
+            const replyCanReply = isGroupMessageSender
+              ? (isOwnReply ? !ownReplyIsGroup : true)
+              : (canReply && isMostRecent && isMostRecentReply)
+            const replyCanReplyAll = isGroupMessageSender && isOwnReply && ownReplyIsGroup
+            // Direct replies in a group thread get a darker card to distinguish
+            // them from reply-alls and the original message.
+            const isDirectReply = message.recipient_type !== 'volunteer' && reply.recipient_type === 'volunteer'
             return (
               <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1 }}>
-                  {/* Sender name pill — shown above each group of replies from the same sender */}
-                  {(idx === 0 || replies[idx - 1].sender_id !== reply.sender_id) && (
-                    <span style={{
-                      alignSelf: 'flex-start',
-                      fontSize: '0.65rem',
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      color: 'var(--accent)',
-                      background: 'rgba(2,65,107,0.08)',
-                      border: '1px solid rgba(2,65,107,0.2)',
-                      borderRadius: '100px',
-                      padding: '0.1rem 0.5rem',
-                      marginBottom: '0.1rem',
-                    }}>
-                      {reply.sender?.full_name?.split(' ')[0] ?? 'Reply'}
-                    </span>
-                  )}
                   <MessageCard
                     m={reply}
                     readMessageIds={readMessageIds}
                     user={user}
                     setLightboxUrl={setLightboxUrl}
                     isHighlighted={isReplyHighlighted}
-                    canReply={isGroupMessageSender ? reply.sender_id !== user?.id : (canReply && isMostRecent && isMostRecentReply)}
-                    canReplyAll={false}
+                    canReply={replyCanReply}
+                    canReplyAll={replyCanReplyAll}
                     replyOpen={replyOpen}
-                    onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(reply.id); setIsReplyAll(false); setReplyOpen(true) }}
+                    onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; if (isGroupMessageSender && isOwnReply) { setReplyToId(null); setIsReplyAll(false); setFollowUpId(reply.id) } else { setReplyToId(reply.id); setIsReplyAll(false); setFollowUpId(null) } setReplyOpen(true) }}
+                    onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setFollowUpId(null); setIsReplyAll(true); setReplyOpen(true) }}
                     recipientLabel={getRecipientLabel(reply)}
+                    dimmed={isDirectReply}
                   />
                 </div>
               </div>
@@ -532,7 +557,7 @@ function ReplyThread({
               onChange={e => setReplyBody(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
-                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false) }
+                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }
               }}
               placeholder={isReplyAll ? 'Replying to Everyone…' : `Replying to ${replyTargetName}…`}
               rows={2}
@@ -549,7 +574,7 @@ function ReplyThread({
             />
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                 <button
-                  onClick={() => { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false) }}
+                  onClick={() => { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
                   style={{
                   padding: '0.35rem 0.75rem',
                   background: 'none',
@@ -762,6 +787,7 @@ export function MessageTab({
 
     const fetched = (older || []).filter(m => m != null)
     setMessages(prev => {
+      const existingIds = new Set(prev.map(m => m.id))
       return [...prev, ...fetched.filter(m => !existingIds.has(m.id))]
     })
     const topLevel = fetched.filter(m => !m.parent_message_id)
@@ -794,9 +820,18 @@ export function MessageTab({
         if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
         repliesMap[r.parent_message_id].push(r)
       })
-    // Sort each reply thread oldest-first
+    // Sort each reply thread: the sender's reply-alls float above direct
+    // messages to/from the sender, chronological within each group.
+    const byId = new Map(validMsgs.map(m => [m.id, m]))
     Object.keys(repliesMap).forEach(k => {
-      repliesMap[k].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      const parentSenderId = byId.get(k)?.sender_id
+      const isBroadcast = (r) => parentSenderId && r.sender_id === parentSenderId && r.recipient_type !== 'volunteer'
+      repliesMap[k].sort((a, b) => {
+        const ag = isBroadcast(a) ? 0 : 1
+        const bg = isBroadcast(b) ? 0 : 1
+        if (ag !== bg) return ag - bg
+        return new Date(a.created_at) - new Date(b.created_at)
+      })
     })
     const topLevel = validMsgs.filter(m => !m.parent_message_id)
       .sort((a, b) => {

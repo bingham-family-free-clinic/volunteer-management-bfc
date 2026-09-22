@@ -61,17 +61,18 @@ function formatBody(text) {
   })
 }
 
-export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, canReplyAll, replyOpen, onReply, onReplyAll, isHighlighted, recipientLabel: recipientLabelProp }) {
+export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, canReplyAll, replyOpen, onReply, onReplyAll, isHighlighted, recipientLabel: recipientLabelProp, dimmed = false }) {
   const isUnread =
     readMessageIds &&
     !readMessageIds.has(m.id) &&
     m.sender_id !== user?.id
+  const isDimmed = dimmed && !isUnread && !isHighlighted
 
   return (
     <div
       style={{
         padding: '0.75rem 1rem',
-        background: isUnread || isHighlighted ? 'rgba(2,65,107,0.06)' : 'var(--bg)',
+        background: isUnread || isHighlighted ? 'rgba(2,65,107,0.06)' : (isDimmed ? 'var(--surface)' : 'var(--bg)'),
         borderRadius: '8px',
         border: `1px solid ${isUnread || isHighlighted ? 'rgba(2,65,107,0.5)' : 'var(--border)'}`,
       }}
@@ -86,7 +87,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           gap: '0.4rem',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           {isUnread || isHighlighted ? (
             <div
               style={{
@@ -106,33 +107,20 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           >
             {senderLabel || m.sender?.full_name || 'Unknown'}
           </span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {recipientLabelProp && (
-            <span
-              style={{
-                fontSize: '0.8rem',
-                padding: '0.15rem 0.5rem',
-                borderRadius: '100px',
-                background: 'var(--surface)',
-                color: 'var(--muted)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              {recipientLabelProp}
-            </span>
-          )}
-
           <span
             style={{
               color: 'var(--muted)',
-              fontSize: '0.8rem',
+              fontSize: '0.68rem',
               fontFamily: 'DM Mono, monospace',
+              whiteSpace: 'nowrap',
             }}
           >
             {formatDateTime(m.created_at)}
+            {recipientLabelProp ? `, ${recipientLabelProp}` : ''}
           </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
 
           {canReply && !replyOpen && (
             <button
@@ -171,9 +159,9 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                 gap: '0.25rem',
                 padding: '0.15rem 0.55rem',
                 background: 'none',
-                border: '1px solid var(--accent)',
+                border: '1px solid var(--border)',
                 borderRadius: '100px',
-                color: 'var(--accent)',
+                color: 'var(--muted)',
                 fontSize: '0.8rem',
                 fontWeight: 500,
                 cursor: 'pointer',
