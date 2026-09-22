@@ -1,7 +1,7 @@
 'use client'
 import JSZip from 'jszip'
-import { useState, useEffect, useRef } from 'react'
-import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS } from '../lib/constants'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, getRoleCapacity } from '../lib/constants'
 import { formatSlotFull, formatSlotDayLabel, formatSlotTime, TIMEZONE_LABEL } from '../lib/interview-schedule'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -22,6 +22,43 @@ function parseSlotKey(key) {
   const day   = key.slice(0, idx)
   const shift = key.slice(idx + 1)
   return { day, shift }
+}
+
+// ── Application shift-availability helpers ────────────────────────────────
+// The volunteer application form stores each shift as its own boolean
+// column (e.g. shift_mon_10_2, shift_tue_2_6 — abbreviated day + shift with
+// underscores), while the Training-stage SlotPicker/onboard_preferred_slots
+// use "monday-10-2" style keys (full day name + shift). These helpers
+// translate between the two so an applicant's stated availability can be
+// displayed and used to pre-fill the SlotPicker.
+function shiftColumnKey(day, shift) {
+  return `shift_${day.slice(0, 3)}_${shift.replace(/-/g, '_')}`
+}
+
+function getStatedAvailability(applicant) {
+  return ALL_SLOTS.filter(s => applicant?.[shiftColumnKey(s.day, s.shift)])
+}
+
+function formatStatedAvailability(applicant) {
+  const slots = getStatedAvailability(applicant)
+  return slots.length ? slots.map(s => s.label).join(', ') : null
+}
+
+// Joins a text[] application field into a readable string, appending the
+// free-text "Other" value (e.g. languages_other, certifications_other,
+// skills_other) when "Other" was one of the selections.
+function joinWithOther(values, otherValue) {
+  if (!values || values.length === 0) return null
+  const parts = values.map(v => (v === 'Other' && otherValue ? `Other (${otherValue})` : v))
+  return parts.join(', ')
+}
+
+// Combines a reference's name + contact info into one display string,
+// e.g. "Jane Doe — (801) 555-0100". Returns null if both are empty.
+function formatReference(name, contact) {
+  if (!name && !contact) return null
+  if (name && contact) return `${name} — ${contact}`
+  return name || contact
 }
 
 const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
@@ -92,6 +129,472 @@ const NON_PATIENT_ROLES_REQUIRED = ['background_check', 'id_check']
 const MISSIONARY_REQUIRED = ['id_check']
 
 const TOTAL_STEPS = 3
+
+// ─── Preparedness scoring ─────────────────────────────────────────────────────
+// Hard-coded 100-pt "preparedness" score for each of the six scored roles,
+// computed from the volunteer application. Only roles the applicant listed in
+// roles_interested are scored. Every category is capped at its stated maximum,
+// and each role's category maximums add up to exactly 100.
+//
+//   • Certifications / Skills — additive per matched item, then capped
+//   • Patient care hours      — linear, full points at PREP_HOURS_FULL_AT hrs
+//   • Shift availability      — worth PREP_SHIFT_MAX (20) pts for EVERY role;
+//                               linear, 1 of 10 shifts = 1/10 of the points,
+//                               10 of 10 = all of the points
+//   • Language proficiency    — non-English language(s) × proficiency level
+//
+// Application values are matched by keyword rather than exact string, so
+// "Registered Nurse (RN)" and "RN" both count, "AEMT" never counts as "EMT",
+// and minor wording changes in the application form won't silently zero a score.
+
+const PREP_HOURS_FULL_AT = 300
+const PREP_SHIFT_MAX = 20   // same weight for every role
+
+// Language: share of the language points earned per proficiency level. The
+// application's dropdown offers None / Basic / Conversational / Fluent /
+// Native; the highest level found in language_proficiency wins ("None"
+// scores 0 even if a language box was ticked). If a non-English language is
+// listed but no level was chosen, PREP_LANG_DEFAULT_FACTOR is used.
+const PREP_LANG_LEVELS = [
+  { factor: 1,    label: 'Native / fluent', re: /\b(native|fluen\w*|bilingual|mother tongue)\b/ },
+  { factor: 0.75, label: 'Advanced',        re: /\b(advanced|proficient|professional|fully)\b/ },
+  { factor: 0.5,  label: 'Conversational',  re: /\b(conversation\w*|intermediate)\b/ },
+  { factor: 0.25, label: 'Basic',           re: /\b(basic|beginner|elementary|limited|novice)\b/ },
+  { factor: 0,    label: 'None',            re: /\bnone\b/ },
+]
+const PREP_LANG_DEFAULT_FACTOR = 0.5
+
+// Matched against normText() output (lowercase, punctuation → spaces).
+const PREP_CERT_MATCHERS = {
+  RN:   /\brn\b|registered nurse/,
+  LPN:  /\blpn\b|licensed practical/,
+  MA:   /\b[cr]?ma\b|medical assistant/,
+  AEMT: /\baemt\b|advanced emt|advanced emergency medical/,
+  EMT:  /\bemt\b|emergency medical tech/,
+  CNA:  /\bcna\b|\brna\b|nursing assistant/,   // the application also offers "RNA"; scored the same as CNA
+  ACLS: /\bacls\b|advanced cardiac|advanced cardiovascular/,
+  BLS:  /\bbls\b|basic life support/,
+  CPR:  /\bcpr\b/,
+}
+
+const PREP_SKILL_MATCHERS = {
+  vitalSigns:     /vital/,
+  patientIntake:  /intake/,
+  phlebotomy:     /phlebotom|venipuncture/,
+  emr:            /\bemr\b|\behr\b|electronic (medical|health) record/,
+  medTerminology: /medical terminology|med terminology/,
+  medTranslation: /translat|interpret/,
+  scheduling:     /schedul|front desk/,
+  office:         /microsoft|google workspace|google suite|g suite|office suite/,
+  scribing:       /scrib/,
+  lab:            /laborator|\blab\b/,
+}
+
+const PREP_SKILL_LABELS = {
+  vitalSigns:     'Vital Signs',
+  patientIntake:  'Patient Intake',
+  phlebotomy:     'Phlebotomy/Venipuncture',
+  emr:            'EMR',
+  medTerminology: 'Medical Terminology',
+  medTranslation: 'Medical Translation',
+  scheduling:     'Scheduling/Front Desk',
+  office:         'Microsoft Office/Google Workspace',
+  scribing:       'Medical Scribing',
+  lab:            'Laboratory Skills',
+}
+
+// Category kinds: 'certs' | 'skills' (pts table + cap), 'hours' | 'shifts' |
+// 'language' (max only). Categories are listed in the same order as the spec.
+const PREP_ROLES = [
+  {
+    key: 'clinical', role: 'Clinical Staff', short: 'Clinical', aliases: ['clinical staff'],
+    categories: [
+      { kind: 'certs', label: 'Certifications', cap: 31, pts: { RN: 31, LPN: 25, MA: 21, AEMT: 19, EMT: 15, CNA: 12, ACLS: 9, BLS: 6, CPR: 4, Other: 3 } },
+      { kind: 'skills', label: 'Skills', cap: 22, pts: { vitalSigns: 9, patientIntake: 5, emr: 4, medTerminology: 4 } },
+      { kind: 'hours', label: 'Patient care hours', cap: 17 },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
+      { kind: 'language', label: 'Language proficiency', cap: 10 },
+    ],
+  },
+  {
+    key: 'navigator', role: 'Patient Nav.', short: 'Navigator', aliases: ['patient nav', 'patient navigator', 'patient navigators'],
+    categories: [
+      { kind: 'language', label: 'Language proficiency', cap: 44 },
+      { kind: 'skills', label: 'Skills', cap: 26, pts: { medTranslation: 16, patientIntake: 5, scheduling: 5 } },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
+      { kind: 'certs', label: 'Certifications', cap: 10, pts: { BLS: 6, CPR: 4 } },
+    ],
+  },
+  {
+    key: 'support', role: 'Support Center', short: 'Support Ctr', aliases: ['support center', 'support centre'],
+    categories: [
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
+      { kind: 'skills', label: 'Skills', cap: 53, pts: { scheduling: 33, office: 13, patientIntake: 7 } },
+      { kind: 'language', label: 'Language proficiency', cap: 20 },
+      { kind: 'certs', label: 'Certifications', cap: 7, pts: { BLS: 4, CPR: 3 } },
+    ],
+  },
+  {
+    key: 'scribe', role: 'Scribe', short: 'Scribe', aliases: ['scribe', 'medical scribe'],
+    categories: [
+      { kind: 'skills', label: 'Skills', cap: 45, pts: { scribing: 28, medTerminology: 11, emr: 6 } },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
+      { kind: 'hours', label: 'Patient care hours', cap: 15 },
+      { kind: 'certs', label: 'Certifications', cap: 10, pts: { BLS: 6, CPR: 4 } },
+      { kind: 'language', label: 'Language proficiency', cap: 10 },
+    ],
+  },
+  {
+    key: 'lab', role: 'Lab', short: 'Lab', aliases: ['lab', 'laboratory'],
+    categories: [
+      { kind: 'skills', label: 'Skills', cap: 28, pts: { phlebotomy: 28, lab: 19 } },
+      { kind: 'certs', label: 'Certifications', cap: 29, pts: { MA: 17, RN: 17, LPN: 17, AEMT: 17, CNA: 12, EMT: 12 } },
+      { kind: 'hours', label: 'Patient care hours', cap: 13 },
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
+      { kind: 'language', label: 'Language proficiency', cap: 10 },
+    ],
+  },
+  {
+    key: 'receptionist', role: 'Receptionist', short: 'Reception', aliases: ['receptionist'],
+    categories: [
+      { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
+      { kind: 'skills', label: 'Skills', cap: 60, pts: { scheduling: 39, office: 21 } },
+      { kind: 'certs', label: 'Certifications', cap: 7, pts: { BLS: 4, CPR: 3 } },
+      { kind: 'language', label: 'Language proficiency', cap: 13 },
+    ],
+  },
+]
+
+// ─── Staffing-need scoring (Applied stage) ────────────────────────────────
+// A quick "High / Moderate / Low Staffing Need" read on each applicant,
+// based on the same six clinic roles PREP_ROLES already knows how to match
+// against roles_interested (Clinical Staff, Scribe, Lab, Patient Nav.,
+// Receptionist, Support Center):
+//   • High     — an open clinic slot exists for a role/day/shift combo the
+//                applicant is interested in
+//   • Moderate — not High, but fewer than 4 waitlist entries are interested
+//                in the same role as the applicant
+//   • Low      — neither of the above
+const STAFFING_ROLES = PREP_ROLES.map(r => r.role)
+const STAFFING_WAITLIST_THRESHOLD = 4
+
+// Canonical clinic roles (matching PREP_ROLES aliases) the applicant expressed
+// interest in, deduped, in the order listed.
+function getApplicantStaffingRoles(applicant) {
+  const interested = prepToList(applicant?.roles_interested).map(normText)
+  const roles = []
+  const seen = new Set()
+  for (const label of interested) {
+    const cfg = PREP_ROLES.find(r => r.aliases.includes(label))
+    if (!cfg || seen.has(cfg.role)) continue
+    seen.add(cfg.role)
+    roles.push(cfg.role)
+  }
+  return roles
+}
+
+// Set of "day-shift-role" keys (role limited to STAFFING_ROLES) that
+// currently have an unfilled clinic slot — mirrors the openings math in
+// ClinicOpenings.jsx / Waitlist.js's computeAvailableSlots.
+function computeOpenStaffingSlotSet(scheduleRows) {
+  const today = new Date().toISOString().split('T')[0]
+  const activeRows = (scheduleRows || []).filter(r => r.end_date == null || r.end_date > today)
+  const set = new Set()
+  for (const day of DAYS) {
+    for (const shift of SHIFTS) {
+      for (const role of STAFFING_ROLES) {
+        const required = getRoleCapacity(day, shift, role)
+        if (!required) continue
+        const slotRows = activeRows.filter(r =>
+          r.day_of_week?.toLowerCase().trim() === day &&
+          r.shift_time?.toLowerCase().trim()  === shift &&
+          r.role                               === role
+        )
+        const filled = slotRows.reduce((sum, r) => sum + (r.week_pattern === 'every' ? 1 : 0.5), 0)
+        if (filled < required) set.add(`${day}-${shift}-${role}`)
+      }
+    }
+  }
+  return set
+}
+
+// How many waitlist entries are interested in each staffing role. An entry
+// with no preferred_roles set is "flexible" and counts toward every role
+// (same convention Waitlist.js/computeAvailableSlots uses for empty prefs).
+function computeWaitlistRoleCounts(waitlistRows) {
+  const counts = {}
+  for (const role of STAFFING_ROLES) counts[role] = 0
+  for (const entry of (waitlistRows || [])) {
+    const roles = (entry.preferred_roles?.length > 0) ? entry.preferred_roles : STAFFING_ROLES
+    for (const role of roles) {
+      if (counts[role] !== undefined) counts[role] += 1
+    }
+  }
+  return counts
+}
+
+// Returns 'high' | 'moderate' | 'low', or null if the applicant hasn't
+// expressed interest in any of the six scored clinic roles.
+function getStaffingNeedLevel(applicant, openSlotSet, waitlistCounts) {
+  const roles = getApplicantStaffingRoles(applicant)
+  if (roles.length === 0) return null
+
+  const statedSlots = getStatedAvailability(applicant)
+  const slots = statedSlots.length > 0 ? statedSlots : ALL_SLOTS   // no shifts checked = flexible
+
+  const hasOpenSlot = roles.some(role =>
+    slots.some(s => openSlotSet.has(`${s.day}-${s.shift}-${role}`))
+  )
+  if (hasOpenSlot) return 'high'
+
+  const underStaffedWaitlist = roles.some(role => (waitlistCounts[role] ?? 0) < STAFFING_WAITLIST_THRESHOLD)
+  if (underStaffedWaitlist) return 'moderate'
+
+  return 'low'
+}
+
+const STAFFING_NEED_STYLE = {
+  high:     { label: 'High Staffing Need',     color: C.primary },
+  moderate: { label: 'Moderate Staffing Need', color: C.blue    },
+  low:      { label: 'Low Staffing Need',      color: C.muted   },
+}
+
+function normText(s) {
+  return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+// text[] columns normally arrive as arrays; tolerate a delimited string too.
+function prepToList(v) {
+  if (Array.isArray(v)) return v
+  if (typeof v === 'string') return v.split(/[,;\n]/)
+  return []
+}
+
+function prepClassifyCerts(applicant) {
+  const found = new Set()
+  for (const raw of prepToList(applicant?.certifications)) {
+    const t = normText(raw)
+    if (!t) continue
+    if (t === 'other') { found.add('Other'); continue }
+    let hits = Object.keys(PREP_CERT_MATCHERS).filter(k => PREP_CERT_MATCHERS[k].test(t))
+    if (hits.includes('AEMT')) hits = hits.filter(k => k !== 'EMT')   // "Advanced EMT" is AEMT only
+    if (hits.length === 0) found.add('Other')   // a real cert we don't have a tier for
+    hits.forEach(k => found.add(k))
+  }
+  if (normText(applicant?.certifications_other)) found.add('Other')
+  return found
+}
+
+function prepClassifySkills(applicant) {
+  const found = new Set()
+  for (const raw of prepToList(applicant?.skills_selected)) {
+    const t = normText(raw)
+    if (!t) continue
+    Object.keys(PREP_SKILL_MATCHERS).forEach(k => { if (PREP_SKILL_MATCHERS[k].test(t)) found.add(k) })
+  }
+  return found
+}
+
+function prepPatientHours(applicant) {
+  const n = parseFloat(String(applicant?.patient_care_hours ?? '').replace(/[^0-9.]/g, ''))
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+// Non-English languages spoken + the proficiency level read from
+// language_proficiency. English alone earns nothing.
+function prepLanguageContext(applicant) {
+  const names = []
+  for (const l of prepToList(applicant?.languages_spoken)) {
+    const t = normText(l)
+    if (!t || t === 'english') continue
+    if (t === 'other') { if (!normText(applicant?.languages_other)) names.push('Other') }
+    else names.push(String(l).trim())
+  }
+  if (normText(applicant?.languages_other)) names.push(String(applicant.languages_other).trim())
+  if (names.length === 0) {
+    for (const l of prepToList(applicant?.languages)) {
+      const t = normText(l)
+      if (t && t !== 'english') names.push(String(l).trim())
+    }
+  }
+  if (names.length === 0) return { factor: 0, note: 'No non-English language listed' }
+
+  const text = normText(applicant?.language_proficiency)
+  const levels = PREP_LANG_LEVELS.filter(lv => lv.re.test(text))
+  const best = levels.reduce((a, b) => (!a || b.factor > a.factor ? b : a), null)
+  const list = names.join(', ')
+  return best
+    ? { factor: best.factor, note: `${list} — ${best.label}` }
+    : { factor: PREP_LANG_DEFAULT_FACTOR, note: `${list} — level not stated (counted as conversational)` }
+}
+
+function prepTrim(n) {
+  const r = Math.round(n * 10) / 10
+  return Number.isInteger(r) ? String(r) : r.toFixed(1)
+}
+
+// Returns one entry per scored role the applicant is interested in, in the
+// order they listed them: { key, role, short, total, max, categories: [...] }.
+function getPreparednessScores(applicant) {
+  const interested = prepToList(applicant?.roles_interested).map(normText)
+  if (interested.length === 0) return []
+
+  const ctx = {
+    certs:  prepClassifyCerts(applicant),
+    skills: prepClassifySkills(applicant),
+    hours:  prepPatientHours(applicant),
+    shifts: getStatedAvailability(applicant).length,
+    lang:   prepLanguageContext(applicant),
+  }
+
+  const results = []
+  const seen = new Set()
+  for (const label of interested) {
+    const cfg = PREP_ROLES.find(r => r.aliases.includes(label))
+    if (!cfg || seen.has(cfg.key)) continue
+    seen.add(cfg.key)
+
+    const categories = cfg.categories.map(cat => {
+      let earned = 0, note = ''
+      if (cat.kind === 'certs') {
+        const matched = Object.keys(cat.pts).filter(k => ctx.certs.has(k))
+        earned = Math.min(matched.reduce((s, k) => s + cat.pts[k], 0), cat.cap)
+        note = matched.length ? matched.join(', ') : 'None'
+      } else if (cat.kind === 'skills') {
+        const matched = Object.keys(cat.pts).filter(k => ctx.skills.has(k))
+        earned = Math.min(matched.reduce((s, k) => s + cat.pts[k], 0), cat.cap)
+        note = matched.length ? matched.map(k => PREP_SKILL_LABELS[k]).join(', ') : 'None'
+      } else if (cat.kind === 'hours') {
+        earned = cat.cap * Math.min(ctx.hours, PREP_HOURS_FULL_AT) / PREP_HOURS_FULL_AT
+        note = ctx.hours ? `${prepTrim(ctx.hours)} hrs (full points at ${PREP_HOURS_FULL_AT})` : 'None reported'
+      } else if (cat.kind === 'shifts') {
+        earned = cat.cap * Math.min(ctx.shifts, ALL_SLOTS.length) / ALL_SLOTS.length
+        note = `${ctx.shifts} of ${ALL_SLOTS.length} shifts`
+      } else if (cat.kind === 'language') {
+        earned = cat.cap * ctx.lang.factor
+        note = ctx.lang.note
+      }
+      return { label: cat.label, earned, max: cat.cap, note }
+    })
+
+    results.push({
+      key: cfg.key, role: cfg.role, short: cfg.short,
+      total: categories.reduce((s, c) => s + c.earned, 0),
+      max: categories.reduce((s, c) => s + c.max, 0),
+      categories,
+    })
+  }
+  return results
+}
+
+// Same scoring math as getPreparednessScores, but returns every one of the
+// six core clinical roles regardless of roles_interested — used by the
+// Applied-stage "Compare Applicants" overlay so every applicant lines up
+// against the same six columns. `interested` flags roles the applicant
+// actually listed, so the overlay can distinguish "scored high because
+// they're genuinely prepared" from "scored high but never asked for this role".
+function getAllRoleScores(applicant) {
+  const ctx = {
+    certs:  prepClassifyCerts(applicant),
+    skills: prepClassifySkills(applicant),
+    hours:  prepPatientHours(applicant),
+    shifts: getStatedAvailability(applicant).length,
+    lang:   prepLanguageContext(applicant),
+  }
+  const interestedRoles = new Set(getApplicantStaffingRoles(applicant))
+
+  return PREP_ROLES.map(cfg => {
+    const total = cfg.categories.reduce((sum, cat) => {
+      let earned = 0
+      if (cat.kind === 'certs') {
+        const matched = Object.keys(cat.pts).filter(k => ctx.certs.has(k))
+        earned = Math.min(matched.reduce((s, k) => s + cat.pts[k], 0), cat.cap)
+      } else if (cat.kind === 'skills') {
+        const matched = Object.keys(cat.pts).filter(k => ctx.skills.has(k))
+        earned = Math.min(matched.reduce((s, k) => s + cat.pts[k], 0), cat.cap)
+      } else if (cat.kind === 'hours') {
+        earned = cat.cap * Math.min(ctx.hours, PREP_HOURS_FULL_AT) / PREP_HOURS_FULL_AT
+      } else if (cat.kind === 'shifts') {
+        earned = cat.cap * Math.min(ctx.shifts, ALL_SLOTS.length) / ALL_SLOTS.length
+      } else if (cat.kind === 'language') {
+        earned = cat.cap * ctx.lang.factor
+      }
+      return sum + earned
+    }, 0)
+    return { key: cfg.key, short: cfg.short, total: Math.round(total), interested: interestedRoles.has(cfg.role) }
+  })
+}
+
+// Blue-palette tiers so a score reads at a glance.
+function prepTierColor(total) {
+  if (total >= 70) return C.primary
+  if (total >= 40) return C.blue
+  return C.light
+}
+
+// Per-role scores for the applicant detail view (Applied stage only). Nothing
+// is shown on the pipeline list. Each role's score is a button; its category
+// breakdown stays hidden until that score is clicked (click again to hide).
+function PreparednessPanel({ applicant, card, secLabel }) {
+  const [openKeys, setOpenKeys] = useState([])
+  const scores = getPreparednessScores(applicant)
+  if (scores.length === 0) return null
+
+  const toggle = key => setOpenKeys(keys => keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key])
+  const openScores = scores.filter(s => openKeys.includes(s.key))
+
+  return (
+    <div style={{ ...card, padding: '1rem 1.25rem' }}>
+      <p style={secLabel}>Preparedness</p>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+        {scores.map(s => {
+          const color  = prepTierColor(s.total)
+          const isOpen = openKeys.includes(s.key)
+          return (
+            <button key={s.key} type="button" onClick={() => toggle(s.key)} aria-expanded={isOpen}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', padding: '0.25rem 0.7rem', borderRadius: '100px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: color + (isOpen ? '26' : '14'), color, border: `1px solid ${color}${isOpen ? '99' : '44'}`, whiteSpace: 'nowrap' }}>
+              {s.short}
+              <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700 }}>{Math.round(s.total)}</span>
+              <span style={{ fontSize: '0.6rem', opacity: 0.7 }}>{isOpen ? '▾' : '▸'}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {openScores.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem', marginTop: '0.9rem' }}>
+          {openScores.map(s => {
+            const color = prepTierColor(s.total)
+            return (
+              <div key={s.key} style={{ padding: '0.75rem 0.9rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.6rem' }}>
+                  <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{s.role}</p>
+                  <p style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700, fontSize: '1rem', color }}>
+                    {Math.round(s.total)}<span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 500 }}>/{s.max}</span>
+                  </p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {s.categories.map(c => (
+                    <div key={c.label}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                        <span>{c.label}</span>
+                        <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)' }}>{prepTrim(c.earned)}/{c.max}</span>
+                      </div>
+                      <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', marginTop: '0.2rem', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${c.max ? (c.earned / c.max) * 100 : 0}%`, background: color, borderRadius: 2 }} />
+                      </div>
+                      <p style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '0.15rem', lineHeight: 1.4 }}>{c.note}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ─── Slot picker ──────────────────────────────────────────────────────────────
 function SlotPicker({ selected, onChange }) {
@@ -964,19 +1467,38 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   const [toast, setToast] = useState(null)
 
+  // ── Staffing-need context (Applied stage badge) ────────────────────────────
+  // Raw rows pulled once and recomputed into lookups via useMemo below.
+  const [staffingSchedule, setStaffingSchedule] = useState([])
+  const [staffingWaitlist, setStaffingWaitlist] = useState([])
+
+  // ── Applied-stage "Compare Applicants" overlay ──────────────────────────
+  const [compareOpen, setCompareOpen] = useState(false)
+
   // ── Applicant profile photo state ──────────────────────────────────────────
   const [applicantPhotoUrl,       setApplicantPhotoUrl]       = useState(null)
   const [uploadingApplicantPhoto, setUploadingApplicantPhoto] = useState(false)
   const [applicantAvatarPath,     setApplicantAvatarPath]     = useState(null)
   const applicantPhotoInputRef = useRef(null)
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { loadAll(); loadStaffingContext() }, [])
 
   useEffect(() => {
     if (activeTab === 'templates' && Object.keys(templates).length === 0) {
       loadTemplates()
     }
   }, [activeTab])
+
+  // Lookups for the Applied-stage "Staffing Need" badge — recomputed only
+  // when the underlying clinic schedule / waitlist rows change.
+  const staffingOpenSlots = useMemo(
+    () => computeOpenStaffingSlotSet(staffingSchedule),
+    [staffingSchedule]
+  )
+  const staffingWaitlistCounts = useMemo(
+    () => computeWaitlistRoleCounts(staffingWaitlist),
+    [staffingWaitlist]
+  )
 
   // ── Parking pass PDF message listener ─────────────────────────────────────
   useEffect(() => {
@@ -1128,6 +1650,17 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       .from('volunteer_applications').select('*').in('stage', STAGES).order('created_at', { ascending: false })
     if (error) { setLoadError(error.message); setApplicants([]) }
     else setApplicants(data || [])
+  }
+
+  // Clinic schedule + waitlist rows feeding the Applied-stage "Staffing Need"
+  // badge. Failures here are non-fatal — the badge just won't render.
+  async function loadStaffingContext() {
+    const [schedRes, wlRes] = await Promise.all([
+      supabase.from('schedule').select('day_of_week, shift_time, role, end_date, week_pattern'),
+      supabase.from('waitlist').select('preferred_roles'),
+    ])
+    if (!schedRes.error) setStaffingSchedule(schedRes.data || [])
+    if (!wlRes.error)    setStaffingWaitlist(wlRes.data || [])
   }
 
   async function loadCompleted() {
@@ -1393,8 +1926,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // saved on their application row, so callers always see the latest values
   // regardless of whether a given field has been touched yet.
   function getTrainingDraft(applicant) {
+    const savedSlots = applicant.onboard_preferred_slots
+    const statedSlots = getStatedAvailability(applicant).map(s => s.key)
     return {
-      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? applicant.onboard_preferred_slots ?? [],
+      // Fall back to what the applicant said on their application if staff
+      // haven't set/overridden availability yet, instead of starting blank.
+      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? (savedSlots?.length ? savedSlots : statedSlots),
       preferred_roles: trainingDrafts[applicant.id]?.preferred_roles ?? applicant.onboard_preferred_roles ?? [],
     }
   }
@@ -1850,10 +2387,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isProvider = affil === 'provider'
     const affiliData = onboardForm
 
+    // profiles has no dedicated columns for educational_background, the raw
+    // `skills` text field, or reference contacts — fold them into
+    // admin_notes so this info isn't silently dropped when the applicant
+    // becomes a volunteer profile.
+    const extraInfo = [
+      selected.educational_background ? `Educational Background: ${selected.educational_background}` : null,
+      selected.skills ? `Additional Skills: ${selected.skills}` : null,
+      formatReference(selected.ref1_name, selected.ref1_contact) ? `Reference 1: ${formatReference(selected.ref1_name, selected.ref1_contact)}` : null,
+      formatReference(selected.ref2_name, selected.ref2_contact) ? `Reference 2: ${formatReference(selected.ref2_name, selected.ref2_contact)}` : null,
+    ].filter(Boolean).join('\n')
+
     const { error: profileErr } = await supabase.from('profiles').insert({
       id: uid, full_name: selected.full_name, email: selected.email,
       phone: selected.phone || null, role: 'volunteer', affiliation: affil || null,
-      languages: selected.languages || null,
+      languages: joinWithOther(selected.languages_spoken, selected.languages_other) || selected.languages || null,
       default_role: affiliData.default_role || null,
       status: 'active',
       avatar_url: applicantAvatarPath || null,
@@ -1865,13 +2413,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       intern_department: affil === 'intern' ? (affiliData.intern_department || null) : null,
       advisor_name:      affil === 'intern' ? (affiliData.advisor_name      || null) : null,
       advisor_contact:   affil === 'intern' ? (affiliData.advisor_contact   || null) : null,
-      credentials: isProvider ? (affiliData.credentials || null) : (selected.credentials || null),
+      credentials: isProvider ? (affiliData.credentials || null) : (joinWithOther(selected.certifications, selected.certifications_other) || selected.credentials || null),
       license_exp: isProvider ? (affiliData.license_exp || null) : null,
       bls_exp:     isProvider ? (affiliData.bls_exp     || null) : null,
       dea_exp:     isProvider ? (affiliData.dea_exp     || null) : null,
       ftca_exp:    isProvider ? (affiliData.ftca_exp    || null) : null,
       tb_exp:      isProvider ? (affiliData.tb_exp      || null) : null,
-      admin_notes: notesDraft || selected.notes || null,
+      admin_notes: [notesDraft || selected.notes || null, extraInfo || null].filter(Boolean).join('\n\n') || null,
     })
     if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
 
@@ -1923,6 +2471,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setChecklist(EMPTY_CHECKLIST)
     setNotesDraft(a.notes || '')
 
+    // Staff-entered values (affiliData) take priority if they've already
+    // been filled in; otherwise fall back to what the applicant told us on
+    // the application itself (School/Program), so nobody has to re-ask a
+    // question already answered.
     const affiliData = applicant.onboard_affil_data || {}
     setOnboardForm({
       affiliation:   applicant.onboard_affiliation   || '',
@@ -1931,8 +2483,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       preferred_roles: applicant.onboard_preferred_roles || [],
       sma_name:          affiliData.sma_name          || '',
       sma_contact:       affiliData.sma_contact        || '',
-      school:            affiliData.school             || '',
-      major:             affiliData.major              || '',
+      school:            affiliData.school             || applicant.school  || '',
+      major:             affiliData.major              || applicant.program || '',
       intern_school:     affiliData.intern_school      || '',
       intern_department: affiliData.intern_department  || '',
       advisor_name:      affiliData.advisor_name       || '',
@@ -2041,6 +2593,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   function StagePill({ stage }) {
     const color = STAGE_COLORS[stage] || C.muted
     return <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: color + '18', color, border: `1px solid ${color}44` }}>{STAGE_LABELS[stage] || stage}</span>
+  }
+
+  // Applied-stage-only badge: High / Moderate / Low Staffing Need, based on
+  // whether the applicant's interested role(s) + shift(s) line up with an
+  // open clinic slot, or a thin waitlist for that role. Renders nothing if
+  // the applicant hasn't listed any of the six scored clinic roles.
+  function StaffingNeedBadge({ applicant }) {
+    const level = getStaffingNeedLevel(applicant, staffingOpenSlots, staffingWaitlistCounts)
+    if (!level) return null
+    const { label, color } = STAFFING_NEED_STYLE[level]
+    return (
+      <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: color + '18', color, border: `1px solid ${color}44`, whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+    )
   }
 
   function StepDots({ current, total, color }) {
@@ -2393,6 +2960,81 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     )
   }
 
+  // Applied-stage-only: a plain black-and-white comparison table so several
+  // applicants can be scanned side by side — staffing need, a score for
+  // each of the six core clinical roles, and service-missionary status, all
+  // aligned into the same columns. No color coding is used, only bold vs.
+  // regular weight, so it stays scannable at a glance.
+  function CompareApplicantsOverlay() {
+    if (!compareOpen) return null
+
+    const rows = applicants
+      .filter(a => a.stage === 'applied')
+      .map(a => ({
+        id: a.id,
+        name: a.full_name || 'Unnamed',
+        level: getStaffingNeedLevel(a, staffingOpenSlots, staffingWaitlistCounts),
+        scores: getAllRoleScores(a),
+        missionary: !!a.is_service_missionary,
+      }))
+      .sort((x, y) => x.name.localeCompare(y.name))
+
+    const roleShorts  = PREP_ROLES.map(r => r.short)
+    const levelLabel  = { high: 'High', moderate: 'Moderate', low: 'Low' }
+
+    const thStyle = { textAlign: 'left', padding: '0.5rem 0.6rem', borderBottom: '2px solid #000', fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: '#fff' }
+    const tdStyle = { padding: '0.5rem 0.6rem', borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }
+
+    return (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 220, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}
+        onClick={e => { if (e.target === e.currentTarget) setCompareOpen(false) }}
+      >
+        <div style={{ background: '#fff', color: '#000', borderRadius: '10px', border: '1px solid #000', width: '100%', maxWidth: 1040, maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'DM Sans, sans-serif' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.9rem 1.25rem', borderBottom: '2px solid #000' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Compare Applicants — Applied ({rows.length})</span>
+            <button onClick={() => setCompareOpen(false)} style={{ background: 'none', border: 'none', color: '#000', cursor: 'pointer', fontSize: '1.3rem', lineHeight: 1, padding: '0.1rem 0.3rem' }} title="Close">×</button>
+          </div>
+          <div style={{ overflow: 'auto', padding: '0 1.25rem' }}>
+            {rows.length === 0 ? (
+              <p style={{ padding: '1.5rem 0', fontStyle: 'italic', color: '#555' }}>No applicants in the Applied stage.</p>
+            ) : (
+              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.8rem' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Name</th>
+                    <th style={thStyle}>Staffing Need</th>
+                    {roleShorts.map(s => <th key={s} style={thStyle}>{s}</th>)}
+                    <th style={thStyle}>Service Missionary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.id}>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{r.name}</td>
+                      <td style={{ ...tdStyle, fontWeight: r.level === 'high' ? 700 : 400, color: r.level ? '#000' : '#999' }}>
+                        {r.level ? levelLabel[r.level] : '—'}
+                      </td>
+                      {r.scores.map(s => (
+                        <td key={s.key} style={{ ...tdStyle, fontFamily: 'DM Mono, monospace', fontWeight: s.interested ? 700 : 400, color: s.interested ? '#000' : '#999' }}>
+                          {s.total}
+                        </td>
+                      ))}
+                      <td style={{ ...tdStyle, fontWeight: r.missionary ? 700 : 400 }}>{r.missionary ? 'Yes' : 'No'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div style={{ padding: '0.7rem 1.25rem', borderTop: '1px solid #ccc' }}>
+            <span style={{ fontSize: '0.68rem', color: '#555' }}>Bold role scores are roles the applicant listed interest in; gray scores are shown for comparison only. Staffing Need reflects current clinic openings and waitlist depth.</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   async function saveTemplate(stage) {
     const draft = templateDrafts[stage]
     if (!draft?.subject || !draft?.body) {
@@ -2636,16 +3278,36 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isRejected   = applicant.stage === 'rejected'
     const trainingDraft = isTraining ? getTrainingDraft(applicant) : null
 
+    const schoolProgram = [applicant.school, applicant.program].filter(Boolean).join(' — ')
+    const languagesStr  = joinWithOther(applicant.languages_spoken, applicant.languages_other)
+    const certsStr      = joinWithOther(applicant.certifications, applicant.certifications_other)
+    const skillsStr     = joinWithOther(applicant.skills_selected, applicant.skills_other)
+    const rolesStr      = applicant.roles_interested?.length ? applicant.roles_interested.join(', ') : null
+    const availabilityStr = formatStatedAvailability(applicant)
+    const ref1Str       = formatReference(applicant.ref1_name, applicant.ref1_contact)
+    const ref2Str       = formatReference(applicant.ref2_name, applicant.ref2_contact)
+
     const fields = [
-      { label: 'Email',       value: applicant.email },
-      { label: 'Phone',       value: applicant.phone },
-      { label: 'Languages',   value: applicant.languages },
-      { label: 'Credentials', value: applicant.credentials },
-      { label: 'Skills',      value: applicant.skills },
-      { label: 'Education',   value: applicant.educational_background },
-      { label: 'Start Date',  value: applicant.start_date },
-      { label: 'Reference 1', value: applicant.ref1_name ? `${applicant.ref1_name} — ${applicant.ref1_contact}` : null },
-      { label: 'Reference 2', value: applicant.ref2_name ? `${applicant.ref2_name} — ${applicant.ref2_contact}` : null },
+      { label: 'Email',                value: applicant.email },
+      { label: 'Phone',                value: applicant.phone },
+      { label: 'School / Program',     value: schoolProgram || null },
+      { label: 'Educational Background', value: applicant.educational_background },
+      { label: 'Languages',            value: languagesStr },
+      { label: 'Additional Languages', value: applicant.languages },
+      { label: 'Language Proficiency', value: applicant.language_proficiency },
+      { label: 'Service Missionary',   value: applicant.is_service_missionary ? 'Yes' : 'No' },
+      { label: 'Role Interest',        value: rolesStr },
+      { label: 'Certifications',       value: certsStr },
+      { label: 'Credentials',          value: applicant.credentials },
+      { label: 'Skills',               value: skillsStr },
+      { label: 'Additional Skills',    value: applicant.skills },
+      { label: 'Shift Availability',   value: availabilityStr },
+      { label: 'Expected Duration',    value: applicant.expected_duration },
+      { label: 'Patient Care Hours',   value: applicant.patient_care_hours != null ? String(applicant.patient_care_hours) : null },
+      { label: 'Referral Source',      value: applicant.referral_source },
+      { label: 'Experience Notes',     value: applicant.experience_notes },
+      { label: 'Reference 1',          value: ref1Str },
+      { label: 'Reference 2',          value: ref2Str },
     ].filter(f => f.value)
 
     const checklistCount    = CHECKLIST_ITEMS.filter(i => checklist[i.key]).length
@@ -2706,6 +3368,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               </div>
           }
         </div>
+
+        {/* Preparedness — Applied stage; breakdown opens on click */}
+        {isApplied && <PreparednessPanel key={applicant.id} applicant={applicant} card={card} secLabel={secLabel} />}
 
         {/* Applied */}
         {isApplied && (
@@ -2790,8 +3455,20 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             {onboardStep === 2 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Default Position</p>
+                {applicant.roles_interested?.length > 0 && (
+                  <p style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '-0.5rem' }}>
+                    {applicant.full_name} expressed interest in: {applicant.roles_interested.join(', ')}
+                  </p>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.6rem' }}>
-                  {ROLES.map(role => { const active = onboardForm.default_role === role; return <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>{role}</button> })}
+                  {ROLES.map(role => {
+                    const active    = onboardForm.default_role === role
+                    return (
+                      <button key={role} onClick={() => setOnboardForm(f => ({ ...f, default_role: role }))} style={{ position: 'relative', padding: '0.65rem 0.9rem', borderRadius: '10px', textAlign: 'left', border: `1px solid ${active ? C.blue : 'var(--border)'}`, background: active ? C.blue + '18' : 'var(--bg)', color: active ? C.blue : 'var(--text)', fontWeight: active ? 700 : 400, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem', transition: 'all 0.15s' }}>
+                        {role}
+                      </button>
+                    )
+                  })}
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                   <button onClick={() => setOnboardStep(1)} style={ghostBtn()}>Back</button>
@@ -3002,16 +3679,23 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       {/* Pipeline tab */}
       {activeTab === 'pipeline' && (
         <>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {STAGES.map(stage => {
-              const color  = STAGE_COLORS[stage]
-              const active = stageFilter === stage
-              return (
-                <button key={stage} onClick={() => setStageFilter(stage)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: active ? color + '18' : 'var(--surface)', color: active ? color : 'var(--muted)', border: active ? `1px solid ${color}55` : '1px solid var(--border)' }}>
-                  {STAGE_LABELS[stage]} <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.78rem', opacity: 0.8 }}>({stageCounts[stage]})</span>
-                </button>
-              )
-            })}
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {STAGES.map(stage => {
+                const color  = STAGE_COLORS[stage]
+                const active = stageFilter === stage
+                return (
+                  <button key={stage} onClick={() => setStageFilter(stage)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: active ? color + '18' : 'var(--surface)', color: active ? color : 'var(--muted)', border: active ? `1px solid ${color}55` : '1px solid var(--border)' }}>
+                    {STAGE_LABELS[stage]} <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.78rem', opacity: 0.8 }}>({stageCounts[stage]})</span>
+                  </button>
+                )
+              })}
+            </div>
+            {stageFilter === 'applied' && (
+              <button onClick={() => setCompareOpen(true)} style={{ padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: '#000', color: '#fff', border: '1px solid #000' }}>
+                Compare Applicants
+              </button>
+            )}
           </div>
 
           {loadError && (
@@ -3037,6 +3721,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{a.email}</p>
                             {a.resume_url && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontWeight: 600 }}>resume</span>}
+                            {a.is_service_missionary && <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.light + '14', color: C.light, border: `1px solid ${C.light}33`, fontWeight: 600 }}>service missionary</span>}
                             {a.stage === 'onboarding' && (
                               <span style={{ display: 'flex', gap: '0.2rem' }}>
                                 {[a.onboard_affiliation, a.onboard_default_role].map((v, i) => (
@@ -3048,6 +3733,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        {a.stage === 'applied' && <StaffingNeedBadge applicant={a} />}
                         <StagePill stage={a.stage} />
                         {a.created_at && <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{new Date(a.created_at).toLocaleDateString()}</span>}
                         <span style={{ color: 'var(--muted)' }}>›</span>
@@ -3113,6 +3799,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       <RejectModal />
       <ParkingPassModal />
       <ConfidentialityModal />
+      <CompareApplicantsOverlay />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>

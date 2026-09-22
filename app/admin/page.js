@@ -35,7 +35,7 @@ const TEAMS = [
 // 'volunteers' intentionally appears in both VOLUNTEER and PROVIDER groups —
 // it's a shared shortcut, not evidence of provider access on its own (see
 // PROVIDER_GROUP_CORE_KEYS below).
-const VOLUNTEER_GROUP_KEYS = ['volunteers', 'pipeline', 'dashboard', 'schedule', 'shifts', 'callouts']
+const VOLUNTEER_GROUP_KEYS = ['dashboard', 'pipeline', 'schedule', 'volunteers', 'shifts', 'callouts']
 const PROVIDER_GROUP_KEYS  = ['providers', 'volunteers', 'hours', 'create']
 // Keys that must be present (beyond the shared 'volunteers') for the
 // Providers menu to be worth showing at all.
