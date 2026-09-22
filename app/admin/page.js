@@ -69,13 +69,33 @@ function hasAdminAccess(p) {
 // Lab Director sees Live/Scheduling/Volunteers, but only for lab-affiliated
 // people: anyone whose default_role is Lab or Lab Director, OR anyone
 // scheduled for a Lab shift (schedule.role === LAB_SCHEDULE_ROLE).
-const LAB_DEFAULT_ROLES = ['Lab', 'Lab Director']
-const LAB_SCHEDULE_ROLE = 'Lab' // must match the exact role string used in ROLES/schedule.role for Lab shifts
+const LAB_DEFAULT_ROLES = [
+  'Lab',
+  'Lab Director',
+  'Float',
+  'Clinical Supervisor'
+]
+
+const LAB_SCHEDULE_ROLES = [
+  'Lab',
+  'Lab Director',
+  'Float',
+  'Clinical Supervisor'
+]
+
 function getLabVolunteerIds(volunteers, schedule) {
   const ids = new Set(
-    volunteers.filter(v => LAB_DEFAULT_ROLES.includes(v?.default_role)).map(v => v.id)
+    volunteers
+      .filter(v => LAB_DEFAULT_ROLES.includes(v?.default_role))
+      .map(v => v.id)
   )
-  schedule.forEach(s => { if (s.role === LAB_SCHEDULE_ROLE) ids.add(s.volunteer_id) })
+
+  schedule.forEach(s => {
+    if (LAB_SCHEDULE_ROLES.includes(s.role)) {
+      ids.add(s.volunteer_id)
+    }
+  })
+
   return ids
 }
 
