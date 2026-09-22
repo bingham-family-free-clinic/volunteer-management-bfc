@@ -663,9 +663,8 @@ export function MessageTab({
         .order('full_name'),
     ])
 
-    const fetched = msgs || []
+    const fetched = (msgs || []).filter(m => m != null)
     setMessages(fetched)
-
     // Cursor = oldest top-level message fetched
     const topLevel = fetched.filter(m => !m.parent_message_id)
     setHasMoreMsgs(topLevel.length >= MSG_PAGE_SIZE)
@@ -708,9 +707,8 @@ export function MessageTab({
       .lt('created_at', msgCursor)
       .limit(MSG_PAGE_SIZE * 2)
 
-    const fetched = older || []
+    const fetched = (older || []).filter(m => m != null)
     setMessages(prev => {
-      const existingIds = new Set(prev.map(m => m.id))
       return [...prev, ...fetched.filter(m => !existingIds.has(m.id))]
     })
     const topLevel = fetched.filter(m => !m.parent_message_id)
@@ -722,7 +720,7 @@ export function MessageTab({
 
   async function loadBroadcastReadCounts(msgs) {
     const broadcastIds = (msgs || [])
-      .filter(m => BROADCAST_TYPES.includes(m.recipient_type))
+      .filter(m => m && BROADCAST_TYPES.includes(m.recipient_type))
       .map(m => m.id)
     if (broadcastIds.length === 0) return
     const { data, error } = await supabase.rpc('get_broadcast_read_counts', { message_ids: broadcastIds })
@@ -735,8 +733,9 @@ export function MessageTab({
   // ── Thread grouping ────────────────────────────────────────────────────────
   // Returns top-level messages with their replies keyed by parent id
   function buildThreadMap(msgs) {
+    const validMsgs = msgs.filter(m => m != null)
     const repliesMap = {}
-    msgs
+    validMsgs
       .filter(m => m.parent_message_id)
       .forEach(r => {
         if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
@@ -746,7 +745,7 @@ export function MessageTab({
     Object.keys(repliesMap).forEach(k => {
       repliesMap[k].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
     })
-    const topLevel = msgs.filter(m => !m.parent_message_id)
+    const topLevel = validMsgs.filter(m => !m.parent_message_id)
       .sort((a, b) => {
         const aLatest = Math.max(new Date(a.created_at), ...(repliesMap[a.id] || []).map(r => new Date(r.created_at)))
         const bLatest = Math.max(new Date(b.created_at), ...(repliesMap[b.id] || []).map(r => new Date(r.created_at)))
@@ -779,13 +778,15 @@ export function MessageTab({
     .concat(
       userSentReplies.map(reply => {
         const parent = messages.find(m => m.id === reply.parent_message_id)
+        if (!parent) return null
         return {
           message: parent,
-          replies: parent ? [reply, ...(inboxRepliesMap[parent.id] || []).filter(r => r.id !== reply.id)] : [reply],
+          replies: [reply, ...(inboxRepliesMap[parent.id] || []).filter(r => r.id !== reply.id)],
           isReplyThread: true,
         }
-      })
+      }).filter(Boolean)
     )
+    .filter(e => e.message != null)
     .sort((a, b) => {
       const aLatest = Math.max(new Date(a.message.created_at), ...a.replies.map(r => new Date(r.created_at)))
       const bLatest = Math.max(new Date(b.message.created_at), ...b.replies.map(r => new Date(r.created_at)))
@@ -1426,3 +1427,4 @@ export function MessageTab({
     </div>
   )
 }
+
