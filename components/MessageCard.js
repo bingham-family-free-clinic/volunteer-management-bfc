@@ -109,18 +109,20 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span
-            style={{
-              fontSize: '0.8rem',
-              padding: '0.15rem 0.5rem',
-              borderRadius: '100px',
-              background: 'var(--surface)',
-              color: 'var(--muted)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            {recipientLabelProp ?? recipientLabel(m)}
-          </span>
+          {recipientLabelProp && (
+            <span
+              style={{
+                fontSize: '0.8rem',
+                padding: '0.15rem 0.5rem',
+                borderRadius: '100px',
+                background: 'var(--surface)',
+                color: 'var(--muted)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              {recipientLabelProp}
+            </span>
+          )}
 
           <span
             style={{

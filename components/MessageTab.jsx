@@ -206,15 +206,10 @@ function ReplyThread({
   const isThreadSender = message.sender_id === user?.id
   const canReply = Boolean(user?.id)
 
-  // Compute the correct recipient label for a message/reply.
-  // If the current user is the recipient → "You".
-  // Otherwise → look up the recipient's name from allUsers.
+  // Recipient pill: only show for group-targeted messages.
+  // Direct/volunteer messages (sent to or from the user) have no pill.
   function getRecipientLabel(m) {
-    if (m.recipient_type === 'volunteer' && m.recipient_volunteer_id === user?.id) return 'You'
-    if (m.recipient_type === 'volunteer' && m.recipient_volunteer_id) {
-      const recipient = allUsers.find(u => u.id === m.recipient_volunteer_id)
-      if (recipient?.full_name) return recipient.full_name.split(' ')[0]
-    }
+    if (m.recipient_type === 'volunteer') return null
     return recipientLabel(m)
   }
 
@@ -464,7 +459,7 @@ function ReplyThread({
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
                 if (e.key === 'Escape') { setReplyOpen(false); setReplyBody('') }
               }}
-              placeholder="Write a reply… (⌘↵ to send)"
+               placeholder={`Replying to ${message.sender?.full_name ?? 'User'}…`}
               rows={2}
               style={{
                 ...S.input,
