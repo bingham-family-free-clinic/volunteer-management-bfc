@@ -136,21 +136,6 @@ export async function POST(req) {
     recipientUserIds = [recipient_volunteer_id]
   }
 
-  // Replies should also notify the parent thread's sender (Reply All),
-  // in case they fall outside the inherited group targeting.
-  if (parent_message_id) {
-    const { data: parent } = await supabaseAdmin
-      .from('messages')
-      .select('sender_id')
-      .eq('id', parent_message_id)
-      .single()
-    if (parent?.sender_id && parent.sender_id !== user.id) {
-      recipientUserIds = [...new Set([...recipientUserIds, parent.sender_id])]
-    }
-  } else {
-    recipientUserIds = [...new Set(recipientUserIds)]
-  }
-
   // ── 5. Fetch push subscriptions and send ──────────────────────────────────
   if (recipientUserIds.length === 0) {
     return Response.json({ message_id: message.id, pushed: 0 })

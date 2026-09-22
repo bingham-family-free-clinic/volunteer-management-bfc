@@ -203,50 +203,32 @@ function ReplyThread({
 
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
-  const isOneOnOne     = message.recipient_type === 'volunteer' || message.recipient_type === 'user'
-
-  // Anyone viewing a thread can reply. Group replies inherit the parent's
-  // targeting so the whole group is notified.
   const canReply = Boolean(user?.id)
-  // `recipient_type === 'everyone'` targets every user. All other
-  // thread types (admin broadcast, shift, role, affiliation, 1-1,
-  // admin-to-single-volunteer) are handled by inheriting the parent.
-  const isEveryone = message.recipient_type === 'everyone'
-  const replyLabel = isEveryone ? 'Reply' : 'Reply All'
+
+  // Compute the correct recipient label for a message/reply.
+  // If the current user is the recipient → "You".
+  // Otherwise → look up the recipient's name from allUsers.
+  function getRecipientLabel(m) {
+    if (m.recipient_type === 'volunteer' && m.recipient_volunteer_id === user?.id) return 'You'
+    if (m.recipient_type === 'volunteer' && m.recipient_volunteer_id) {
+      const recipient = allUsers.find(u => u.id === m.recipient_volunteer_id)
+      if (recipient?.full_name) return recipient.full_name.split(' ')[0]
+    }
+    return recipientLabel(m)
+  }
 
   async function handleSendReply() {
     if (!replyBody.trim()) return
     setSending(true)
-    // Inherit the parent's targeting so group replies notify the whole group.
-    // 1-1 replies target the single recipient; admin replying back to a
-    // specific volunteer targets just that volunteer. `everyone` inherits.
-    const replyTarget = (() => {
-      if (isOneOnOne) {
-        return {
-          recipient_type: message.recipient_type,
-          recipient_day: null,
-          recipient_shift: null,
-          recipient_role: null,
-          recipient_volunteer_id: isThreadSender ? message.recipient_volunteer_id : message.sender_id,
-        }
-      }
-      if (message.recipient_type === 'admin') {
-        return {
-          recipient_type: 'admin',
-          recipient_day: null,
-          recipient_shift: null,
-          recipient_role: null,
-          recipient_volunteer_id: (isAdmin && !isThreadSender) ? message.sender_id : null,
-        }
-      }
-      return {
-        recipient_type: message.recipient_type,
-        recipient_day: message.recipient_day ?? null,
-        recipient_shift: message.recipient_shift ?? null,
-        recipient_role: message.recipient_role ?? null,
-        recipient_volunteer_id: message.recipient_volunteer_id ?? null,
-      }
-    })()
+    // Reply to the parent message's sender only, regardless of
+    // thread type (group, admin broadcast, 1-1, etc.).
+    const replyTarget = {
+      recipient_type: 'volunteer',
+      recipient_day: null,
+      recipient_shift: null,
+      recipient_role: null,
+      recipient_volunteer_id: message.sender_id,
+    }
     try {
       const accessToken = await getFreshAccessToken(supabase)
       const res = await fetch('/api/send-message', {
@@ -348,7 +330,7 @@ function ReplyThread({
               clearNotificationForMessage(message.id)
               setReplyOpen(true)
             }}
-            title={replyLabel}
+            title="Reply"
             style={{
               flexShrink: 0,
               display: 'flex',
@@ -372,7 +354,7 @@ function ReplyThread({
               <polyline points="9 14 4 9 9 4" />
               <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
             </svg>
-            {replyLabel}
+            Reply
           </button>
         )}
       </div>
@@ -396,7 +378,7 @@ function ReplyThread({
           replyOpen={replyOpen}
           onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
           isHighlighted={isHighlighted}
-          replyLabel={replyLabel}
+          recipientLabel={getRecipientLabel(message)}
         />
       </div>
 
@@ -438,16 +420,16 @@ function ReplyThread({
                     </span>
                   )}
                   <MessageCard
-                    m={reply}
-                    readMessageIds={readMessageIds}
-                    user={user}
-                    setLightboxUrl={setLightboxUrl}
-                    isHighlighted={isReplyHighlighted}
-                    canReply={canReply && isMostRecent && isMostRecentReply}
-                    replyOpen={replyOpen}
-                    onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
-                    replyLabel={replyLabel}
-                  />
+                     m={reply}
+                     readMessageIds={readMessageIds}
+                     user={user}
+                     setLightboxUrl={setLightboxUrl}
+                     isHighlighted={isReplyHighlighted}
+                     canReply={canReply && isMostRecent && isMostRecentReply}
+                     replyOpen={replyOpen}
+                     onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
+                     recipientLabel={getRecipientLabel(reply)}
+                   />
                 </div>
               </div>
             )
