@@ -75,6 +75,7 @@ function ReplyThread({
   onReplySent,
   onMarkRead,
   senderLabel,
+  collapsedLabel,
   startExpanded = false,
   previewMessage,
 }) {
@@ -312,7 +313,7 @@ function ReplyThread({
 {/* Line 1: sender + timestamp */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.5rem', minWidth: 0 }}>
               <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName}
+                {collapsedLabel ?? (latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName)}
               </span>
               <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
                 {formatDateTime(previewSource.created_at)}
@@ -765,9 +766,18 @@ export function MessageTab({
   )
 
   // Sent messages: top-level sent messages + user-sent replies.
-  // Replies are shown as sent threads where the parent message becomes
-  // the root and the user's reply appears below it.
+  // If the user sent the original message, that entry takes priority and
+  // absorbs any of their replies (no duplicate reply-thread entry).
+  // Otherwise replies are grouped by parent so one parent = one sent entry.
   const userSentReplies = messages.filter(m => m.sender_id === user?.id && m.parent_message_id)
+  const topLevelSentIds = new Set(
+    messages.filter(m => m.sender_id === user?.id && !m.parent_message_id).map(m => m.id)
+  )
+  const replyParentIds = [...new Set(
+    userSentReplies
+      .map(r => r.parent_message_id)
+      .filter(pid => pid && !topLevelSentIds.has(pid))
+  )]
   const sentMessages = messages
     .filter(m => m.sender_id === user?.id && !m.parent_message_id)
     .map(m => ({
@@ -776,12 +786,12 @@ export function MessageTab({
       isReplyThread: false,
     }))
     .concat(
-      userSentReplies.map(reply => {
-        const parent = messages.find(m => m.id === reply.parent_message_id)
+      replyParentIds.map(pid => {
+        const parent = messages.find(m => m.id === pid)
         if (!parent) return null
         return {
           message: parent,
-          replies: [reply, ...(inboxRepliesMap[parent.id] || []).filter(r => r.id !== reply.id)],
+          replies: inboxRepliesMap[pid] || [],
           isReplyThread: true,
         }
       }).filter(Boolean)
@@ -851,9 +861,14 @@ export function MessageTab({
   })()
 
   const recentRecipients = sentMessages
-    .map(s => s.message)
-    .filter(m => m.recipient_type === 'volunteer' && m.recipient_volunteer_id)
-    .map(m => m.recipient_volunteer_id)
+    .flatMap(s => {
+      if (s.isReplyThread) {
+        const my = [...s.replies].reverse().find(r => r.sender_id === user?.id) ?? s.replies.find(r => r.sender_id === user?.id)
+        return my && my.recipient_type === 'volunteer' && my.recipient_volunteer_id ? [my.recipient_volunteer_id] : []
+      }
+      const m = s.message
+      return m.recipient_type === 'volunteer' && m.recipient_volunteer_id ? [m.recipient_volunteer_id] : []
+    })
     .filter((id, i, arr) => arr.indexOf(id) === i)
     .slice(0, 4)
     .map(id => allUsers.find(u => u.id === id))
@@ -1110,13 +1125,17 @@ export function MessageTab({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
               {sentMessages.map(sent => {
                 const m = sent.message
-                const toLabel =
-                  m.recipient_type === 'everyone' ? 'To: Everyone' :
-                  m.recipient_type === 'admin'    ? 'To: HR' :
-                  m.recipient_type === 'shift'    ? `To: ${m.recipient_day ? m.recipient_day.charAt(0).toUpperCase() + m.recipient_day.slice(1, 3) : ''} ${m.recipient_shift || ''}`.trim() :
-                  m.recipient_type === 'role'     ? `To: ${m.recipient_role}` :
-                  m.recipient_type === 'volunteer'? `To: ${allUsers.find(u => u.id === m.recipient_volunteer_id)?.full_name || 'Individual'}` :
-                  'To: ' + m.recipient_type
+                const getToLabel = (msg) =>
+                  msg.recipient_type === 'everyone' ? 'To: Everyone' :
+                  msg.recipient_type === 'admin'    ? 'To: HR' :
+                  msg.recipient_type === 'shift'    ? `To: ${msg.recipient_day ? msg.recipient_day.charAt(0).toUpperCase() + msg.recipient_day.slice(1, 3) : ''} ${msg.recipient_shift || ''}`.trim() :
+                  msg.recipient_type === 'role'     ? `To: ${msg.recipient_role}` :
+                  msg.recipient_type === 'volunteer'? `To: ${allUsers.find(u => u.id === msg.recipient_volunteer_id)?.full_name || m.sender?.full_name || 'Individual'}` :
+                  'To: ' + msg.recipient_type
+                const myReply = sent.isReplyThread
+                  ? [...sent.replies].reverse().find(r => r.sender_id === user?.id) ?? sent.replies.find(r => r.sender_id === user?.id)
+                  : null
+                const toLabel = sent.isReplyThread && myReply ? getToLabel(myReply) : getToLabel(m)
                 return (
                   <ReplyThread
                     key={m.id}
@@ -1132,9 +1151,10 @@ export function MessageTab({
                     allUsers={allUsers}
                     onReplySent={fetchMessages}
                     onMarkRead={markThreadRead}
-                    senderLabel={toLabel}
+                    senderLabel={sent.isReplyThread ? undefined : toLabel}
+                    collapsedLabel={sent.isReplyThread ? toLabel : undefined}
                     startExpanded={openThreadId === m.id}
-                    previewMessage={sent.isReplyThread ? sent.replies.find(r => r.sender_id === user?.id) : null}
+                    previewMessage={myReply ?? null}
                   />
                 )
               })}
