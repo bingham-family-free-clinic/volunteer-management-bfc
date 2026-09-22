@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { MessageCard } from './MessageCard'
 import { formatDateTime } from '../lib/timeUtils'
 import { ROLES } from '../lib/constants'
+import { recipientLabel } from '../lib/messageUtils'
 
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
