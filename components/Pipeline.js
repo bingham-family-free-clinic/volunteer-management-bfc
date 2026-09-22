@@ -1,7 +1,7 @@
 'use client'
 import JSZip from 'jszip'
-import { useState, useEffect, useRef } from 'react'
-import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS } from '../lib/constants'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, getRoleCapacity } from '../lib/constants'
 import { formatSlotFull, formatSlotDayLabel, formatSlotTime, TIMEZONE_LABEL } from '../lib/interview-schedule'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -264,6 +264,100 @@ const PREP_ROLES = [
     ],
   },
 ]
+
+// ─── Staffing-need scoring (Applied stage) ────────────────────────────────
+// A quick "High / Moderate / Low Staffing Need" read on each applicant,
+// based on the same six clinic roles PREP_ROLES already knows how to match
+// against roles_interested (Clinical Staff, Scribe, Lab, Patient Nav.,
+// Receptionist, Support Center):
+//   • High     — an open clinic slot exists for a role/day/shift combo the
+//                applicant is interested in
+//   • Moderate — not High, but fewer than 4 waitlist entries are interested
+//                in the same role as the applicant
+//   • Low      — neither of the above
+const STAFFING_ROLES = PREP_ROLES.map(r => r.role)
+const STAFFING_WAITLIST_THRESHOLD = 4
+
+// Canonical clinic roles (matching PREP_ROLES aliases) the applicant expressed
+// interest in, deduped, in the order listed.
+function getApplicantStaffingRoles(applicant) {
+  const interested = prepToList(applicant?.roles_interested).map(normText)
+  const roles = []
+  const seen = new Set()
+  for (const label of interested) {
+    const cfg = PREP_ROLES.find(r => r.aliases.includes(label))
+    if (!cfg || seen.has(cfg.role)) continue
+    seen.add(cfg.role)
+    roles.push(cfg.role)
+  }
+  return roles
+}
+
+// Set of "day-shift-role" keys (role limited to STAFFING_ROLES) that
+// currently have an unfilled clinic slot — mirrors the openings math in
+// ClinicOpenings.jsx / Waitlist.js's computeAvailableSlots.
+function computeOpenStaffingSlotSet(scheduleRows) {
+  const today = new Date().toISOString().split('T')[0]
+  const activeRows = (scheduleRows || []).filter(r => r.end_date == null || r.end_date > today)
+  const set = new Set()
+  for (const day of DAYS) {
+    for (const shift of SHIFTS) {
+      for (const role of STAFFING_ROLES) {
+        const required = getRoleCapacity(day, shift, role)
+        if (!required) continue
+        const slotRows = activeRows.filter(r =>
+          r.day_of_week?.toLowerCase().trim() === day &&
+          r.shift_time?.toLowerCase().trim()  === shift &&
+          r.role                               === role
+        )
+        const filled = slotRows.reduce((sum, r) => sum + (r.week_pattern === 'every' ? 1 : 0.5), 0)
+        if (filled < required) set.add(`${day}-${shift}-${role}`)
+      }
+    }
+  }
+  return set
+}
+
+// How many waitlist entries are interested in each staffing role. An entry
+// with no preferred_roles set is "flexible" and counts toward every role
+// (same convention Waitlist.js/computeAvailableSlots uses for empty prefs).
+function computeWaitlistRoleCounts(waitlistRows) {
+  const counts = {}
+  for (const role of STAFFING_ROLES) counts[role] = 0
+  for (const entry of (waitlistRows || [])) {
+    const roles = (entry.preferred_roles?.length > 0) ? entry.preferred_roles : STAFFING_ROLES
+    for (const role of roles) {
+      if (counts[role] !== undefined) counts[role] += 1
+    }
+  }
+  return counts
+}
+
+// Returns 'high' | 'moderate' | 'low', or null if the applicant hasn't
+// expressed interest in any of the six scored clinic roles.
+function getStaffingNeedLevel(applicant, openSlotSet, waitlistCounts) {
+  const roles = getApplicantStaffingRoles(applicant)
+  if (roles.length === 0) return null
+
+  const statedSlots = getStatedAvailability(applicant)
+  const slots = statedSlots.length > 0 ? statedSlots : ALL_SLOTS   // no shifts checked = flexible
+
+  const hasOpenSlot = roles.some(role =>
+    slots.some(s => openSlotSet.has(`${s.day}-${s.shift}-${role}`))
+  )
+  if (hasOpenSlot) return 'high'
+
+  const underStaffedWaitlist = roles.some(role => (waitlistCounts[role] ?? 0) < STAFFING_WAITLIST_THRESHOLD)
+  if (underStaffedWaitlist) return 'moderate'
+
+  return 'low'
+}
+
+const STAFFING_NEED_STYLE = {
+  high:     { label: 'High Staffing Need',     color: C.primary },
+  moderate: { label: 'Moderate Staffing Need', color: C.blue    },
+  low:      { label: 'Low Staffing Need',      color: C.muted   },
+}
 
 function normText(s) {
   return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
@@ -1335,19 +1429,35 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   const [toast, setToast] = useState(null)
 
+  // ── Staffing-need context (Applied stage badge) ────────────────────────────
+  // Raw rows pulled once and recomputed into lookups via useMemo below.
+  const [staffingSchedule, setStaffingSchedule] = useState([])
+  const [staffingWaitlist, setStaffingWaitlist] = useState([])
+
   // ── Applicant profile photo state ──────────────────────────────────────────
   const [applicantPhotoUrl,       setApplicantPhotoUrl]       = useState(null)
   const [uploadingApplicantPhoto, setUploadingApplicantPhoto] = useState(false)
   const [applicantAvatarPath,     setApplicantAvatarPath]     = useState(null)
   const applicantPhotoInputRef = useRef(null)
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { loadAll(); loadStaffingContext() }, [])
 
   useEffect(() => {
     if (activeTab === 'templates' && Object.keys(templates).length === 0) {
       loadTemplates()
     }
   }, [activeTab])
+
+  // Lookups for the Applied-stage "Staffing Need" badge — recomputed only
+  // when the underlying clinic schedule / waitlist rows change.
+  const staffingOpenSlots = useMemo(
+    () => computeOpenStaffingSlotSet(staffingSchedule),
+    [staffingSchedule]
+  )
+  const staffingWaitlistCounts = useMemo(
+    () => computeWaitlistRoleCounts(staffingWaitlist),
+    [staffingWaitlist]
+  )
 
   // ── Parking pass PDF message listener ─────────────────────────────────────
   useEffect(() => {
@@ -1499,6 +1609,17 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       .from('volunteer_applications').select('*').in('stage', STAGES).order('created_at', { ascending: false })
     if (error) { setLoadError(error.message); setApplicants([]) }
     else setApplicants(data || [])
+  }
+
+  // Clinic schedule + waitlist rows feeding the Applied-stage "Staffing Need"
+  // badge. Failures here are non-fatal — the badge just won't render.
+  async function loadStaffingContext() {
+    const [schedRes, wlRes] = await Promise.all([
+      supabase.from('schedule').select('day_of_week, shift_time, role, end_date, week_pattern'),
+      supabase.from('waitlist').select('preferred_roles'),
+    ])
+    if (!schedRes.error) setStaffingSchedule(schedRes.data || [])
+    if (!wlRes.error)    setStaffingWaitlist(wlRes.data || [])
   }
 
   async function loadCompleted() {
@@ -2431,6 +2552,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   function StagePill({ stage }) {
     const color = STAGE_COLORS[stage] || C.muted
     return <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: color + '18', color, border: `1px solid ${color}44` }}>{STAGE_LABELS[stage] || stage}</span>
+  }
+
+  // Applied-stage-only badge: High / Moderate / Low Staffing Need, based on
+  // whether the applicant's interested role(s) + shift(s) line up with an
+  // open clinic slot, or a thin waitlist for that role. Renders nothing if
+  // the applicant hasn't listed any of the six scored clinic roles.
+  function StaffingNeedBadge({ applicant }) {
+    const level = getStaffingNeedLevel(applicant, staffingOpenSlots, staffingWaitlistCounts)
+    if (!level) return null
+    const { label, color } = STAFFING_NEED_STYLE[level]
+    return (
+      <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: color + '18', color, border: `1px solid ${color}44`, whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+    )
   }
 
   function StepDots({ current, total, color }) {
@@ -3472,6 +3608,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        {a.stage === 'applied' && <StaffingNeedBadge applicant={a} />}
                         <StagePill stage={a.stage} />
                         {a.created_at && <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{new Date(a.created_at).toLocaleDateString()}</span>}
                         <span style={{ color: 'var(--muted)' }}>›</span>
