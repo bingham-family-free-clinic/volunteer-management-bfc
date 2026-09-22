@@ -206,20 +206,20 @@ function ReplyThread({
   const isOneOnOne     = message.recipient_type === 'volunteer' || message.recipient_type === 'user'
 
   // Anyone viewing a thread can reply. Group replies inherit the parent's
-  // targeting so the whole group is notified (Reply All).
+  // targeting so the whole group is notified.
   const canReply = Boolean(user?.id)
-  // Reply All when the reply would go to more than one person: any group
-  // thread, or an admin broadcast. A 1-1 reply — or an admin replying back
-  // to one specific volunteer — targets a single person.
-  const isReplyAll = !isOneOnOne && !(message.recipient_type === 'admin' && isAdmin && !isThreadSender)
-  const replyLabel = isReplyAll ? 'Reply All' : 'Reply'
+  // `recipient_type === 'everyone'` targets every user. All other
+  // thread types (admin broadcast, shift, role, affiliation, 1-1,
+  // admin-to-single-volunteer) are handled by inheriting the parent.
+  const isEveryone = message.recipient_type === 'everyone'
+  const replyLabel = isEveryone ? 'Reply' : 'Reply All'
 
   async function handleSendReply() {
     if (!replyBody.trim()) return
     setSending(true)
     // Inherit the parent's targeting so group replies notify the whole group.
-    // Admin replying to someone else's admin-directed message still targets
-    // just that volunteer (server notifies them only, not all admins).
+    // 1-1 replies target the single recipient; admin replying back to a
+    // specific volunteer targets just that volunteer. `everyone` inherits.
     const replyTarget = (() => {
       if (isOneOnOne) {
         return {
