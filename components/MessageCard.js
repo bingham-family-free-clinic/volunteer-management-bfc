@@ -61,7 +61,7 @@ function formatBody(text) {
   })
 }
 
-export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, replyOpen, onReply, isHighlighted, recipientLabel: recipientLabelProp }) {
+export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, canReplyAll, replyOpen, onReply, onReplyAll, isHighlighted, recipientLabel: recipientLabelProp }) {
   const isUnread =
     readMessageIds &&
     !readMessageIds.has(m.id) &&
@@ -160,6 +160,34 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                 <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
               </svg>
               Reply
+            </button>
+          )}
+          {canReplyAll && !replyOpen && (
+            <button
+              onClick={e => { e.stopPropagation(); onReplyAll?.() }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                padding: '0.15rem 0.55rem',
+                background: 'none',
+                border: '1px solid var(--accent)',
+                borderRadius: '100px',
+                color: 'var(--accent)',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: 'DM Sans, sans-serif',
+                transition: 'border-color 0.15s, color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+            >
+              <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 14 4 9 9 4" />
+                <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+              </svg>
+              Reply All
             </button>
           )}
         </div>

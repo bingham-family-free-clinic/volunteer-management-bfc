@@ -76,6 +76,7 @@ function ReplyThread({
   onMarkRead,
   senderLabel,
   startExpanded = false,
+  previewMessage,
 }) {
   const isUnread = readMessageIds && (
     // Received message not yet read
@@ -90,7 +91,11 @@ function ReplyThread({
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
+  const [replyToId, setReplyToId]     = useState(null)
+  const [isReplyAll, setIsReplyAll]   = useState(false)
   const [locallyHighlightedReplies, setLocallyHighlightedReplies] = useState(new Set())
+
+  const isGroupMessageSender = message.sender_id === user?.id && message.recipient_type !== 'volunteer'
 
   // Auto size textboxes if browser supports it
   const replyRef = useRef(null)
@@ -194,7 +199,7 @@ function ReplyThread({
         .at(-1) // replies are already sorted oldest→newest, so last = most recent
     : null
 
-  const previewSource = latestUnreadReply ?? message
+  const previewSource = previewMessage ?? latestUnreadReply ?? message
   const previewSnippet = previewSource.body
     ? previewSource.body.replace(/\n/g, ' ')
     : '📎 Image'
@@ -216,14 +221,26 @@ function ReplyThread({
   async function handleSendReply() {
     if (!replyBody.trim()) return
     setSending(true)
-    // Reply to the parent message's sender only, regardless of
-    // thread type (group, admin broadcast, 1-1, etc.).
-    const replyTarget = {
-      recipient_type: 'volunteer',
-      recipient_day: null,
-      recipient_shift: null,
-      recipient_role: null,
-      recipient_volunteer_id: message.sender_id,
+    const targetReply = replies.find(r => r.id === replyToId)
+    let replyTarget
+    if (isReplyAll) {
+      replyTarget = {
+        recipient_type: message.recipient_type,
+        recipient_day: message.recipient_day,
+        recipient_shift: message.recipient_shift,
+        recipient_role: message.recipient_role,
+        recipient_volunteer_id: message.recipient_volunteer_id,
+      }
+    } else if (targetReply) {
+      replyTarget = {
+        recipient_type: 'volunteer',
+        recipient_volunteer_id: targetReply.sender_id,
+      }
+    } else {
+      replyTarget = {
+        recipient_type: 'volunteer',
+        recipient_volunteer_id: message.sender_id,
+      }
     }
     try {
       const accessToken = await getFreshAccessToken(supabase)
@@ -247,6 +264,8 @@ function ReplyThread({
         showToast('Reply sent!', 'success')
         setReplyBody('')
         setReplyOpen(false)
+        setReplyToId(null)
+        setIsReplyAll(false)
         onReplySent()
       }
     } catch (err) {
@@ -362,7 +381,7 @@ function ReplyThread({
       {/* ── Original message (click to collapse) ── */}
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
-        onClick={() => { setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody('') }}
+         onClick={() => { setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false) }}
       >
         <MessageCard
           m={message}
@@ -371,8 +390,10 @@ function ReplyThread({
           setLightboxUrl={setLightboxUrl}
           senderLabel={senderLabel}
           canReply={canReply}
+          canReplyAll={isGroupMessageSender}
           replyOpen={replyOpen}
-          onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
+          onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(false); setReplyOpen(true) }}
+          onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(true); setReplyOpen(true) }}
           isHighlighted={isHighlighted}
           recipientLabel={getRecipientLabel(message)}
         />
@@ -416,16 +437,17 @@ function ReplyThread({
                     </span>
                   )}
                   <MessageCard
-                     m={reply}
-                     readMessageIds={readMessageIds}
-                     user={user}
-                     setLightboxUrl={setLightboxUrl}
-                     isHighlighted={isReplyHighlighted}
-                     canReply={canReply && isMostRecent && isMostRecentReply}
-                     replyOpen={replyOpen}
-                     onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
-                     recipientLabel={getRecipientLabel(reply)}
-                   />
+                    m={reply}
+                    readMessageIds={readMessageIds}
+                    user={user}
+                    setLightboxUrl={setLightboxUrl}
+                    isHighlighted={isReplyHighlighted}
+                    canReply={isGroupMessageSender ? true : (canReply && isMostRecent && isMostRecentReply)}
+                    canReplyAll={false}
+                    replyOpen={replyOpen}
+                    onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(reply.id); setIsReplyAll(false); setReplyOpen(true) }}
+                    recipientLabel={getRecipientLabel(reply)}
+                  />
                 </div>
               </div>
             )
@@ -457,9 +479,9 @@ function ReplyThread({
               onChange={e => setReplyBody(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
-                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody('') }
+                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false) }
               }}
-               placeholder={`Replying to ${message.sender?.full_name ?? 'User'}…`}
+              placeholder={isReplyAll ? 'Replying to Everyone…' : replyToId ? `Replying to ${replies.find(r => r.id === replyToId)?.sender?.full_name ?? 'User'}…` : `Replying to ${message.sender?.full_name ?? 'User'}…`}
               rows={2}
               style={{
                 ...S.input,
@@ -472,10 +494,10 @@ function ReplyThread({
                 padding: '0.6rem 0.75rem',
               }}
             />
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setReplyOpen(false); setReplyBody('') }}
-                style={{
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false) }}
+                  style={{
                   padding: '0.35rem 0.75rem',
                   background: 'none',
                   border: '1px solid var(--border)',
@@ -743,11 +765,30 @@ export function MessageTab({
     messages
   )
 
+  // Sent messages: top-level sent messages + user-sent replies.
+  // Replies are shown as sent threads where the parent message becomes
+  // the root and the user's reply appears below it.
+  const userSentReplies = messages.filter(m => m.sender_id === user?.id && m.parent_message_id)
   const sentMessages = messages
     .filter(m => m.sender_id === user?.id && !m.parent_message_id)
+    .map(m => ({
+      message: m,
+      replies: inboxRepliesMap[m.id] || [],
+      isReplyThread: false,
+    }))
+    .concat(
+      userSentReplies.map(reply => {
+        const parent = messages.find(m => m.id === reply.parent_message_id)
+        return {
+          message: parent,
+          replies: parent ? [reply, ...(inboxRepliesMap[parent.id] || []).filter(r => r.id !== reply.id)] : [reply],
+          isReplyThread: true,
+        }
+      })
+    )
     .sort((a, b) => {
-      const aLatest = Math.max(new Date(a.created_at), ...(inboxRepliesMap[a.id] || []).map(r => new Date(r.created_at)))
-      const bLatest = Math.max(new Date(b.created_at), ...(inboxRepliesMap[b.id] || []).map(r => new Date(r.created_at)))
+      const aLatest = Math.max(new Date(a.message.created_at), ...a.replies.map(r => new Date(r.created_at)))
+      const bLatest = Math.max(new Date(b.message.created_at), ...b.replies.map(r => new Date(r.created_at)))
       return bLatest - aLatest
     })
 
@@ -809,6 +850,7 @@ export function MessageTab({
   })()
 
   const recentRecipients = sentMessages
+    .map(s => s.message)
     .filter(m => m.recipient_type === 'volunteer' && m.recipient_volunteer_id)
     .map(m => m.recipient_volunteer_id)
     .filter((id, i, arr) => arr.indexOf(id) === i)
@@ -1065,7 +1107,8 @@ export function MessageTab({
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No sent messages yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {sentMessages.map(m => {
+              {sentMessages.map(sent => {
+                const m = sent.message
                 const toLabel =
                   m.recipient_type === 'everyone' ? 'To: Everyone' :
                   m.recipient_type === 'admin'    ? 'To: HR' :
@@ -1077,7 +1120,7 @@ export function MessageTab({
                   <ReplyThread
                     key={m.id}
                     message={m}
-                    replies={inboxRepliesMap[m.id] || []}
+                    replies={sent.replies}
                     user={user}
                     profile={profile}
                     supabase={supabase}
@@ -1090,6 +1133,7 @@ export function MessageTab({
                     onMarkRead={markThreadRead}
                     senderLabel={toLabel}
                     startExpanded={openThreadId === m.id}
+                    previewMessage={sent.isReplyThread ? sent.replies.find(r => r.sender_id === user?.id) : null}
                   />
                 )
               })}
