@@ -750,13 +750,13 @@ function CalendarTab({
               <input type="date" value={manualForm.date} onChange={e => setManualForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
             </div>
             <div>
-              <label style={labelStyle}>Time (optional)</label>
+              <label style={labelStyle}>Time</label>
               <input type="time" value={manualForm.time} onChange={e => setManualForm(f => ({ ...f, time: e.target.value }))} style={inputStyle} />
             </div>
             <button
               onClick={scheduleManual}
-              disabled={schedulingManual || !manualForm.applicantId || !manualForm.date}
-              style={solidBtn(C.warn, schedulingManual || !manualForm.applicantId || !manualForm.date)}
+              disabled={schedulingManual || !manualForm.applicantId || !manualForm.date || !manualForm.time}
+              style={solidBtn(C.warn, schedulingManual || !manualForm.applicantId || !manualForm.date || !manualForm.time)}
             >
               {schedulingManual ? 'Scheduling...' : 'Schedule'}
             </button>
