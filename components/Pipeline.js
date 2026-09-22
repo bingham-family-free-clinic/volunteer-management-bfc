@@ -756,7 +756,7 @@ function CalendarTab({
             <button
               onClick={scheduleManual}
               disabled={schedulingManual || !manualForm.applicantId || !manualForm.date || !manualForm.time}
-              style={solidBtn(C.warn, schedulingManual || !manualForm.applicantId || !manualForm.date)}
+              style={solidBtn(C.warn, schedulingManual || !manualForm.applicantId || !manualForm.date || !manualForm.time)}
             >
               {schedulingManual ? 'Scheduling...' : 'Schedule'}
             </button>
