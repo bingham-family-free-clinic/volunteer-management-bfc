@@ -513,9 +513,6 @@ function ReplyThread({
               ? (isOwnReply ? !ownReplyIsGroup : true)
               : (canReply && isMostRecent && isMostRecentReply)
             const replyCanReplyAll = isGroupMessageSender && isOwnReply && ownReplyIsGroup
-            // Direct replies in a group thread get a darker card to distinguish
-            // them from reply-alls and the original message.
-            const isDirectReply = message.recipient_type !== 'volunteer' && reply.recipient_type === 'volunteer'
             return (
               <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1 }}>
@@ -531,7 +528,6 @@ function ReplyThread({
                     onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; if (isGroupMessageSender && isOwnReply) { setReplyToId(null); setIsReplyAll(false); setFollowUpId(reply.id) } else { setReplyToId(reply.id); setIsReplyAll(false); setFollowUpId(null) } setReplyOpen(true) }}
                     onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setFollowUpId(null); setIsReplyAll(true); setReplyOpen(true) }}
                     recipientLabel={getRecipientLabel(reply)}
-                    dimmed={isDirectReply}
                   />
                 </div>
               </div>
@@ -922,9 +918,16 @@ export function MessageTab({
     }
 
     if (inboxFilter === 'direct') {
-      return (
+      if (
           m.recipient_type === 'volunteer' &&
           m.recipient_volunteer_id === user?.id
+      ) return true
+      // Threads where someone sent you a direct reply (e.g. a 1-on-1 reply
+      // inside a group thread), even when the top-level message is group.
+      return (inboxRepliesMap[m.id] || []).some(r =>
+          r.recipient_type === 'volunteer' &&
+          r.recipient_volunteer_id === user?.id &&
+          r.sender_id !== user?.id
       )
     }
 

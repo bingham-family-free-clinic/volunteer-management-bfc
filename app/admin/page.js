@@ -356,7 +356,7 @@ function AdminDesktopHeader({
   showVolunteers, showProviders,
   openMenu, onToggleMenu, onCloseMenu,
   onSwitchView, onSignOut,
-  messagesTab,
+  messagesBadge,
 }) {
   const otherMenuActive = otherItems.some(([key]) => key === activeTab)
 
@@ -389,36 +389,7 @@ function AdminDesktopHeader({
           />
         )}
 
-        {messagesTab && (
-          <button
-            onClick={() => onSelectTab(messagesTab.key)}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              cursor: 'pointer',
-              fontFamily: 'DM Sans, sans-serif',
-              fontSize: '0.95rem',
-              fontWeight: activeTab === messagesTab.key ? 600 : 500,
-              color: activeTab === messagesTab.key ? 'var(--text)' : 'var(--muted)',
-              position: 'relative',
-            }}
-          >
-            {messagesTab.label}
-            {messagesTab.badge > 0 && (
-              <span style={{
-                position: 'absolute', top: '-8px', right: '-14px',
-                background: '#ef4444', color: '#fff', borderRadius: '50%',
-                width: '16px', height: '16px', fontSize: '0.6rem', fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
-              }}>
-                {messagesTab.badge > 9 ? '9+' : messagesTab.badge}
-              </span>
-            )}
-          </button>
-        )}
-
-        {/* "Other" always renders — it's also home to Volunteer View / Sign out */}
+        {/* "Other" always renders — it's also home to Messages, Volunteer View / Sign out */}
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => onToggleMenu('other')}
@@ -431,9 +402,20 @@ function AdminDesktopHeader({
               fontSize: '0.95rem',
               fontWeight: otherMenuActive || openMenu === 'other' ? 600 : 500,
               color: otherMenuActive || openMenu === 'other' ? 'var(--text)' : 'var(--muted)',
+              position: 'relative',
             }}
           >
             Other
+            {messagesBadge > 0 && (
+              <span style={{
+                position: 'absolute', top: '-8px', right: '-14px',
+                background: '#ef4444', color: '#fff', borderRadius: '50%',
+                width: '16px', height: '16px', fontSize: '0.6rem', fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+              }}>
+                {messagesBadge > 9 ? '9+' : messagesBadge}
+              </span>
+            )}
           </button>
 
           {openMenu === 'other' && (
@@ -456,6 +438,16 @@ function AdminDesktopHeader({
                     style={dropdownItemStyle(activeTab === key)}
                   >
                     {label}
+                    {key === 'messages' && messagesBadge > 0 && (
+                      <span style={{
+                        background: '#ef4444', color: '#fff', borderRadius: '50%',
+                        minWidth: '18px', height: '18px', fontSize: '0.65rem', fontWeight: 700,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+                        padding: '0 4px',
+                      }}>
+                        {messagesBadge > 9 ? '9+' : messagesBadge}
+                      </span>
+                    )}
                   </button>
                 ))}
 
@@ -474,7 +466,7 @@ function AdminDesktopHeader({
   )
 }
 
-function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitchView, onSignOut }) {
+function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitchView, onSignOut, messagesBadge = 0 }) {
   function handleItemClick(action) {
     action()
     onClose()
@@ -567,7 +559,19 @@ function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitc
                 fontFamily: 'DM Sans, sans-serif',
               }}
             >
-              {label}
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <span>{label}</span>
+                {key === 'messages' && messagesBadge > 0 && (
+                  <span style={{
+                    background: '#ef4444', color: '#fff', borderRadius: '50%',
+                    minWidth: '20px', height: '20px', fontSize: '0.7rem', fontWeight: 700,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+                    padding: '0 5px',
+                  }}>
+                    {messagesBadge > 9 ? '9+' : messagesBadge}
+                  </span>
+                )}
+              </span>
             </button>
           ))}
 
@@ -832,7 +836,7 @@ export default function AdminPage() {
   }
 
   const messagesTabEntry = tabItems.find(([key]) => key === 'messages')
-  const messagesTab = messagesTabEntry ? { key: 'messages', label: 'Messages', badge: unreadCount } : null
+  const messagesBadge = messagesTabEntry ? unreadCount : 0
 
   // Insert Language Coverage right after Volunteers, but only for the three
   // roles allowed to see it. Works regardless of which branch above produced
@@ -851,7 +855,7 @@ export default function AdminPage() {
     .map(k => tabItems.find(([key]) => key === k))
     .filter(Boolean)
   const groupedKeySet = new Set([...VOLUNTEER_GROUP_KEYS, ...PROVIDER_GROUP_KEYS])
-  const otherMenuItems = tabItems.filter(([key]) => !groupedKeySet.has(key) && key !== 'messages')
+  const otherMenuItems = tabItems.filter(([key]) => !groupedKeySet.has(key))
 
   const showVolunteersMenu = volunteerMenuItems.length > 0
   const showProvidersMenu  = providerMenuItems.some(([key]) => PROVIDER_GROUP_CORE_KEYS.includes(key))
@@ -2122,7 +2126,7 @@ export default function AdminPage() {
             onCloseMenu={closeHeaderMenu}
             onSwitchView={() => { window.location.href = '/volunteer' }}
             onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
-            messagesTab={messagesTab}
+            messagesBadge={messagesBadge}
           />
         )}
 
@@ -2993,6 +2997,7 @@ export default function AdminPage() {
           onSelectTab={switchTab}
           onSwitchView={() => window.location.href = '/volunteer'}
           onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
+          messagesBadge={messagesBadge}
         />
 
         {/* Toast */}

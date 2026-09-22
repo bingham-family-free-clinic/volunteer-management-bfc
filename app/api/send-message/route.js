@@ -21,7 +21,7 @@ export async function POST(req) {
   const token = authHeader.replace('Bearer ', '')
   if (!token) {
     return Response.json(
-      { error: 'Session expired. Refresh the page or sign out and sign in again.', code: 'NO_TOKEN' },
+      { error: 'Session expired. Please sign out and in again.', code: 'NO_TOKEN' },
       { status: 401 }
     )
   }
@@ -34,10 +34,59 @@ export async function POST(req) {
   )
   const { data: { user }, error: authError } = await supabaseUser.auth.getUser()
   if (authError || !user) {
-    return Response.json(
-      { error: 'Session expired. Refresh the page or sign out and sign in again.', code: 'SESSION_EXPIRED' },
-      { status: 401 }
-    )
+    // Log the real reason server-side — the client-facing message stays
+    // generic, but this is what actually tells us what's happening.
+    console.error('[messages/send] auth.getUser() failed', {
+      status:  authError?.status,
+      name:    authError?.name,
+      code:    authError?.code,
+      message: authError?.message,
+    })
+
+    // Distinguish the failure modes we know about so the client can react
+    // differently (e.g. only force a full sign-out for genuinely dead
+    // sessions, and retry/backoff for transient ones).
+    let code = 'SESSION_EXPIRED'
+    let error = 'Session expired. Please sign out and in again.'
+    let status = 401
+
+    const msg = authError?.message?.toLowerCase() ?? ''
+
+    if (!authError) {
+      // getUser() resolved with no error but also no user — shouldn't
+      // normally happen, but don't claim "expired" if we don't know that.
+      code = 'NO_USER'
+      error = 'Could not verify your session. Please sign out and in again.'
+    } else if (msg.includes('refresh_token_already_used') || msg.includes('invalid refresh token')) {
+      // Classic Supabase refresh-token-rotation race: two tabs (or a
+      // double-mount) refreshed with the same token, one lost. Storage now
+      // holds a dead session that reload cannot fix.
+      code = 'REFRESH_TOKEN_INVALID'
+      error = 'Your session was invalidated (often from being open in multiple tabs). Please sign out and in again.'
+    } else if (msg.includes('jwt expired') || msg.includes('token is expired')) {
+      code = 'TOKEN_EXPIRED'
+      error = 'Your session expired. Please sign out and in again.'
+    } else if (msg.includes('invalid jwt') || msg.includes('malformed') || msg.includes('invalid token')) {
+      code = 'TOKEN_MALFORMED'
+      error = 'Your session token is invalid. Please sign out and in again.'
+    } else if (authError.status && authError.status >= 500) {
+      // Supabase Auth itself had a problem — this is NOT the user's fault
+      // and a forced logout won't help; a retry might.
+      code = 'AUTH_SERVICE_ERROR'
+      error = 'Could not verify your session right now. Please try again in a moment.'
+      status = 503
+    } else if (authError.status === 429) {
+      code = 'AUTH_RATE_LIMITED'
+      error = 'Too many requests. Please wait a moment and try again.'
+      status = 429
+    } else {
+      // Unrecognized error shape — keep the generic message but preserve
+      // the underlying reason server-side (already logged above) and echo
+      // a hint in the code so it shows up in client error reports too.
+      code = `SESSION_EXPIRED_UNKNOWN`
+    }
+
+    return Response.json({ error, code }, { status })
   }
 
   // ── 2. Parse the request body ─────────────────────────────────────────────

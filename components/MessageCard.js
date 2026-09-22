@@ -61,18 +61,17 @@ function formatBody(text) {
   })
 }
 
-export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, canReplyAll, replyOpen, onReply, onReplyAll, isHighlighted, recipientLabel: recipientLabelProp, dimmed = false }) {
+export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, canReplyAll, replyOpen, onReply, onReplyAll, isHighlighted, recipientLabel: recipientLabelProp }) {
   const isUnread =
     readMessageIds &&
     !readMessageIds.has(m.id) &&
     m.sender_id !== user?.id
-  const isDimmed = dimmed && !isUnread && !isHighlighted
 
   return (
     <div
       style={{
         padding: '0.75rem 1rem',
-        background: isUnread || isHighlighted ? 'rgba(2,65,107,0.06)' : (isDimmed ? '#e6ebf1' : 'var(--bg)'),
+        background: isUnread || isHighlighted ? 'rgba(2,65,107,0.06)' : 'var(--bg)',
         borderRadius: '8px',
         border: `1px solid ${isUnread || isHighlighted ? 'rgba(2,65,107,0.5)' : 'var(--border)'}`,
       }}
