@@ -404,7 +404,6 @@ function ReplyThread({
   if (!expanded) {
     return (
       <div
-        className="msg-collapsed"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -433,7 +432,7 @@ function ReplyThread({
               <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {collapsedLabel ?? (latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName)}
               </span>
-              <span className="msg-collapsed-meta" style={{ display: 'inline-flex', flexWrap: 'wrap', columnGap: '0.35rem', fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
+              <span style={{ display: 'inline-flex', flexWrap: 'wrap', columnGap: '0.35rem', fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
                 <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(previewSource.created_at)}{previewRecipientText ? ',' : ''}</span>
                 {previewRecipientText && (
                   <span style={{ whiteSpace: 'nowrap' }}>{previewRecipientText}</span>

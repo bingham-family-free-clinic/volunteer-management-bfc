@@ -93,7 +93,6 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
       }}
     >
       <div
-        className="msg-head"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -128,7 +127,6 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
             {senderLabel || m.sender?.full_name || 'Unknown'}
           </span>
           <span
-            className="msg-head-meta"
             style={{
               display: 'inline-flex',
               flexWrap: 'wrap',

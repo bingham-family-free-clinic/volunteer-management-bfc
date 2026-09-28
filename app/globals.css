@@ -28,14 +28,3 @@ body {
 }
 
 .mono { font-family: 'DM Mono', monospace; }
-
-/* ── Message thread responsive wrapping ─────────────────────────────
-   The sender meta (timestamp + To:) drops below the sender name at ≤24rem.
-   Inside the meta line itself, "To: …" wraps below the timestamp naturally
-   (flex), exactly when it no longer fits. Reply buttons never leave the
-   top row. */
-.msg-collapsed, .msg-head { container-type: inline-size; }
-
-@container (max-width: 24rem) {
-  .msg-collapsed-meta, .msg-head-meta { flex-basis: 100%; }
-}
