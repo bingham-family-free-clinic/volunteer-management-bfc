@@ -96,10 +96,22 @@ export async function POST(req) {
     recipient_shift,
     recipient_role,
     recipient_volunteer_id,
+    recipient_volunteer_ids,
     body,
     image_url,
     parent_message_id,
   } = await req.json()
+
+  // Group chats (Individuals tab, 2+ people): member ids arrive as an array
+  // and are stored as JSON in recipient_role (no array column exists).
+  let groupMemberIds = []
+  if (recipient_type === 'group') {
+    const raw = Array.isArray(recipient_volunteer_ids) ? recipient_volunteer_ids : []
+    groupMemberIds = [...new Set(raw.filter(id => typeof id === 'string' && id && id !== user.id))].sort()
+    if (groupMemberIds.length === 0) {
+      return Response.json({ error: 'Select at least one recipient.' }, { status: 400 })
+    }
+  }
 
   // ── 3. Insert the message ─────────────────────────────────────────────────
   const { data: message, error: insertError } = await supabaseAdmin
@@ -109,7 +121,7 @@ export async function POST(req) {
       recipient_type,
       recipient_day:          recipient_day          ?? null,
       recipient_shift:        recipient_shift        ?? null,
-      recipient_role:         recipient_role         ?? null,
+      recipient_role:         recipient_type === 'group' ? JSON.stringify(groupMemberIds) : (recipient_role ?? null),
       recipient_volunteer_id: recipient_volunteer_id ?? null,
       body:                   body?.trim() ?? '',
       image_url:              image_url ?? null,
@@ -176,6 +188,9 @@ export async function POST(req) {
       .eq('shift_time', recipient_shift)
       .neq('volunteer_id', user.id)
     recipientUserIds = [...new Set((data || []).map(s => s.volunteer_id))]
+
+  } else if (recipient_type === 'group') {
+    recipientUserIds = groupMemberIds
 
   } else if (
     (recipient_type === 'volunteer' || recipient_type === 'user') &&

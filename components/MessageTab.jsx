@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { MessageCard } from './MessageCard'
 import { formatDateTime } from '../lib/timeUtils'
 import { ROLES } from '../lib/constants'
-import { recipientLabel } from '../lib/messageUtils'
+import { recipientLabel, parseGroupMemberIds } from '../lib/messageUtils'
 
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
@@ -224,6 +224,14 @@ function ReplyThread({
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
   const canReply = Boolean(user?.id)
+
+  // Group chat member names (Individuals tab, 2+ people), alphabetical.
+  function getGroupMemberNames(m) {
+    return parseGroupMemberIds(m)
+      .map(id => allUsers.find(u => u.id === id)?.full_name)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
+  }
 
   // Recipient pill: show for every message, prefixed with "To: ".
   // Resolved per message (original or each reply), not from the thread root.
@@ -485,6 +493,7 @@ function ReplyThread({
           onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(true); setFollowUpId(null); setReplyOpen(true) }}
           isHighlighted={isHighlighted}
           recipientLabel={getRecipientLabel(message)}
+          groupMemberNames={message.recipient_type === 'group' ? getGroupMemberNames(message) : null}
         />
       </div>
 
@@ -528,6 +537,7 @@ function ReplyThread({
                     onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; if (isGroupMessageSender && isOwnReply) { setReplyToId(null); setIsReplyAll(false); setFollowUpId(reply.id) } else { setReplyToId(reply.id); setIsReplyAll(false); setFollowUpId(null) } setReplyOpen(true) }}
                     onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setFollowUpId(null); setIsReplyAll(true); setReplyOpen(true) }}
                     recipientLabel={getRecipientLabel(reply)}
+                    groupMemberNames={reply.recipient_type === 'group' ? getGroupMemberNames(reply) : null}
                   />
                 </div>
               </div>
@@ -648,7 +658,7 @@ export function MessageTab({
   const [msgRecipientType, setMsgRecipientType] = useState('admin')
   const [msgSelectedShift, setMsgSelectedShift] = useState(null)
   const [msgSelectedRole, setMsgSelectedRole]   = useState(null)
-  const [msgRecipientVolId, setMsgRecipientVolId] = useState('')
+  const [msgRecipientVolIds, setMsgRecipientVolIds] = useState([])
   const [sendingMsg, setSendingMsg]           = useState(false)
   const [msgImageFile, setMsgImageFile]       = useState(null)
   const [msgImagePreview, setMsgImagePreview] = useState(null)
@@ -657,6 +667,7 @@ export function MessageTab({
   const [comboOpen, setComboOpen]             = useState(false)
   const fileInputRef = useRef(null)
   const comboRef     = useRef(null)
+  const recipientInputRef = useRef(null)
   const msgBodyRef = useRef(null)
   const [msgBodyFieldSizingSupported] = useState(() =>
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
@@ -961,10 +972,13 @@ export function MessageTab({
     .flatMap(s => {
       if (s.isReplyThread) {
         const my = [...s.replies].reverse().find(r => r.sender_id === user?.id) ?? s.replies.find(r => r.sender_id === user?.id)
-        return my && my.recipient_type === 'volunteer' && my.recipient_volunteer_id ? [my.recipient_volunteer_id] : []
+        if (!my) return []
+        if (my.recipient_type === 'volunteer' && my.recipient_volunteer_id) return [my.recipient_volunteer_id]
+        return parseGroupMemberIds(my).filter(id => id !== user?.id)
       }
       const m = s.message
-      return m.recipient_type === 'volunteer' && m.recipient_volunteer_id ? [m.recipient_volunteer_id] : []
+      if (m.recipient_type === 'volunteer' && m.recipient_volunteer_id) return [m.recipient_volunteer_id]
+      return parseGroupMemberIds(m).filter(id => id !== user?.id)
     })
     .filter((id, i, arr) => arr.indexOf(id) === i)
     .slice(0, 4)
@@ -978,6 +992,7 @@ export function MessageTab({
         allUsers
         .filter(u => u.id !== user?.id)
         .filter(u => u.status === 'active')
+        .filter(u => !msgRecipientVolIds.includes(u.id))
     if (q.length === 0) {
       const recentIds = new Set(recentRecipients.map(u => u.id))
       const rest = baseList.filter(u => !recentIds.has(u.id))
@@ -1022,10 +1037,27 @@ export function MessageTab({
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  function selectRecipient(vol) {
-    setMsgRecipientVolId(vol.id)
-    setComboQuery(vol.full_name)
-    setComboOpen(false)
+  const selectedRecipientUsers = msgRecipientVolIds
+    .map(id => allUsers.find(u => u.id === id))
+    .filter(Boolean)
+
+  function addRecipient(vol) {
+    if (!vol || vol.id === user?.id) return
+    setMsgRecipientVolIds(prev => prev.includes(vol.id) ? prev : [...prev, vol.id])
+    setComboQuery('')
+    setComboOpen(true)
+    recipientInputRef.current?.focus?.()
+  }
+
+  function removeRecipient(id) {
+    setMsgRecipientVolIds(prev => prev.filter(v => v !== id))
+  }
+
+  function handleRecipientKeyDown(e) {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    // Only auto-select when the filter narrows to a single option.
+    if (comboResults.length === 1) addRecipient(comboResults[0])
   }
 
   async function uploadImage(userId) {
@@ -1052,8 +1084,13 @@ export function MessageTab({
       const imageUrl = await uploadImage(user.id)
       if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
 
-      const recipientType = msgRecipientType === 'user'      ? 'volunteer'
-                          : msgRecipientType === 'providers' ? 'role'
+      const individualIds = msgRecipientType === 'user'
+        ? [...new Set(msgRecipientVolIds.filter(id => id && id !== user?.id))]
+        : []
+      const isGroupCompose = msgRecipientType === 'user' && individualIds.length > 1
+      const recipientType = isGroupCompose                        ? 'group'
+                          : msgRecipientType === 'user'           ? 'volunteer'
+                          : msgRecipientType === 'providers'      ? 'role'
                           : msgRecipientType
       const accessToken = await getFreshAccessToken(supabase)
 
@@ -1069,7 +1106,8 @@ export function MessageTab({
           recipient_role:         msgRecipientType === 'role'      ? (msgSelectedRole || null)
                                 : msgRecipientType === 'providers' ? 'Provider'
                                 : null,
-          recipient_volunteer_id: recipientType === 'volunteer' ? (msgRecipientVolId || null) : null,
+          recipient_volunteer_id: recipientType === 'volunteer' ? (individualIds[0] || null) : null,
+          recipient_volunteer_ids: isGroupCompose ? individualIds : undefined,
           parent_message_id: null, // always null for new top-level compose
         }),
       })
@@ -1084,7 +1122,7 @@ export function MessageTab({
         setMsgRecipientType('admin')
         setMsgSelectedShift(null)
         setMsgSelectedRole(null)
-        setMsgRecipientVolId('')
+        setMsgRecipientVolIds([])
         setComboQuery('')
         setComboOpen(false)
         setMessages([])
@@ -1225,6 +1263,7 @@ export function MessageTab({
               {sentMessages.map(sent => {
                 const m = sent.message
                 const getToLabel = (msg) =>
+                  msg.recipient_type === 'group' ? 'To: Group' :
                   msg.recipient_type === 'everyone' ? 'To: Everyone' :
                   msg.recipient_type === 'admin'    ? 'To: HR' :
                   msg.recipient_type === 'shift'    ? `To: ${msg.recipient_day ? msg.recipient_day.charAt(0).toUpperCase() + msg.recipient_day.slice(1, 3) : ''} ${msg.recipient_shift || ''}`.trim() + ' Shift' :
@@ -1292,7 +1331,7 @@ export function MessageTab({
                   ...(!isProvider && !isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
                   ...(myShiftCombos.length > 0 ? [{ value: 'shift', label: 'My Shift' }] : []),
                   ...(rolesForCompose.length > 0 ? [{ value: 'role', label: isAdmin ? 'Role' : 'My Role' }] : []),
-                  { value: 'user', label: 'Individual' },
+                  { value: 'user', label: 'Individuals' },
                 ].map(opt => (
                   <button
                     key={opt.value}
@@ -1301,7 +1340,7 @@ export function MessageTab({
                       setMsgRecipientType(opt.value)
                       setMsgSelectedShift(null)
                       setMsgSelectedRole(null)
-                      setMsgRecipientVolId('')
+                      setMsgRecipientVolIds([])
                       setComboQuery('')
                       setComboOpen(false)
                     }}
@@ -1361,31 +1400,63 @@ export function MessageTab({
                 </div>
               )}
 
-              {/* Individual user selector */}
+              {/* Individuals multi-select (email-style bubbles) */}
               {msgRecipientType === 'user' && (
                 <div style={{ marginTop: '0.75rem' }} ref={comboRef}>
-                  <label style={S.label}>Select user</label>
+                  <label style={S.label}>Select users</label>
                   {isMobile ? (
                     <>
+                      {selectedRecipientUsers.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                          {selectedRecipientUsers.map(u => (
+                            <span
+                              key={u.id}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                                padding: '0.2rem 0.3rem 0.2rem 0.6rem', borderRadius: '100px',
+                                fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif',
+                                background: '#0369a1' + '18', color: '#0369a1',
+                                border: '1px solid #0369a144',
+                              }}
+                            >
+                              {u.full_name}
+                              <button
+                                type="button"
+                                aria-label={`Remove ${u.full_name}`}
+                                onClick={() => removeRecipient(u.id)}
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  width: '1.1rem', height: '1.1rem', borderRadius: '50%',
+                                  background: 'none', border: 'none', cursor: 'pointer',
+                                  color: '#0369a1', fontSize: '0.75rem', lineHeight: 1, padding: 0,
+                                }}
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={() => { setComboOpen(true); setComboQuery('') }}
-                        style={{ ...S.input, textAlign: 'left', cursor: 'pointer', color: msgRecipientVolId ? 'var(--text)' : 'var(--muted)' }}
+                        style={{ ...S.input, textAlign: 'left', cursor: 'pointer', color: 'var(--muted)' }}
                       >
-                        {msgRecipientVolId ? allUsers.find(u => u.id === msgRecipientVolId)?.full_name : 'Tap to select recipient…'}
+                        {selectedRecipientUsers.length > 0 ? `Add more… (${selectedRecipientUsers.length} selected)` : 'Tap to select recipients…'}
                       </button>
                       {comboOpen && (
                         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', paddingBottom: '19%' }}>
                           <div style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', display: 'flex', flexDirection: 'column', height: '57%' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem 0.75rem', borderBottom: '1px solid var(--border)' }}>
-                              <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Select recipient</span>
-                              <button type="button" onClick={() => setComboOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '1.2rem' }}>✕</button>
+                              <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Select recipients</span>
+                              <button type="button" onClick={() => { setComboOpen(false); setComboQuery('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '1.2rem' }}>✕</button>
                             </div>
                             <input
                               autoFocus
                               type="text"
                               value={comboQuery}
                               onChange={e => setComboQuery(e.target.value)}
+                              onKeyDown={handleRecipientKeyDown}
                               placeholder="Search…"
                               style={{ ...S.input, borderRadius: 0, border: 'none', borderBottom: '1px solid var(--border)', padding: '0.75rem 1.25rem' }}
                             />
@@ -1394,7 +1465,7 @@ export function MessageTab({
                                 <button
                                   key={vol.id}
                                   type="button"
-                                  onClick={() => selectRecipient(vol)}
+                                  onClick={() => addRecipient(vol)}
                                   style={{ width: '100%', padding: '0.75rem 1.25rem', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text)', fontFamily: 'DM Sans, sans-serif', borderBottom: '1px solid var(--border)' }}
                                 >
                                   {vol.full_name}
@@ -1407,21 +1478,57 @@ export function MessageTab({
                     </>
                   ) : (
                     <div style={{ position: 'relative' }}>
-                      <input
-                        type="text"
-                        value={comboQuery}
-                        onChange={e => { setComboQuery(e.target.value); setComboOpen(true); setMsgRecipientVolId('') }}
-                        onFocus={() => setComboOpen(true)}
-                        placeholder="Search by name…"
-                        style={S.input}
-                      />
+                      <div
+                        onClick={() => { setComboOpen(true); recipientInputRef.current?.focus?.() }}
+                        style={{ ...S.input, display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', cursor: 'text', minHeight: '3rem' }}
+                      >
+                        {selectedRecipientUsers.map(u => (
+                          <span
+                            key={u.id}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                              padding: '0.2rem 0.3rem 0.2rem 0.6rem', borderRadius: '100px',
+                              fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif',
+                              background: '#0369a1' + '18', color: '#0369a1',
+                              border: '1px solid #0369a144',
+                            }}
+                          >
+                            {u.full_name}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${u.full_name}`}
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => removeRecipient(u.id)}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: '1.1rem', height: '1.1rem', borderRadius: '50%',
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#0369a1', fontSize: '0.75rem', lineHeight: 1, padding: 0,
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          ref={recipientInputRef}
+                          type="text"
+                          value={comboQuery}
+                          onChange={e => { setComboQuery(e.target.value); setComboOpen(true) }}
+                          onFocus={() => setComboOpen(true)}
+                          onBlur={() => { setComboQuery(''); setComboOpen(false) }}
+                          onKeyDown={handleRecipientKeyDown}
+                          placeholder={selectedRecipientUsers.length > 0 ? '' : 'Search by name…'}
+                          style={{ flex: '1 1 8rem', minWidth: '8rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.95rem', fontFamily: 'DM Sans, sans-serif', color: 'var(--text)', padding: 0 }}
+                        />
+                      </div>
                       {comboOpen && comboResults.length > 0 && (
                         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 100, maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}>
                           {comboResults.map(vol => (
                             <button
                               key={vol.id}
                               type="button"
-                              onMouseDown={e => { e.preventDefault(); selectRecipient(vol) }}
+                              onMouseDown={e => { e.preventDefault(); addRecipient(vol) }}
                               style={{ width: '100%', padding: '0.6rem 1rem', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', textAlign: 'left', cursor: 'pointer', fontSize: '0.88rem', color: 'var(--text)', fontFamily: 'DM Sans, sans-serif' }}
                             >
                               {vol.full_name}
@@ -1476,7 +1583,7 @@ export function MessageTab({
 
             <button
               type="submit"
-              disabled={sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && !msgRecipientVolId) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)}
+              disabled={sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)}
               style={{
                 padding: '0.85rem',
                 background: 'var(--accent)',

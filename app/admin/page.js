@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
-import { getInboxMessages } from '../../lib/messageUtils'
+import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import DataDashboard from '../../components/DataDashboard'
 import ClinicOpenings from '../../components/ClinicOpenings'
 import Pipeline from '../../components/Pipeline'
@@ -1369,6 +1369,7 @@ export default function AdminPage() {
       repliesMap[r.parent_message_id].push(r)
     })
     const count = topLevel.filter(m => {
+      if (m.recipient_type === 'group' && !parseGroupMemberIds(m).includes(userId)) return false
       const isUnreadMsg = m.sender_id !== userId && !readSet.has(m.id)
       const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== userId)
       return isUnreadMsg || hasUnreadReplies

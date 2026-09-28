@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } f
 import { supabase } from '../../lib/supabase'
 import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE } from '../../lib/constants'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
-import { getInboxMessages } from '../../lib/messageUtils'
+import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import { MessageCard } from '../../components/MessageCard'
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotifications.js'
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
@@ -823,7 +823,7 @@ function VolunteerPageInner() {
     try {
       const [{ data: msgs }, { data: reads }] = await Promise.all([
         supabase.from('messages')
-          .select('id, sender_id, recipient_type, recipient_volunteer_id, parent_message_id')
+          .select('id, sender_id, recipient_type, recipient_role, recipient_volunteer_id, parent_message_id')
           .order('created_at', { ascending: false })
           .limit(10 * 5),
         supabase.from('message_reads').select('message_id').eq('user_id', user.id),
@@ -837,6 +837,7 @@ function VolunteerPageInner() {
         repliesMap[r.parent_message_id].push(r)
       })
       const count = topLevel.filter(m => {
+        if (m.recipient_type === 'group' && !parseGroupMemberIds(m).includes(user.id)) return false
         const isUnreadMsg = m.sender_id !== user.id && !readSet.has(m.id)
         const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
         return isUnreadMsg || hasUnreadReplies
@@ -911,7 +912,7 @@ function VolunteerPageInner() {
     // Seed the unread message count badge immediately on load
     const { data: allMsgs } = await supabase
       .from('messages')
-      .select('id, sender_id, recipient_type, recipient_volunteer_id, parent_message_id')
+      .select('id, sender_id, recipient_type, recipient_role, recipient_volunteer_id, parent_message_id')
       .order('created_at', { ascending: false })
       .limit(MSG_PAGE_SIZE * 2)
     const { data: reads } = await supabase
@@ -928,6 +929,7 @@ function VolunteerPageInner() {
       repliesMap[r.parent_message_id].push(r)
     })
     const count = topLevel.filter(m => {
+      if (m.recipient_type === 'group' && !parseGroupMemberIds(m).includes(user.id)) return false
       const isUnreadMsg = m.sender_id !== user.id && !readSet.has(m.id)
       const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
       return isUnreadMsg || hasUnreadReplies
