@@ -1119,7 +1119,7 @@ export function MessageTab({
               fontFamily: 'DM Sans, sans-serif',
               background: msgView === key ? '#0369a1' + '18' : 'transparent',
               color:      msgView === key ? '#0369a1' : 'var(--muted)',
-              border:     msgView === key ? '1px solid #0369a144' : '1px solid transparent',
+              border:     msgView === key ? '1px solid #0369a144' : '1px solid var(--border)',
               transition: 'all 0.15s',
             }}
           >
@@ -1162,7 +1162,7 @@ export function MessageTab({
                       color: inboxFilter === key ? '#0369a1' : 'var(--muted)',
                       border: inboxFilter === key
                           ? '1px solid #0369a144'
-                          : '1px solid transparent',
+                          : '1px solid var(--border)',
                       transition: 'all 0.15s',
                     }}
                 >
@@ -1307,10 +1307,11 @@ export function MessageTab({
                     }}
                     style={{
                       padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem',
-                      fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
-                      background: msgRecipientType === opt.value ? 'var(--accent)' : 'var(--surface)',
-                      color:      msgRecipientType === opt.value ? '#fff' : 'var(--muted)',
-                      border:     msgRecipientType === opt.value ? 'none' : '1px solid var(--border)',
+                      fontWeight: msgRecipientType === opt.value ? 700 : 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                      background: msgRecipientType === opt.value ? '#0369a1' + '18' : 'transparent',
+                      color:      msgRecipientType === opt.value ? '#0369a1' : 'var(--muted)',
+                      border:     msgRecipientType === opt.value ? '1px solid #0369a144' : '1px solid var(--border)',
+                      transition: 'all 0.15s',
                     }}
                   >
                     {opt.label}
