@@ -1880,7 +1880,7 @@ function VolunteerPageInner() {
             schedule={schedule}
             onUnreadCountChange={setUnreadCount}
             openMessageId={messageId}
-            sheetBottomOffset="calc(84px + env(safe-area-inset-bottom, 0px))"
+            sheetBottomOffset="calc(76px + env(safe-area-inset-bottom, 0px))"
           />
         )}
 
