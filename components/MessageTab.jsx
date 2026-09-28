@@ -1236,18 +1236,17 @@ export function MessageTab({
                 key="mark-all-read"
                 type="button"
                 onClick={markAllThreadsRead}
-                disabled={markingAllRead || unreadThreadCount === 0}
                 style={{
                   padding: '0.35rem 0.75rem',
-                  borderRadius: '100px',
+                  borderRadius: '8px',
                   fontSize: '0.78rem',
-                  fontWeight: 600,
-                  cursor: (markingAllRead || unreadThreadCount === 0) ? 'not-allowed' : 'pointer',
+                  fontWeight: 500,
+                  cursor: 'pointer',
                   fontFamily: 'DM Sans, sans-serif',
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  border: 'none',
-                  opacity: (markingAllRead || unreadThreadCount === 0) ? 0.5 : 1,
+                  background: '#fff',
+                  color: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  marginLeft: 'auto',
                 }}
             >
               {markingAllRead ? 'Marking…' : 'Mark all as read'}
