@@ -407,14 +407,15 @@ function ReplyThread({
         style={{
           display: 'flex',
           alignItems: 'center',
-          flexWrap: 'wrap',
           gap: '0.5rem',
           padding: '0.45rem 0.75rem',
           borderRadius: '8px',
           border: `1px solid ${isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'}`,
           background: isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
           userSelect: 'none',
+          cursor: 'pointer',
         }}
+        onClick={expandThread}
         onMouseEnter={e => e.currentTarget.style.background = 'var(--surface)'}
         onMouseLeave={e => e.currentTarget.style.background = isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)'}
       >
@@ -423,10 +424,9 @@ function ReplyThread({
           <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, alignSelf: 'center' }} />
         )}
 
-        {/* Line 1: sender + timestamp (meta drops below name at ≤30rem) */}
+        {/* Line 1: sender + timestamp */}
         <div
-          onClick={expandThread}
-          style={{ flex: '1 1 0%', minWidth: 0, cursor: 'pointer' }}
+          style={{ flex: 1, minWidth: 0 }}
         >
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.5rem', minWidth: 0 }}>
               <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -439,6 +439,19 @@ function ReplyThread({
                 )}
               </span>
             </div>
+          {/* Line 2: reply count + snippet (only rendered if there is content) */}
+          {(replyCount > 0 || bodySnippet) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
+              {replyCount > 0 && (
+                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                  {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
+                </span>
+              )}
+              <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {previewSnippet}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Inline reply button — only for replyable threads.
@@ -461,6 +474,7 @@ function ReplyThread({
             title={isGroupMessageSender ? "Reply All" : "Reply"}
             style={{
               flexShrink: 0,
+              alignSelf: 'center',
               display: 'flex',
               alignItems: 'center',
               gap: '0.25rem',
@@ -486,24 +500,6 @@ function ReplyThread({
           </button>
         )}
 
-        {/* Line 2: reply count + snippet, full-width below (own line) */}
-        {(replyCount > 0 || bodySnippet) && (
-          <div
-            onClick={expandThread}
-            style={{ flex: '1 1 100%', minWidth: 0, cursor: 'pointer' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
-              {replyCount > 0 && (
-                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                  {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
-                </span>
-              )}
-              <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {previewSnippet}
-              </span>
-            </div>
-          </div>
-        )}
       </div>
     )
   }
@@ -1561,8 +1557,8 @@ export function MessageTab({
                         />
                       </div>
                       {comboOpen && (
-                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', paddingBottom: '19%' }}>
-                          <div style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', display: 'flex', flexDirection: 'column', height: '57%' }}>
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                          <div style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', display: 'flex', flexDirection: 'column', height: '440px', maxHeight: '75vh', width: '100%' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem 0.75rem', borderBottom: '1px solid var(--border)' }}>
                               <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Select recipients</span>
                               <button type="button" onClick={() => { setComboOpen(false); setComboQuery('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '1.2rem' }}>✕</button>
@@ -1709,7 +1705,7 @@ export function MessageTab({
                 fontWeight: 600,
                 cursor: sendingMsg || uploadingImage ? 'not-allowed' : 'pointer',
                 fontFamily: 'DM Sans, sans-serif',
-                opacity: (!msgBody.trim() && !msgImageFile) ? 0.5 : 1,
+                opacity: (sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)) ? 0.5 : 1,
               }}
             >
               {uploadingImage ? 'Uploading image…' : sendingMsg ? 'Sending…' : 'Send Message'}
