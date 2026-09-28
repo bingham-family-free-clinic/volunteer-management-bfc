@@ -1069,9 +1069,11 @@ export function MessageTab({
         .filter(u => u.status === 'active')
         .filter(u => !msgRecipientVolIds.includes(u.id))
     if (q.length === 0) {
-      const recentIds = new Set(recentRecipients.map(u => u.id))
+      const selectedIds = new Set(msgRecipientVolIds)
+      const usableRecents = recentRecipients.filter(u => !selectedIds.has(u.id))
+      const recentIds = new Set(usableRecents.map(u => u.id))
       const rest = baseList.filter(u => !recentIds.has(u.id))
-      return [...recentRecipients, ...rest].slice(0, 20)
+      return [...usableRecents, ...rest].slice(0, 20)
     }
     const startsWith = baseList.filter(u => u.full_name.toLowerCase().startsWith(q))
     const midString  = baseList.filter(u =>
@@ -1116,23 +1118,39 @@ export function MessageTab({
     .map(id => allUsers.find(u => u.id === id))
     .filter(Boolean)
 
-  function addRecipient(vol) {
+  function addRecipient(vol, opts = {}) {
+    const { closeAfter = false } = opts
     if (!vol || vol.id === user?.id) return
     setMsgRecipientVolIds(prev => prev.includes(vol.id) ? prev : [...prev, vol.id])
     setComboQuery('')
-    setComboOpen(true)
-    recipientInputRef.current?.focus?.()
+    if (closeAfter) {
+      setComboOpen(false)
+      if (typeof document !== 'undefined' && document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur()
+      }
+    } else {
+      // Re-open (and re-focus) on the next frame so the textbox + dropdown
+      // reliably come back after every selection, no matter how many names
+      // are already picked or which closer ran during the click.
+      setComboOpen(true)
+      requestAnimationFrame(() => {
+        setComboOpen(true)
+        if (recipientInputRef.current && recipientInputRef.current.focus) {
+          recipientInputRef.current.focus()
+        }
+      })
+    }
   }
 
   function removeRecipient(id) {
     setMsgRecipientVolIds(prev => prev.filter(v => v !== id))
   }
 
-  function handleRecipientKeyDown(e) {
+  function handleRecipientKeyDown(e, closeAfter = false) {
     if (e.key !== 'Enter') return
     e.preventDefault()
     // Only auto-select when the filter narrows to a single option.
-    if (comboResults.length === 1) addRecipient(comboResults[0])
+    if (comboResults.length === 1) addRecipient(comboResults[0], { closeAfter })
   }
 
   async function uploadImage(userId) {
@@ -1503,44 +1521,45 @@ export function MessageTab({
                   <label style={S.label}>Select users</label>
                   {isMobile ? (
                     <>
-                      {selectedRecipientUsers.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
-                          {selectedRecipientUsers.map(u => (
-                            <span
-                              key={u.id}
+                      <div
+                        onClick={() => { setComboOpen(true); setComboQuery('') }}
+                        style={{ ...S.input, display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', cursor: 'pointer', minHeight: '3rem' }}
+                      >
+                        {selectedRecipientUsers.map(u => (
+                          <span
+                            key={u.id}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                              padding: '0.2rem 0.3rem 0.2rem 0.6rem', borderRadius: '100px',
+                              fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif',
+                              background: '#0369a1' + '18', color: '#0369a1',
+                              border: '1px solid #0369a144',
+                            }}
+                          >
+                            {u.full_name}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${u.full_name}`}
+                              onClick={e => { e.stopPropagation(); removeRecipient(u.id) }}
                               style={{
-                                display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                                padding: '0.2rem 0.3rem 0.2rem 0.6rem', borderRadius: '100px',
-                                fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif',
-                                background: '#0369a1' + '18', color: '#0369a1',
-                                border: '1px solid #0369a144',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: '1.1rem', height: '1.1rem', borderRadius: '50%',
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#0369a1', fontSize: '0.75rem', lineHeight: 1, padding: 0,
                               }}
                             >
-                              {u.full_name}
-                              <button
-                                type="button"
-                                aria-label={`Remove ${u.full_name}`}
-                                onClick={() => removeRecipient(u.id)}
-                                style={{
-                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                  width: '1.1rem', height: '1.1rem', borderRadius: '50%',
-                                  background: 'none', border: 'none', cursor: 'pointer',
-                                  color: '#0369a1', fontSize: '0.75rem', lineHeight: 1, padding: 0,
-                                }}
-                              >
-                                ✕
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => { setComboOpen(true); setComboQuery('') }}
-                        style={{ ...S.input, textAlign: 'left', cursor: 'pointer', color: 'var(--muted)' }}
-                      >
-                        {selectedRecipientUsers.length > 0 ? `Add more… (${selectedRecipientUsers.length} selected)` : 'Tap to select recipients…'}
-                      </button>
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          readOnly
+                          tabIndex={-1}
+                          value=""
+                          placeholder="Add recipients..."
+                          style={{ flex: '1 1 8rem', minWidth: '8rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.95rem', fontFamily: 'DM Sans, sans-serif', color: 'var(--text)', padding: 0, cursor: 'pointer' }}
+                        />
+                      </div>
                       {comboOpen && (
                         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', paddingBottom: '19%' }}>
                           <div style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', display: 'flex', flexDirection: 'column', height: '57%' }}>
@@ -1553,7 +1572,7 @@ export function MessageTab({
                               type="text"
                               value={comboQuery}
                               onChange={e => setComboQuery(e.target.value)}
-                              onKeyDown={handleRecipientKeyDown}
+                              onKeyDown={e => handleRecipientKeyDown(e, true)}
                               placeholder="Search…"
                               style={{ ...S.input, borderRadius: 0, border: 'none', borderBottom: '1px solid var(--border)', padding: '0.75rem 1.25rem' }}
                             />
@@ -1562,7 +1581,7 @@ export function MessageTab({
                                 <button
                                   key={vol.id}
                                   type="button"
-                                  onClick={() => addRecipient(vol)}
+                                  onClick={() => addRecipient(vol, { closeAfter: true })}
                                   style={{ width: '100%', padding: '0.75rem 1.25rem', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text)', fontFamily: 'DM Sans, sans-serif', borderBottom: '1px solid var(--border)' }}
                                 >
                                   {vol.full_name}
@@ -1615,7 +1634,7 @@ export function MessageTab({
                           onFocus={() => setComboOpen(true)}
                           onBlur={() => { setComboQuery(''); setComboOpen(false) }}
                           onKeyDown={handleRecipientKeyDown}
-                          placeholder={selectedRecipientUsers.length > 0 ? '' : 'Search by name…'}
+                          placeholder="Add recipients..."
                           style={{ flex: '1 1 8rem', minWidth: '8rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.95rem', fontFamily: 'DM Sans, sans-serif', color: 'var(--text)', padding: 0 }}
                         />
                       </div>
