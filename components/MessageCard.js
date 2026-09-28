@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { formatDateTime } from '../lib/timeUtils'
 import { recipientLabel } from '../lib/messageUtils'
 
@@ -68,9 +68,20 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
     !readMessageIds.has(m.id) &&
     m.sender_id !== user?.id
   const [groupOpen, setGroupOpen] = useState(false)
-  // Group chats (Individuals tab, 2+ people) show an expandable member list
-  // under the sender name instead of the inline recipient text.
+  const groupRef = useRef(null)
+  // Group chats (Individuals tab, 2+ people) show an inline "To: Group"
+  // toggle that overlays the member list Gmail-style. Clicking out collapses.
   const isGroupChat = m.recipient_type === 'group'
+  const groupShort = (recipientLabelProp || '').replace(/^To:\s*/, '') || 'Group'
+
+  useEffect(() => {
+    if (!groupOpen) return
+    function onDown(e) {
+      if (groupRef.current && !groupRef.current.contains(e.target)) setGroupOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [groupOpen])
 
   return (
     <div
@@ -121,6 +132,57 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           >
             {formatDateTime(m.created_at)}
             {!isGroupChat && recipientLabelProp ? `, ${recipientLabelProp}` : ''}
+            {isGroupChat && recipientLabelProp ? ', To: ' : ''}
+            {isGroupChat && recipientLabelProp && (
+              <span ref={groupRef} style={{ position: 'relative', display: 'inline-block' }}>
+                <button
+                  onClick={e => { e.stopPropagation(); setGroupOpen(o => !o) }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    color: 'var(--muted)',
+                    fontSize: '0.68rem',
+                    fontFamily: 'DM Mono, monospace',
+                    textDecoration: 'underline',
+                    textUnderlineOffset: '2px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {groupShort} {groupOpen ? '˄' : '˅'}
+                </button>
+                {groupOpen && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      left: 0,
+                      zIndex: 200,
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '10px',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                      padding: '0.5rem 0.75rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.15rem',
+                      minWidth: '10rem',
+                      whiteSpace: 'normal',
+                    }}
+                  >
+                    {(groupMemberNames && groupMemberNames.length > 0
+                      ? groupMemberNames
+                      : ['No members found']
+                    ).map(name => (
+                      <span key={name} style={{ fontSize: '0.78rem', color: 'var(--text)', whiteSpace: 'nowrap' }}>
+                        {name}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
+            )}
           </span>
         </div>
 
@@ -184,36 +246,6 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           )}
         </div>
       </div>
-
-      {isGroupChat && recipientLabelProp && (
-        <div style={{ marginBottom: m.body || m.image_url ? '0.4rem' : 0 }}>
-          <button
-            onClick={e => { e.stopPropagation(); setGroupOpen(o => !o) }}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              cursor: 'pointer',
-              color: 'var(--muted)',
-              fontSize: '0.68rem',
-              fontFamily: 'DM Mono, monospace',
-              textDecoration: 'underline',
-              textUnderlineOffset: '2px',
-            }}
-          >
-            {recipientLabelProp} {groupOpen ? '˄' : '˅'}
-          </button>
-          {groupOpen && groupMemberNames && groupMemberNames.length > 0 && (
-            <div style={{ marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-              {groupMemberNames.map(name => (
-                <div key={name} style={{ fontSize: '0.78rem', color: 'var(--text)' }}>
-                  {name}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {m.body && (
         <div
