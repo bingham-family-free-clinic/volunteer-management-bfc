@@ -217,9 +217,13 @@ function ReplyThread({
   // expanded header format (timestamp, To: X). Skipped when it duplicates
   // the collapsed label (sent reply threads already show To: X as the title).
   const previewRecipientLabel = getRecipientLabel(previewSource)
-  const collapsedRecipientSuffix = previewRecipientLabel && previewRecipientLabel !== collapsedLabel
-    ? `, ${previewRecipientLabel}`
-    : ''
+  // Shown on its own sub-line inside the meta wrapper once the meta line
+  // itself runs tight (the wrapper flex-wraps naturally). Skipped when it
+  // duplicates the collapsed label (sent reply threads already show To: X
+  // as the title).
+  const previewRecipientText = previewRecipientLabel && previewRecipientLabel !== collapsedLabel
+    ? previewRecipientLabel
+    : null
 
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
@@ -429,8 +433,11 @@ function ReplyThread({
               <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {collapsedLabel ?? (latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName)}
               </span>
-              <span className="msg-collapsed-meta" style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
-                {formatDateTime(previewSource.created_at)}{collapsedRecipientSuffix}
+              <span className="msg-collapsed-meta" style={{ display: 'inline-flex', flexWrap: 'wrap', columnGap: '0.35rem', fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
+                <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(previewSource.created_at)}{previewRecipientText ? ',' : ''}</span>
+                {previewRecipientText && (
+                  <span style={{ whiteSpace: 'nowrap' }}>{previewRecipientText}</span>
+                )}
               </span>
             </div>
         </div>
@@ -440,7 +447,6 @@ function ReplyThread({
             collapsed entry opens Reply All instead of a self-reply. */}
         {canReply && (
           <button
-            className="msg-collapsed-btn"
             onClick={e => {
               e.stopPropagation()
               replyScrollPosRef.current = window.scrollY

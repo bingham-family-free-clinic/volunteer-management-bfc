@@ -130,16 +130,22 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           <span
             className="msg-head-meta"
             style={{
+              display: 'inline-flex',
+              flexWrap: 'wrap',
+              columnGap: '0.35rem',
               color: 'var(--muted)',
               fontSize: '0.68rem',
               fontFamily: 'DM Mono, monospace',
-              whiteSpace: 'nowrap',
             }}
           >
-            {formatDateTime(m.created_at)}
-            {!isGroupChat && recipientLabelProp ? `, ${recipientLabelProp}` : ''}
-            {isGroupChat && recipientLabelProp ? ', To: ' : ''}
+            <span style={{ whiteSpace: 'nowrap' }}>
+              {formatDateTime(m.created_at)}{recipientLabelProp ? ',' : ''}
+            </span>
+            {!isGroupChat && recipientLabelProp && (
+              <span style={{ whiteSpace: 'nowrap' }}>{recipientLabelProp}</span>
+            )}
             {isGroupChat && recipientLabelProp && (
+              <span style={{ whiteSpace: 'nowrap' }}>To:{' '}
               <span ref={groupRef} style={{ position: 'relative', display: 'inline-block' }}>
                 <button
                   onClick={e => { e.stopPropagation(); setGroupOpen(o => !o) }}
@@ -188,11 +194,12 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                   </span>
                 )}
               </span>
+              </span>
             )}
           </span>
         </div>
 
-        <div className="msg-head-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
 
           {canReply && !replyOpen && (
             <button
