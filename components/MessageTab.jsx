@@ -996,6 +996,13 @@ export function MessageTab({
       )
     }
 
+    if (inboxFilter === 'everyone') {
+      return (
+          m.recipient_type === 'everyone' &&
+          m.sender_id !== user?.id
+      )
+    }
+
     if (inboxFilter === 'direct') {
       if (
           m.recipient_type === 'volunteer' &&
@@ -1273,6 +1280,7 @@ export function MessageTab({
               ['direct', 'Directly to me'],
               ...(isAdmin ? [['hr', 'HR']] : []),
               ['role', 'My Role'],
+              ['everyone', 'Everyone'],
             ].map(([key, label]) => (
                 <button
                     key={key}
