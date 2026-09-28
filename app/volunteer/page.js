@@ -948,8 +948,8 @@ function VolunteerPageInner() {
   }, [user?.id])
 
   const fetchCalloutTab = useCallback(async () => {
-    if (!user || fetchedTabs.current.has('callout')) return
-    fetchedTabs.current.add('callout')
+    // if (!user || fetchedTabs.current.has('callout')) return
+    // fetchedTabs.current.add('callout')
 
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
     const [{ data: openSubs }, { data: myCoverReqs }] = await Promise.all([
