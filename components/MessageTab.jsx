@@ -395,6 +395,7 @@ function ReplyThread({
         style={{
           display: 'flex',
           alignItems: 'center',
+          flexWrap: 'wrap',
           gap: '0.5rem',
           padding: '0.45rem 0.75rem',
           borderRadius: '8px',
@@ -419,9 +420,9 @@ function ReplyThread({
             onMarkRead(message.id, replies.map(r => r.id))
             clearNotificationForMessage(message.id)
           }}
-          style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+          style={{ flex: '1 1 14rem', minWidth: 0, cursor: 'pointer' }}
         >
-{/* Line 1: sender + timestamp */}
+{/* Line 1: sender + timestamp (wraps only after the reply button has dropped) */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.5rem', minWidth: 0 }}>
               <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {collapsedLabel ?? (latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName)}
@@ -465,6 +466,7 @@ function ReplyThread({
             title={isGroupMessageSender ? "Reply All" : "Reply"}
             style={{
               flexShrink: 0,
+              marginLeft: 'auto',
               display: 'flex',
               alignItems: 'center',
               gap: '0.25rem',
@@ -543,8 +545,8 @@ function ReplyThread({
               : (canReply && isMostRecent && isMostRecentReply)
             const replyCanReplyAll = isGroupMessageSender && isOwnReply && ownReplyIsGroup
             return (
-              <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1 }}>
+              <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start', minWidth: 0, maxWidth: '100%' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1, minWidth: 0, maxWidth: '100%' }}>
                   <MessageCard
                     m={reply}
                     readMessageIds={readMessageIds}
@@ -1222,7 +1224,28 @@ export function MessageTab({
       {/* ── INBOX ── */}
       {msgView === 'inbox' && (
         <div style={S.card}>
-          <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Inbox</h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+            <h2 style={{ fontWeight: 600, margin: 0 }}>Inbox</h2>
+            <button
+                key="mark-all-read"
+                type="button"
+                onClick={markAllThreadsRead}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '8px',
+                  fontSize: '0.78rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                  background: '#fff',
+                  color: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  marginLeft: 'auto',
+                }}
+            >
+              {markingAllRead ? 'Loading...' : 'Mark all as read'}
+            </button>
+          </div>
 
           <div
               style={{
@@ -1260,25 +1283,6 @@ export function MessageTab({
                   {label}
                 </button>
             ))}
-            <button
-                key="mark-all-read"
-                type="button"
-                onClick={markAllThreadsRead}
-                style={{
-                  padding: '0.35rem 0.75rem',
-                  borderRadius: '8px',
-                  fontSize: '0.78rem',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  fontFamily: 'DM Sans, sans-serif',
-                  background: '#fff',
-                  color: 'var(--muted)',
-                  border: '1px solid var(--border)',
-                  marginLeft: 'auto',
-                }}
-            >
-              {markingAllRead ? 'Loading...' : 'Mark all as read'}
-            </button>
           </div>
 
 
