@@ -28,3 +28,17 @@ body {
 }
 
 .mono { font-family: 'DM Mono', monospace; }
+
+/* ── Message thread responsive wrapping ─────────────────────────────
+   Deterministic two-step collapse (avoids wrap/unwrap flicker):
+   1. ≤30rem: sender meta (timestamp + To:) drops below the sender name.
+   2. ≤22rem: reply buttons drop to their own left-aligned line, below the
+      sender info and above the message body / preview. */
+.msg-collapsed, .msg-head { container-type: inline-size; }
+
+@container (max-width: 30rem) {
+  .msg-collapsed-meta, .msg-head-meta { flex-basis: 100%; }
+}
+@container (max-width: 22rem) {
+  .msg-collapsed-btn, .msg-head-actions { flex-basis: 100%; max-width: max-content; }
+}

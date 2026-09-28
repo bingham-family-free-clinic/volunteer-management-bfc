@@ -389,9 +389,18 @@ function ReplyThread({
     return message.sender?.full_name ?? 'User'
   })()
 
+  const expandThread = () => {
+    const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
+    setLocallyHighlightedReplies(new Set(unreadReplyIds))
+    setExpanded(true)
+    onMarkRead(message.id, replies.map(r => r.id))
+    clearNotificationForMessage(message.id)
+  }
+
   if (!expanded) {
     return (
       <div
+        className="msg-collapsed"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -411,39 +420,19 @@ function ReplyThread({
           <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, alignSelf: 'center' }} />
         )}
 
-        {/* Clickable two-line content */}
+        {/* Line 1: sender + timestamp (meta drops below name at ≤30rem) */}
         <div
-          onClick={() => {
-            const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
-            setLocallyHighlightedReplies(new Set(unreadReplyIds))
-            setExpanded(true)
-            onMarkRead(message.id, replies.map(r => r.id))
-            clearNotificationForMessage(message.id)
-          }}
-          style={{ flex: '1 1 14rem', minWidth: 0, cursor: 'pointer' }}
+          onClick={expandThread}
+          style={{ flex: '1 1 0%', minWidth: 0, cursor: 'pointer' }}
         >
-{/* Line 1: sender + timestamp (wraps only after the reply button has dropped) */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.5rem', minWidth: 0 }}>
               <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {collapsedLabel ?? (latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName)}
               </span>
-              <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
+              <span className="msg-collapsed-meta" style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
                 {formatDateTime(previewSource.created_at)}{collapsedRecipientSuffix}
               </span>
             </div>
-          {/* Line 2: reply count + snippet (only rendered if there is content) */}
-          {(replyCount > 0 || bodySnippet) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
-              {replyCount > 0 && (
-                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                  {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
-                </span>
-              )}
-              <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {previewSnippet}
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Inline reply button — only for replyable threads.
@@ -451,6 +440,7 @@ function ReplyThread({
             collapsed entry opens Reply All instead of a self-reply. */}
         {canReply && (
           <button
+            className="msg-collapsed-btn"
             onClick={e => {
               e.stopPropagation()
               replyScrollPosRef.current = window.scrollY
@@ -466,7 +456,6 @@ function ReplyThread({
             title={isGroupMessageSender ? "Reply All" : "Reply"}
             style={{
               flexShrink: 0,
-              marginLeft: 'auto',
               display: 'flex',
               alignItems: 'center',
               gap: '0.25rem',
@@ -490,6 +479,25 @@ function ReplyThread({
             </svg>
             {isGroupMessageSender ? "Reply All" : "Reply"}
           </button>
+        )}
+
+        {/* Line 2: reply count + snippet, full-width below (own line) */}
+        {(replyCount > 0 || bodySnippet) && (
+          <div
+            onClick={expandThread}
+            style={{ flex: '1 1 100%', minWidth: 0, cursor: 'pointer' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
+              {replyCount > 0 && (
+                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                  {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
+                </span>
+              )}
+              <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {previewSnippet}
+              </span>
+            </div>
+          </div>
         )}
       </div>
     )

@@ -93,6 +93,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
       }}
     >
       <div
+        className="msg-head"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -103,7 +104,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           minHeight: '24px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: '1 1 0%', minWidth: 0 }}>
           {isUnread || isHighlighted ? (
             <div
               style={{
@@ -119,11 +120,15 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
             style={{
               fontWeight: isUnread || isHighlighted ? 700 : 600,
               fontSize: '0.8rem',
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}
           >
             {senderLabel || m.sender?.full_name || 'Unknown'}
           </span>
           <span
+            className="msg-head-meta"
             style={{
               color: 'var(--muted)',
               fontSize: '0.68rem',
@@ -187,7 +192,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div className="msg-head-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
 
           {canReply && !replyOpen && (
             <button
