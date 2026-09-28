@@ -106,7 +106,15 @@ export async function POST(req) {
   // and are stored as JSON in recipient_role (no array column exists).
   let groupMemberIds = []
   if (recipient_type === 'group') {
-    const raw = Array.isArray(recipient_volunteer_ids) ? recipient_volunteer_ids : []
+    let raw = Array.isArray(recipient_volunteer_ids) ? recipient_volunteer_ids : []
+    // Fall back to the member list already stored on the thread (Reply All
+    // forwards it via recipient_role) when no explicit array is sent.
+    if (raw.length === 0 && typeof recipient_role === 'string') {
+      try {
+        const parsed = JSON.parse(recipient_role)
+        if (Array.isArray(parsed)) raw = parsed
+      } catch { /* ignore, validated below */ }
+    }
     groupMemberIds = [...new Set(raw.filter(id => typeof id === 'string' && id && id !== user.id))].sort()
     if (groupMemberIds.length === 0) {
       return Response.json({ error: 'Select at least one recipient.' }, { status: 400 })

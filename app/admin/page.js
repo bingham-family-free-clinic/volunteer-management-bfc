@@ -1369,7 +1369,7 @@ export default function AdminPage() {
       repliesMap[r.parent_message_id].push(r)
     })
     const count = topLevel.filter(m => {
-      if (m.recipient_type === 'group' && !parseGroupMemberIds(m).includes(userId)) return false
+      if (m.recipient_type === 'group' && m.sender_id !== userId && !parseGroupMemberIds(m).includes(userId)) return false
       const isUnreadMsg = m.sender_id !== userId && !readSet.has(m.id)
       const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== userId)
       return isUnreadMsg || hasUnreadReplies

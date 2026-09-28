@@ -259,6 +259,19 @@ function ReplyThread({
         recipient_shift: message.recipient_shift,
         recipient_role: message.recipient_role,
         recipient_volunteer_id: message.recipient_volunteer_id,
+        // Group threads store members as JSON — the API requires the id
+        // array, so forward it explicitly.
+        recipient_volunteer_ids: message.recipient_type === 'group'
+          ? parseGroupMemberIds(message)
+          : undefined,
+      }
+    } else if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
+      // Recipient view in group threads: every Reply button sends a direct
+      // reply to the thread sender, never to another replier (or yourself).
+      if (message.sender_id === user?.id) return abort("Use Reply All to respond to your own group message")
+      replyTarget = {
+        recipient_type: 'volunteer',
+        recipient_volunteer_id: message.sender_id,
       }
     } else if (followUpReply && followUpReply.sender_id === user?.id) {
       // Follow-up on own reply: reply to that reply's recipient, not yourself.
@@ -269,6 +282,9 @@ function ReplyThread({
           recipient_shift: followUpReply.recipient_shift,
           recipient_role: followUpReply.recipient_role,
           recipient_volunteer_id: followUpReply.recipient_volunteer_id,
+          recipient_volunteer_ids: followUpReply.recipient_type === 'group'
+            ? parseGroupMemberIds(followUpReply)
+            : undefined,
         }
       } else {
         if (!followUpReply.recipient_volunteer_id || followUpReply.recipient_volunteer_id === user?.id) return abort("Could not determine who to follow up with")
@@ -364,6 +380,10 @@ function ReplyThread({
       if (message.sender_id !== user?.id) return message.sender?.full_name ?? 'User'
       const recip = allUsers.find(u => u.id === message.recipient_volunteer_id)
       return recip?.full_name ?? 'User'
+    }
+    // Recipient view in group threads: replies always go to the thread sender.
+    if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
+      return message.sender?.full_name ?? 'User'
     }
     if (replyToId) return replies.find(r => r.id === replyToId)?.sender?.full_name ?? 'User'
     return message.sender?.full_name ?? 'User'
@@ -572,7 +592,7 @@ function ReplyThread({
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
                 if (e.key === 'Escape') { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }
               }}
-              placeholder={isReplyAll ? 'Replying to Everyone…' : `Replying to ${replyTargetName}…`}
+              placeholder={isReplyAll ? (message.recipient_type === 'group' ? 'Replying to Group…' : 'Replying to Everyone…') : `Replying to ${replyTargetName}…`}
               rows={2}
               style={{
                 ...S.input,
