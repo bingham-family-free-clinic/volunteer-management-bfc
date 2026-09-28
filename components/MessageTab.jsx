@@ -671,6 +671,9 @@ export function MessageTab({
   schedule = [],
   onUnreadCountChange,
   openMessageId,
+  // Bottom offset for the mobile recipients sheet (e.g. above the volunteer
+  // BottomNav). Accepts any CSS length; 0 keeps the sheet flush to the bottom.
+  sheetBottomOffset = 0,
 }) {
   // ── Local state ────────────────────────────────────────────────────────────
   const [messages, setMessages]               = useState([])
@@ -1557,8 +1560,8 @@ export function MessageTab({
                         />
                       </div>
                       {comboOpen && (
-                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                          <div style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', display: 'flex', flexDirection: 'column', height: '440px', maxHeight: '75vh', width: '100%' }}>
+                        <div onClick={() => { setComboOpen(false); setComboQuery('') }} style={{ position: 'fixed', inset: 0, bottom: sheetBottomOffset, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', display: 'flex', flexDirection: 'column', height: `calc(440px - (${sheetBottomOffset || 0}))`, maxHeight: `calc(85vh - (${sheetBottomOffset || 0}))`, width: '100%' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem 0.75rem', borderBottom: '1px solid var(--border)' }}>
                               <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Select recipients</span>
                               <button type="button" onClick={() => { setComboOpen(false); setComboQuery('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '1.2rem' }}>✕</button>
