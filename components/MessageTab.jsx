@@ -1232,25 +1232,6 @@ export function MessageTab({
                 marginBottom: '1.25rem',
               }}
           >
-            <button
-                key="mark-all-read"
-                type="button"
-                onClick={markAllThreadsRead}
-                style={{
-                  padding: '0.35rem 0.75rem',
-                  borderRadius: '8px',
-                  fontSize: '0.78rem',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  fontFamily: 'DM Sans, sans-serif',
-                  background: '#fff',
-                  color: 'var(--muted)',
-                  border: '1px solid var(--border)',
-                  marginLeft: 'auto',
-                }}
-            >
-              {markingAllRead ? 'Marking…' : 'Mark all as read'}
-            </button>
             {[
               ['all', 'All'],
               ['direct', 'Directly to me'],
@@ -1279,6 +1260,25 @@ export function MessageTab({
                   {label}
                 </button>
             ))}
+            <button
+                key="mark-all-read"
+                type="button"
+                onClick={markAllThreadsRead}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '8px',
+                  fontSize: '0.78rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                  background: '#fff',
+                  color: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  marginLeft: 'auto',
+                }}
+            >
+              {markingAllRead ? 'Loading...' : 'Mark all as read'}
+            </button>
           </div>
 
 
