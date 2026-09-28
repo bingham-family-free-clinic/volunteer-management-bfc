@@ -100,6 +100,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           marginBottom: '0.4rem',
           flexWrap: 'wrap',
           gap: '0.4rem',
+          minHeight: '24px',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>

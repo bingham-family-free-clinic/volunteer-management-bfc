@@ -671,6 +671,7 @@ export function MessageTab({
   const [allUsers, setAllUsers]               = useState(allUsersProp)
   const [lightboxUrl, setLightboxUrl]         = useState(null)
   const [inboxFilter, setInboxFilter] = useState('all')
+  const [markingAllRead, setMarkingAllRead] = useState(false)
 
   // Compose state
   const [msgView, setMsgView]                 = useState('inbox')
@@ -803,6 +804,38 @@ export function MessageTab({
       return next
     })
   }, [user, supabase, readMessageIds])
+
+  async function markAllThreadsRead() {
+    if (!user || markingAllRead) return
+    const ids = []
+    inboxThreads.forEach(m => {
+      if (m.sender_id !== user?.id && !readMessageIds.has(m.id)) ids.push(m.id)
+      ;(inboxRepliesMap[m.id] || []).forEach(r => {
+        if (r.sender_id !== user?.id && !readMessageIds.has(r.id)) ids.push(r.id)
+      })
+    })
+    const unique = [...new Set(ids)]
+    if (unique.length === 0) return
+    setMarkingAllRead(true)
+    try {
+      const rows = unique.map(id => ({ user_id: user.id, message_id: id }))
+      const { error } = await supabase.from('message_reads').upsert(rows, { onConflict: 'user_id,message_id' })
+      if (error) {
+        showToast(error.message || 'Failed to mark all as read', 'error')
+      } else {
+        setReadMessageIds(prev => {
+          const next = new Set(prev)
+          unique.forEach(id => next.add(id))
+          return next
+        })
+        showToast('All messages marked as read', 'success')
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to mark all as read', 'error')
+    } finally {
+      setMarkingAllRead(false)
+    }
+  }
 
   async function loadMoreMessages() {
     if (!user || !msgCursor || loadingMoreMsgs) return
@@ -1199,6 +1232,26 @@ export function MessageTab({
                 marginBottom: '1.25rem',
               }}
           >
+            <button
+                key="mark-all-read"
+                type="button"
+                onClick={markAllThreadsRead}
+                disabled={markingAllRead || unreadThreadCount === 0}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '100px',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: (markingAllRead || unreadThreadCount === 0) ? 'not-allowed' : 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  opacity: (markingAllRead || unreadThreadCount === 0) ? 0.5 : 1,
+                }}
+            >
+              {markingAllRead ? 'Marking…' : 'Mark all as read'}
+            </button>
             {[
               ['all', 'All'],
               ['direct', 'Directly to me'],
