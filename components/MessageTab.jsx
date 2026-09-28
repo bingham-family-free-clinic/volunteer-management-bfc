@@ -1104,22 +1104,23 @@ export function MessageTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-      {/* View switcher */}
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
+      {/* View switcher — matches the admin Pipeline tab style */}
+      <div style={{ display: 'flex', gap: '0.4rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
         {[['inbox', 'Inbox'], ['sent', 'Sent'], ['compose', 'Compose']].map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMsgView(key)}
             style={{
-              padding: '0.45rem 0.9rem',
+              padding: '0.45rem 1rem',
               borderRadius: '8px',
               fontSize: '0.85rem',
-              fontWeight: 500,
+              fontWeight: msgView === key ? 700 : 500,
               cursor: 'pointer',
               fontFamily: 'DM Sans, sans-serif',
-              background: msgView === key ? 'var(--accent)' : 'var(--surface)',
-              color:      msgView === key ? '#fff' : 'var(--muted)',
-              border:     msgView === key ? 'none' : '1px solid var(--border)',
+              background: msgView === key ? '#0369a1' + '18' : 'transparent',
+              color:      msgView === key ? '#0369a1' : 'var(--muted)',
+              border:     msgView === key ? '1px solid #0369a144' : '1px solid transparent',
+              transition: 'all 0.15s',
             }}
           >
             {label}
@@ -1154,14 +1155,15 @@ export function MessageTab({
                       padding: '0.35rem 0.75rem',
                       borderRadius: '100px',
                       fontSize: '0.78rem',
-                      fontWeight: 500,
+                      fontWeight: inboxFilter === key ? 700 : 500,
                       cursor: 'pointer',
                       fontFamily: 'DM Sans, sans-serif',
-                      background: inboxFilter === key ? 'var(--accent)' : 'var(--bg)',
-                      color: inboxFilter === key ? '#fff' : 'var(--muted)',
+                      background: inboxFilter === key ? '#0369a1' + '18' : 'transparent',
+                      color: inboxFilter === key ? '#0369a1' : 'var(--muted)',
                       border: inboxFilter === key
-                          ? '1px solid var(--accent)'
-                          : '1px solid var(--border)',
+                          ? '1px solid #0369a144'
+                          : '1px solid transparent',
+                      transition: 'all 0.15s',
                     }}
                 >
                   {label}
@@ -1225,7 +1227,7 @@ export function MessageTab({
                 const getToLabel = (msg) =>
                   msg.recipient_type === 'everyone' ? 'To: Everyone' :
                   msg.recipient_type === 'admin'    ? 'To: HR' :
-                  msg.recipient_type === 'shift'    ? `To: ${msg.recipient_day ? msg.recipient_day.charAt(0).toUpperCase() + msg.recipient_day.slice(1, 3) : ''} ${msg.recipient_shift || ''}`.trim() :
+                  msg.recipient_type === 'shift'    ? `To: ${msg.recipient_day ? msg.recipient_day.charAt(0).toUpperCase() + msg.recipient_day.slice(1, 3) : ''} ${msg.recipient_shift || ''}`.trim() + ' Shift' :
                   msg.recipient_type === 'role'     ? `To: ${msg.recipient_role}` :
                   msg.recipient_type === 'volunteer'? `To: ${allUsers.find(u => u.id === msg.recipient_volunteer_id)?.full_name || m.sender?.full_name || 'Individual'}` :
                   'To: ' + msg.recipient_type
