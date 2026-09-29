@@ -164,11 +164,13 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                 </button>
                 {groupOpen && (
                   <span
+                    onClick={e => e.stopPropagation()}
                     style={{
                       position: 'absolute',
                       top: 'calc(100% + 6px)',
                       left: 0,
                       zIndex: 200,
+                      cursor: 'default',
                       background: 'var(--surface)',
                       border: '1px solid var(--border)',
                       borderRadius: '10px',
