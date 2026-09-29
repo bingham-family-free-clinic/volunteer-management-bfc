@@ -4,9 +4,32 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { MessageCard } from './MessageCard'
 import { formatDateTime } from '../lib/timeUtils'
 import { ROLES } from '../lib/constants'
+import { recipientLabel, parseGroupMemberIds } from '../lib/messageUtils'
 
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
+
+// Refreshes Supabase token if expired, missing, or about to expire
+async function getFreshAccessToken(supabase) {
+  let { data: { session } } = await supabase.auth.getSession()
+
+  const EXPIRY_BUFFER_SECONDS = 30
+  const isExpiredOrExpiring =
+    !session ||
+    !session.expires_at ||
+    session.expires_at - Date.now() / 1000 < EXPIRY_BUFFER_SECONDS
+
+  if (isExpiredOrExpiring) {
+    const { data: refreshed } = await supabase.auth.refreshSession()
+    session = refreshed?.session ?? null
+  }
+
+  if (!session?.access_token) {
+    throw new Error('Session expired. Refresh the page or sign out and sign in again.')
+  }
+
+  return session.access_token
+}
 
 // ── Shared style tokens (mirror page.js S object) ─────────────────────────────
 const S = {
@@ -52,24 +75,71 @@ function ReplyThread({
   onReplySent,
   onMarkRead,
   senderLabel,
+  collapsedLabel,
+  startExpanded = false,
+  previewMessage,
 }) {
   const isUnread = readMessageIds && (
     // Received message not yet read
     (!readMessageIds.has(message.id) && message.sender_id !== user?.id) ||
-    // Sent message that has unread replies — exclude replies the user sent themselves (fix #3)
-    (message.sender_id === user?.id && replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id))
+    // Thread has an unread reply from someone else — regardless of who started the thread
+    replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)
   )
-  const [expanded, setExpanded]     = useState(!!isUnread)
+  const [expanded, setExpanded]     = useState(startExpanded)
+  // Sync expanded with startExpanded so deep-linked threads expand
+  // even if MessageTab mounts before openMessageId is set
+  useEffect(() => { setExpanded(startExpanded) }, [startExpanded])
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
+  const [replyToId, setReplyToId]     = useState(null)
+  const [isReplyAll, setIsReplyAll]   = useState(false)
+  const [followUpId, setFollowUpId]   = useState(null)
+  const [locallyHighlightedReplies, setLocallyHighlightedReplies] = useState(new Set())
+
+  const isGroupMessageSender = message.sender_id === user?.id && message.recipient_type !== 'volunteer'
+  const isDirectThread = message.recipient_type === 'volunteer'
+  // In a 1-on-1 thread the "other person" is whoever isn't the viewer.
+  const otherParticipantId = isDirectThread
+    ? (message.sender_id === user?.id ? message.recipient_volunteer_id : message.sender_id)
+    : null
 
   // Auto size textboxes if browser supports it
   const replyRef = useRef(null)
   const replyScrollPosRef = useRef(null)
+  const mostRecentReplyRef = useRef(null)
   const [replyFieldSizingSupported] = useState(() =>
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
   )
+
+  // Clear browser notifications for a specific message ID
+  async function clearNotificationForMessage(messageId) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration()
+      if (!reg) return
+      const notifications = await reg.getNotifications()
+      notifications.forEach(n => {
+        if (n.data?.url?.includes(messageId)) n.close()
+      })
+    } catch (e) { /* ignore */ }
+  }
+
+  // Auto-scroll to most recent reply when expanded
+  useEffect(() => {
+    if (expanded && mostRecentReplyRef.current) {
+      const elementTop = mostRecentReplyRef.current.getBoundingClientRect().top + window.pageYOffset
+      window.scrollTo({ top: elementTop - 350, behavior: 'smooth' })
+    }
+  }, [expanded])
+
+  // Auto-scroll to textbox when reply opens
+  useEffect(() => {
+    if (replyOpen && replyRef.current) {
+      const elementTop = replyRef.current.getBoundingClientRect().top + window.pageYOffset
+      window.scrollTo({ top: elementTop - 350, behavior: 'smooth' })
+      replyScrollPosRef.current = null
+    }
+  }, [replyOpen])
 
   useEffect(() => {
     if (!replyOpen || replyScrollPosRef.current === null) return
@@ -96,15 +166,36 @@ function ReplyThread({
     el.style.height = Math.max(contentHeight, minHeight) + 'px'
   }, [replyOpen, replyFieldSizingSupported])
 
-  // Fix #2: if the thread auto-expanded on mount because it was unread,
-  // write the message_reads rows immediately — don't wait for a click.
+  // Deep-link highlight: when auto-expanded via notification, highlight unread replies
+  // and mark as read. Highlight persists until user collapses or navigates away.
+  const latestRef = useRef({ replies, readMessageIds, message, user, onMarkRead })
   useEffect(() => {
-    if (isUnread && expanded) {
-      onMarkRead(message.id, replies.map(r => r.id))
+    latestRef.current = { replies, readMessageIds, message, user, onMarkRead }
+  })
+
+  useEffect(() => {
+    if (!startExpanded) {
+      setLocallyHighlightedReplies(new Set())
+      return
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // intentionally runs once on mount only
+    const { replies, readMessageIds, message, user, onMarkRead } = latestRef.current
+    const idsToHighlight = replies
+      .filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)
+      .map(r => r.id)
+    // The deep-linked message itself may be the top-level message (no unread
+    // replies at all) — highlight it too when it's the unread thing being opened.
+    if (!readMessageIds.has(message.id) && message.sender_id !== user?.id) {
+      idsToHighlight.push(message.id)
+    }
+    if (idsToHighlight.length > 0) {
+      setLocallyHighlightedReplies(new Set(idsToHighlight))
+    }
+    onMarkRead(message.id, replies.map(r => r.id))
+    clearNotificationForMessage(message.id)
+  }, [startExpanded])
+
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
+  const isHighlighted = locallyHighlightedReplies.has(message.id)
   const replyCount = replies.length
 
   // Surface the latest unread reply in the collapsed preview so admins
@@ -115,45 +206,139 @@ function ReplyThread({
         .at(-1) // replies are already sorted oldest→newest, so last = most recent
     : null
 
-  const previewSource = latestUnreadReply ?? message
+  const previewSource = previewMessage ?? latestUnreadReply ?? message
   const previewSnippet = previewSource.body
     ? previewSource.body.replace(/\n/g, ' ')
     : '📎 Image'
   const previewSenderName = latestUnreadReply
     ? (latestUnreadReply.sender?.full_name || 'HR')
     : (senderLabel || message.sender?.full_name || 'Unknown')
+  // Condensed view shows the previewed message's recipient, mirroring the
+  // expanded header format (timestamp, To: X). Skipped when it duplicates
+  // the collapsed label (sent reply threads already show To: X as the title).
+  const previewRecipientLabel = getRecipientLabel(previewSource)
+  // Shown on its own sub-line inside the meta wrapper once the meta line
+  // itself runs tight (the wrapper flex-wraps naturally). Skipped when it
+  // duplicates the collapsed label (sent reply threads already show To: X
+  // as the title).
+  const previewRecipientText = previewRecipientLabel && previewRecipientLabel !== collapsedLabel
+    ? previewRecipientLabel
+    : null
 
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
-  const isOneOnOne     = message.recipient_type === 'volunteer' || message.recipient_type === 'user'
+  const canReply = Boolean(user?.id)
 
-  // Admins can reply to admin-directed messages.
-  // Either party can reply in a one-on-one thread.
-  const isThreadParticipant = isOneOnOne && (
-    isThreadSender || message.recipient_volunteer_id === user?.id
-  )
-  const canReply = (message.recipient_type === 'admin' && (isAdmin || isThreadSender))
-                || isThreadParticipant
+  // Group chat member names (Individuals tab, 2+ people), alphabetical.
+  function getGroupMemberNames(m) {
+    return parseGroupMemberIds(m)
+      .map(id => allUsers.find(u => u.id === id)?.full_name)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
+  }
+
+  // Recipient pill: show for every message, prefixed with "To: ".
+  // Resolved per message (original or each reply), not from the thread root.
+  function getRecipientLabel(m) {
+    if (!m) return null
+    if (m.recipient_type === 'volunteer') {
+      if (m.recipient_volunteer_id === user?.id) return 'To: You'
+      const name = allUsers.find(u => u.id === m.recipient_volunteer_id)?.full_name
+      return `To: ${name || 'Individual'}`
+    }
+    return `To: ${recipientLabel(m)}`
+  }
 
   async function handleSendReply() {
     if (!replyBody.trim()) return
     setSending(true)
+    const targetReply = replies.find(r => r.id === replyToId)
+    const followUpReply = followUpId ? replies.find(r => r.id === followUpId) : null
+    const abort = (msg) => { showToast(msg, 'error'); setSending(false) }
+    let replyTarget
+    if (isReplyAll) {
+      replyTarget = {
+        recipient_type: message.recipient_type,
+        recipient_day: message.recipient_day,
+        recipient_shift: message.recipient_shift,
+        recipient_role: message.recipient_role,
+        recipient_volunteer_id: message.recipient_volunteer_id,
+        // Group threads store members as JSON — the API requires the id
+        // array, so forward it explicitly.
+        recipient_volunteer_ids: message.recipient_type === 'group'
+          ? parseGroupMemberIds(message)
+          : undefined,
+      }
+    } else if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
+      // Recipient view in group threads: every Reply button sends a direct
+      // reply to the thread sender, never to another replier (or yourself).
+      if (message.sender_id === user?.id) return abort("Use Reply All to respond to your own group message")
+      replyTarget = {
+        recipient_type: 'volunteer',
+        recipient_volunteer_id: message.sender_id,
+      }
+    } else if (followUpReply && followUpReply.sender_id === user?.id) {
+      // Follow-up on own reply: reply to that reply's recipient, not yourself.
+      if (followUpReply.recipient_type !== 'volunteer') {
+        replyTarget = {
+          recipient_type: followUpReply.recipient_type,
+          recipient_day: followUpReply.recipient_day,
+          recipient_shift: followUpReply.recipient_shift,
+          recipient_role: followUpReply.recipient_role,
+          recipient_volunteer_id: followUpReply.recipient_volunteer_id,
+          recipient_volunteer_ids: followUpReply.recipient_type === 'group'
+            ? parseGroupMemberIds(followUpReply)
+            : undefined,
+        }
+      } else {
+        if (!followUpReply.recipient_volunteer_id || followUpReply.recipient_volunteer_id === user?.id) return abort("Could not determine who to follow up with")
+        replyTarget = {
+          recipient_type: 'volunteer',
+          recipient_volunteer_id: followUpReply.recipient_volunteer_id,
+        }
+      }
+    } else if (isDirectThread) {
+      // 1-on-1: always reply to the other person in the string, never yourself.
+      // This prevents self-only replies when replying in a thread you started.
+      let otherId = otherParticipantId
+      if (!otherId || otherId === user?.id) {
+        const candidate = targetReply?.sender_id && targetReply.sender_id !== user?.id
+          ? targetReply.sender_id
+          : null
+        otherId = candidate
+          ?? (message.sender_id !== user?.id ? message.sender_id : message.recipient_volunteer_id)
+      }
+      if (!otherId || otherId === user?.id) return abort('Could not determine the other person in this conversation')
+      replyTarget = {
+        recipient_type: 'volunteer',
+        recipient_volunteer_id: otherId,
+      }
+    } else if (targetReply) {
+      if (targetReply.sender_id === user?.id) return abort("You can't reply to yourself")
+      replyTarget = {
+        recipient_type: 'volunteer',
+        recipient_volunteer_id: targetReply.sender_id,
+      }
+    } else {
+      if (message.sender_id === user?.id) return abort("Use Reply All to respond to your own group message")
+      replyTarget = {
+        recipient_type: 'volunteer',
+        recipient_volunteer_id: message.sender_id,
+      }
+    }
     try {
-      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = await getFreshAccessToken(supabase)
       const res = await fetch('/api/send-message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          recipient_type: isOneOnOne ? 'volunteer' : 'admin',
+          ...replyTarget,
           body: replyBody.trim(),
           image_url: null,
           parent_message_id: message.id,
-          recipient_volunteer_id: isOneOnOne
-            ? (isThreadSender ? message.recipient_volunteer_id : message.sender_id)
-            : (isAdmin && !isThreadSender ? message.sender_id : null),
         }),
       })
       const result = await res.json()
@@ -163,6 +348,9 @@ function ReplyThread({
         showToast('Reply sent!', 'success')
         setReplyBody('')
         setReplyOpen(false)
+        setReplyToId(null)
+        setIsReplyAll(false)
+        setFollowUpId(null)
         onReplySent()
       }
     } catch (err) {
@@ -173,6 +361,45 @@ function ReplyThread({
   }
 
   const hasReplies = replies.length > 0
+
+  // Display name for the reply composer: in 1-on-1 threads always the
+  // other person, for follow-ups the recipient of your own reply,
+  // otherwise the sender of the message being replied to.
+  const replyTargetName = (() => {
+    if (isReplyAll) return null
+    if (followUpId) {
+      const f = replies.find(r => r.id === followUpId)
+      if (f?.sender_id === user?.id && f?.recipient_type === 'volunteer') {
+        if (f.recipient_volunteer_id === user?.id) return 'User'
+        return allUsers.find(u => u.id === f.recipient_volunteer_id)?.full_name ?? 'User'
+      }
+    }
+    if (isDirectThread) {
+      const other = allUsers.find(u => u.id === otherParticipantId)
+      if (other?.full_name) return other.full_name
+      if (replyToId) {
+        const t = replies.find(r => r.id === replyToId)
+        if (t?.sender_id && t.sender_id !== user?.id) return t.sender?.full_name ?? 'User'
+      }
+      if (message.sender_id !== user?.id) return message.sender?.full_name ?? 'User'
+      const recip = allUsers.find(u => u.id === message.recipient_volunteer_id)
+      return recip?.full_name ?? 'User'
+    }
+    // Recipient view in group threads: replies always go to the thread sender.
+    if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
+      return message.sender?.full_name ?? 'User'
+    }
+    if (replyToId) return replies.find(r => r.id === replyToId)?.sender?.full_name ?? 'User'
+    return message.sender?.full_name ?? 'User'
+  })()
+
+  const expandThread = () => {
+    const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
+    setLocallyHighlightedReplies(new Set(unreadReplyIds))
+    setExpanded(true)
+    onMarkRead(message.id, replies.map(r => r.id))
+    clearNotificationForMessage(message.id)
+  }
 
   if (!expanded) {
     return (
@@ -186,32 +413,32 @@ function ReplyThread({
           border: `1px solid ${isUnread ? 'rgba(2,65,107,0.35)' : 'var(--border)'}`,
           background: isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)',
           userSelect: 'none',
+          cursor: 'pointer',
         }}
+        onClick={expandThread}
         onMouseEnter={e => e.currentTarget.style.background = 'var(--surface)'}
         onMouseLeave={e => e.currentTarget.style.background = isUnread ? 'rgba(2,65,107,0.04)' : 'var(--bg)'}
       >
-        {/* Unread dot */}
+        {/* Unread blue dot */}
         {isUnread && (
-          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
+          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, alignSelf: 'center' }} />
         )}
 
-        {/* Clickable two-line content */}
+        {/* Line 1: sender + timestamp */}
         <div
-          onClick={() => {
-            setExpanded(true)
-            onMarkRead(message.id, replies.map(r => r.id))
-          }}
-          style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+          style={{ flex: 1, minWidth: 0 }}
         >
-          {/* Line 1: sender + timestamp */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
-              {latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName}
-            </span>
-            <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
-              {formatDateTime(previewSource.created_at)}
-            </span>
-          </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.5rem', minWidth: 0 }}>
+              <span style={{ fontWeight: isUnread ? 700 : 600, fontSize: '0.8rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {collapsedLabel ?? (latestUnreadReply ? `↩ ${previewSenderName}` : previewSenderName)}
+              </span>
+              <span style={{ display: 'inline-flex', flexWrap: 'wrap', columnGap: '0.35rem', fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
+                <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(previewSource.created_at)}{previewRecipientText ? ',' : ''}</span>
+                {previewRecipientText && (
+                  <span style={{ whiteSpace: 'nowrap' }}>{previewRecipientText}</span>
+                )}
+              </span>
+            </div>
           {/* Line 2: reply count + snippet (only rendered if there is content) */}
           {(replyCount > 0 || bodySnippet) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
@@ -227,19 +454,27 @@ function ReplyThread({
           )}
         </div>
 
-        {/* Inline reply button — only for replyable threads */}
+        {/* Inline reply button — only for replyable threads.
+            Group senders have no regular reply on their own message, so their
+            collapsed entry opens Reply All instead of a self-reply. */}
         {canReply && (
           <button
             onClick={e => {
               e.stopPropagation()
               replyScrollPosRef.current = window.scrollY
+              setLocallyHighlightedReplies(new Set())
               setExpanded(true)
               onMarkRead(message.id, replies.map(r => r.id))
+              clearNotificationForMessage(message.id)
+              setReplyToId(null)
+              setIsReplyAll(isGroupMessageSender)
+              setFollowUpId(null)
               setReplyOpen(true)
             }}
-            title="Reply"
+            title={isGroupMessageSender ? "Reply All" : "Reply"}
             style={{
               flexShrink: 0,
+              alignSelf: 'center',
               display: 'flex',
               alignItems: 'center',
               gap: '0.25rem',
@@ -261,9 +496,10 @@ function ReplyThread({
               <polyline points="9 14 4 9 9 4" />
               <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
             </svg>
-            Reply
+            {isGroupMessageSender ? "Reply All" : "Reply"}
           </button>
         )}
+
       </div>
     )
   }
@@ -273,7 +509,7 @@ function ReplyThread({
       {/* ── Original message (click to collapse) ── */}
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
-        onClick={() => { setExpanded(false); setReplyOpen(false); setReplyBody('') }}
+          onClick={() => { setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
       >
         <MessageCard
           m={message}
@@ -281,9 +517,14 @@ function ReplyThread({
           user={user}
           setLightboxUrl={setLightboxUrl}
           senderLabel={senderLabel}
-          canReply={canReply}
+          canReply={canReply && !isGroupMessageSender}
+          canReplyAll={isGroupMessageSender}
           replyOpen={replyOpen}
-          onReply={() => { replyScrollPosRef.current = window.scrollY; setReplyOpen(true) }}
+          onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(false); setFollowUpId(null); setReplyOpen(true) }}
+          onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(true); setFollowUpId(null); setReplyOpen(true) }}
+          isHighlighted={isHighlighted}
+          recipientLabel={getRecipientLabel(message)}
+          groupMemberNames={message.recipient_type === 'group' ? getGroupMemberNames(message) : null}
         />
       </div>
 
@@ -298,37 +539,38 @@ function ReplyThread({
           flexDirection: 'column',
           gap: '0.5rem',
         }}>
-          {replies.map(reply => {
-            const replyIsAdmin = reply.sender?.role === 'admin' ||
-              // fall back to checking if the sender name matches an admin — 
-              // MessageCard only gets sender.full_name, so we tag the label
-              false
+          {replies.map((reply, idx) => {
+            const replyIsAdmin = reply.sender?.role === 'admin' || false
+            const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
+            const isMostRecent = idx === replies.length - 1
+            const isMostRecentReply = true
+            const isOwnReply = reply.sender_id === user?.id
+            // Group sender's own replies get a button matching that reply's
+            // audience: Reply All for group-targeted replies, follow-up Reply
+            // for replies sent to a specific person.
+            const ownReplyIsGroup = isOwnReply && reply.recipient_type !== 'volunteer'
+            const replyCanReply = isGroupMessageSender
+              ? (isOwnReply ? !ownReplyIsGroup : true)
+              : (canReply && isMostRecent && isMostRecentReply)
+            const replyCanReplyAll = isGroupMessageSender && isOwnReply && ownReplyIsGroup
             return (
-              <div key={reply.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                {/* Admin-replied indicator pill */}
-                {reply.sender_id !== message.sender_id && (
-                  <span style={{
-                    alignSelf: 'flex-start',
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    color: 'var(--accent)',
-                    background: 'rgba(2,65,107,0.08)',
-                    border: '1px solid rgba(2,65,107,0.2)',
-                    borderRadius: '100px',
-                    padding: '0.1rem 0.5rem',
-                    marginBottom: '0.1rem',
-                  }}>
-                    {isOneOnOne ? (reply.sender?.full_name?.split(' ')[0] ?? 'Reply') : 'Admin replied'}
-                  </span>
-                )}
-                <MessageCard
-                  m={reply}
-                  readMessageIds={readMessageIds}
-                  user={user}
-                  setLightboxUrl={setLightboxUrl}
-                />
+              <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start', minWidth: 0, maxWidth: '100%' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1, minWidth: 0, maxWidth: '100%' }}>
+                  <MessageCard
+                    m={reply}
+                    readMessageIds={readMessageIds}
+                    user={user}
+                    setLightboxUrl={setLightboxUrl}
+                    isHighlighted={isReplyHighlighted}
+                    canReply={replyCanReply}
+                    canReplyAll={replyCanReplyAll}
+                    replyOpen={replyOpen}
+                    onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; if (isGroupMessageSender && isOwnReply) { setReplyToId(null); setIsReplyAll(false); setFollowUpId(reply.id) } else { setReplyToId(reply.id); setIsReplyAll(false); setFollowUpId(null) } setReplyOpen(true) }}
+                    onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setFollowUpId(null); setIsReplyAll(true); setReplyOpen(true) }}
+                    recipientLabel={getRecipientLabel(reply)}
+                    groupMemberNames={reply.recipient_type === 'group' ? getGroupMemberNames(reply) : null}
+                  />
+                </div>
               </div>
             )
           })}
@@ -359,9 +601,9 @@ function ReplyThread({
               onChange={e => setReplyBody(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
-                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody('') }
+                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }
               }}
-              placeholder="Write a reply… (⌘↵ to send)"
+              placeholder={isReplyAll ? (message.recipient_type === 'group' ? 'Replying to Group…' : 'Replying to Everyone…') : `Replying to ${replyTargetName}…`}
               rows={2}
               style={{
                 ...S.input,
@@ -374,10 +616,10 @@ function ReplyThread({
                 padding: '0.6rem 0.75rem',
               }}
             />
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setReplyOpen(false); setReplyBody('') }}
-                style={{
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
+                  style={{
                   padding: '0.35rem 0.75rem',
                   background: 'none',
                   border: '1px solid var(--border)',
@@ -428,6 +670,10 @@ export function MessageTab({
   MAX_FILE_SIZE,
   schedule = [],
   onUnreadCountChange,
+  openMessageId,
+  // Bottom offset for the mobile recipients sheet (e.g. above the volunteer
+  // BottomNav). Accepts any CSS length; 0 keeps the sheet flush to the bottom.
+  sheetBottomOffset = 0,
 }) {
   // ── Local state ────────────────────────────────────────────────────────────
   const [messages, setMessages]               = useState([])
@@ -439,6 +685,7 @@ export function MessageTab({
   const [allUsers, setAllUsers]               = useState(allUsersProp)
   const [lightboxUrl, setLightboxUrl]         = useState(null)
   const [inboxFilter, setInboxFilter] = useState('all')
+  const [markingAllRead, setMarkingAllRead] = useState(false)
 
   // Compose state
   const [msgView, setMsgView]                 = useState('inbox')
@@ -446,7 +693,7 @@ export function MessageTab({
   const [msgRecipientType, setMsgRecipientType] = useState('admin')
   const [msgSelectedShift, setMsgSelectedShift] = useState(null)
   const [msgSelectedRole, setMsgSelectedRole]   = useState(null)
-  const [msgRecipientVolId, setMsgRecipientVolId] = useState('')
+  const [msgRecipientVolIds, setMsgRecipientVolIds] = useState([])
   const [sendingMsg, setSendingMsg]           = useState(false)
   const [msgImageFile, setMsgImageFile]       = useState(null)
   const [msgImagePreview, setMsgImagePreview] = useState(null)
@@ -455,6 +702,7 @@ export function MessageTab({
   const [comboOpen, setComboOpen]             = useState(false)
   const fileInputRef = useRef(null)
   const comboRef     = useRef(null)
+  const recipientInputRef = useRef(null)
   const msgBodyRef = useRef(null)
   const [msgBodyFieldSizingSupported] = useState(() =>
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
@@ -496,6 +744,14 @@ export function MessageTab({
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [user])
 
+  // ── Poll unread count every 30s so the badge stays current
+  // even when the messages tab is not open ──
+  useEffect(() => {
+    if (!user) return
+    const id = setInterval(fetchMessages, 30000)
+    return () => clearInterval(id)
+  }, [user])
+
   // ── Unlock pinch-to-zoom when lightbox is open on mobile ───────────────────
   useEffect(() => {
     const viewport = document.querySelector('meta[name="viewport"]')
@@ -534,9 +790,8 @@ export function MessageTab({
         .order('full_name'),
     ])
 
-    const fetched = msgs || []
+    const fetched = (msgs || []).filter(m => m != null)
     setMessages(fetched)
-
     // Cursor = oldest top-level message fetched
     const topLevel = fetched.filter(m => !m.parent_message_id)
     setHasMoreMsgs(topLevel.length >= MSG_PAGE_SIZE)
@@ -564,6 +819,38 @@ export function MessageTab({
     })
   }, [user, supabase, readMessageIds])
 
+  async function markAllThreadsRead() {
+    if (!user || markingAllRead) return
+    const ids = []
+    inboxThreads.forEach(m => {
+      if (m.sender_id !== user?.id && !readMessageIds.has(m.id)) ids.push(m.id)
+      ;(inboxRepliesMap[m.id] || []).forEach(r => {
+        if (r.sender_id !== user?.id && !readMessageIds.has(r.id)) ids.push(r.id)
+      })
+    })
+    const unique = [...new Set(ids)]
+    if (unique.length === 0) return
+    setMarkingAllRead(true)
+    try {
+      const rows = unique.map(id => ({ user_id: user.id, message_id: id }))
+      const { error } = await supabase.from('message_reads').upsert(rows, { onConflict: 'user_id,message_id' })
+      if (error) {
+        showToast(error.message || 'Failed to mark all as read', 'error')
+      } else {
+        setReadMessageIds(prev => {
+          const next = new Set(prev)
+          unique.forEach(id => next.add(id))
+          return next
+        })
+        showToast('All messages marked as read', 'success')
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to mark all as read', 'error')
+    } finally {
+      setMarkingAllRead(false)
+    }
+  }
+
   async function loadMoreMessages() {
     if (!user || !msgCursor || loadingMoreMsgs) return
     setLoadingMoreMsgs(true)
@@ -579,7 +866,7 @@ export function MessageTab({
       .lt('created_at', msgCursor)
       .limit(MSG_PAGE_SIZE * 2)
 
-    const fetched = older || []
+    const fetched = (older || []).filter(m => m != null)
     setMessages(prev => {
       const existingIds = new Set(prev.map(m => m.id))
       return [...prev, ...fetched.filter(m => !existingIds.has(m.id))]
@@ -593,7 +880,7 @@ export function MessageTab({
 
   async function loadBroadcastReadCounts(msgs) {
     const broadcastIds = (msgs || [])
-      .filter(m => BROADCAST_TYPES.includes(m.recipient_type))
+      .filter(m => m && BROADCAST_TYPES.includes(m.recipient_type))
       .map(m => m.id)
     if (broadcastIds.length === 0) return
     const { data, error } = await supabase.rpc('get_broadcast_read_counts', { message_ids: broadcastIds })
@@ -606,19 +893,33 @@ export function MessageTab({
   // ── Thread grouping ────────────────────────────────────────────────────────
   // Returns top-level messages with their replies keyed by parent id
   function buildThreadMap(msgs) {
-    const topLevel = msgs.filter(m => !m.parent_message_id)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    const validMsgs = msgs.filter(m => m != null)
     const repliesMap = {}
-    msgs
+    validMsgs
       .filter(m => m.parent_message_id)
       .forEach(r => {
         if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
         repliesMap[r.parent_message_id].push(r)
       })
-    // Sort each reply thread oldest-first
+    // Sort each reply thread: the sender's reply-alls float above direct
+    // messages to/from the sender, chronological within each group.
+    const byId = new Map(validMsgs.map(m => [m.id, m]))
     Object.keys(repliesMap).forEach(k => {
-      repliesMap[k].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      const parentSenderId = byId.get(k)?.sender_id
+      const isBroadcast = (r) => parentSenderId && r.sender_id === parentSenderId && r.recipient_type !== 'volunteer'
+      repliesMap[k].sort((a, b) => {
+        const ag = isBroadcast(a) ? 0 : 1
+        const bg = isBroadcast(b) ? 0 : 1
+        if (ag !== bg) return ag - bg
+        return new Date(a.created_at) - new Date(b.created_at)
+      })
     })
+    const topLevel = validMsgs.filter(m => !m.parent_message_id)
+      .sort((a, b) => {
+        const aLatest = Math.max(new Date(a.created_at), ...(repliesMap[a.id] || []).map(r => new Date(r.created_at)))
+        const bLatest = Math.max(new Date(b.created_at), ...(repliesMap[b.id] || []).map(r => new Date(r.created_at)))
+        return bLatest - aLatest
+      })
     return { topLevel, repliesMap }
   }
 
@@ -627,12 +928,48 @@ export function MessageTab({
     ? getInboxMessages(messages.filter(m => !m.parent_message_id), user, profile)
     : messages.filter(m => !m.parent_message_id && m.sender_id !== user?.id)
 
-  const sentMessages = messages.filter(m => m.sender_id === user?.id && !m.parent_message_id)
-
   const { topLevel: inboxTopLevel, repliesMap: inboxRepliesMap } = buildThreadMap(
     // For inbox: show all top-level messages the user received + sent top-levels that got replies
     messages
   )
+
+  // Sent messages: top-level sent messages + user-sent replies.
+  // If the user sent the original message, that entry takes priority and
+  // absorbs any of their replies (no duplicate reply-thread entry).
+  // Otherwise replies are grouped by parent so one parent = one sent entry.
+  const userSentReplies = messages.filter(m => m.sender_id === user?.id && m.parent_message_id)
+  const topLevelSentIds = new Set(
+    messages.filter(m => m.sender_id === user?.id && !m.parent_message_id).map(m => m.id)
+  )
+  const replyParentIds = [...new Set(
+    userSentReplies
+      .map(r => r.parent_message_id)
+      .filter(pid => pid && !topLevelSentIds.has(pid))
+  )]
+  const sentMessages = messages
+    .filter(m => m.sender_id === user?.id && !m.parent_message_id)
+    .map(m => ({
+      message: m,
+      replies: inboxRepliesMap[m.id] || [],
+      isReplyThread: false,
+    }))
+    .concat(
+      replyParentIds.map(pid => {
+        const parent = messages.find(m => m.id === pid)
+        if (!parent) return null
+        return {
+          message: parent,
+          replies: inboxRepliesMap[pid] || [],
+          isReplyThread: true,
+        }
+      }).filter(Boolean)
+    )
+    .filter(e => e.message != null)
+    .sort((a, b) => {
+      const aLatest = Math.max(new Date(a.message.created_at), ...a.replies.map(r => new Date(r.created_at)))
+      const bLatest = Math.max(new Date(b.message.created_at), ...b.replies.map(r => new Date(r.created_at)))
+      return bLatest - aLatest
+    })
 
   // Inbox threads: messages sent to this user (or admin) that are top-level
   const inboxThreads = inboxTopLevel.filter(m => {
@@ -658,10 +995,24 @@ export function MessageTab({
       )
     }
 
-    if (inboxFilter === 'direct') {
+    if (inboxFilter === 'everyone') {
       return (
+          m.recipient_type === 'everyone' &&
+          m.sender_id !== user?.id
+      )
+    }
+
+    if (inboxFilter === 'direct') {
+      if (
           m.recipient_type === 'volunteer' &&
           m.recipient_volunteer_id === user?.id
+      ) return true
+      // Threads where someone sent you a direct reply (e.g. a 1-on-1 reply
+      // inside a group thread), even when the top-level message is group.
+      return (inboxRepliesMap[m.id] || []).some(r =>
+          r.recipient_type === 'volunteer' &&
+          r.recipient_volunteer_id === user?.id &&
+          r.sender_id !== user?.id
       )
     }
 
@@ -682,9 +1033,27 @@ export function MessageTab({
     onUnreadCountChange?.(unreadThreadCount)
   }, [unreadThreadCount, onUnreadCountChange])
 
+  // Resolve a deep-linked message id (which may be a reply) to its thread's
+  // top-level id, so notifications for replies still expand the right thread.
+  const openThreadId = (() => {
+    if (!openMessageId) return null
+    const target = messages.find(m => m.id === openMessageId)
+    if (!target) return openMessageId // not loaded locally yet — fall back to raw id
+    return target.parent_message_id || target.id
+  })()
+
   const recentRecipients = sentMessages
-    .filter(m => m.recipient_type === 'volunteer' && m.recipient_volunteer_id)
-    .map(m => m.recipient_volunteer_id)
+    .flatMap(s => {
+      if (s.isReplyThread) {
+        const my = [...s.replies].reverse().find(r => r.sender_id === user?.id) ?? s.replies.find(r => r.sender_id === user?.id)
+        if (!my) return []
+        if (my.recipient_type === 'volunteer' && my.recipient_volunteer_id) return [my.recipient_volunteer_id]
+        return parseGroupMemberIds(my).filter(id => id !== user?.id)
+      }
+      const m = s.message
+      if (m.recipient_type === 'volunteer' && m.recipient_volunteer_id) return [m.recipient_volunteer_id]
+      return parseGroupMemberIds(m).filter(id => id !== user?.id)
+    })
     .filter((id, i, arr) => arr.indexOf(id) === i)
     .slice(0, 4)
     .map(id => allUsers.find(u => u.id === id))
@@ -697,10 +1066,13 @@ export function MessageTab({
         allUsers
         .filter(u => u.id !== user?.id)
         .filter(u => u.status === 'active')
+        .filter(u => !msgRecipientVolIds.includes(u.id))
     if (q.length === 0) {
-      const recentIds = new Set(recentRecipients.map(u => u.id))
+      const selectedIds = new Set(msgRecipientVolIds)
+      const usableRecents = recentRecipients.filter(u => !selectedIds.has(u.id))
+      const recentIds = new Set(usableRecents.map(u => u.id))
       const rest = baseList.filter(u => !recentIds.has(u.id))
-      return [...recentRecipients, ...rest].slice(0, 20)
+      return [...usableRecents, ...rest].slice(0, 20)
     }
     const startsWith = baseList.filter(u => u.full_name.toLowerCase().startsWith(q))
     const midString  = baseList.filter(u =>
@@ -741,10 +1113,43 @@ export function MessageTab({
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  function selectRecipient(vol) {
-    setMsgRecipientVolId(vol.id)
-    setComboQuery(vol.full_name)
-    setComboOpen(false)
+  const selectedRecipientUsers = msgRecipientVolIds
+    .map(id => allUsers.find(u => u.id === id))
+    .filter(Boolean)
+
+  function addRecipient(vol, opts = {}) {
+    const { closeAfter = false } = opts
+    if (!vol || vol.id === user?.id) return
+    setMsgRecipientVolIds(prev => prev.includes(vol.id) ? prev : [...prev, vol.id])
+    setComboQuery('')
+    if (closeAfter) {
+      setComboOpen(false)
+      if (typeof document !== 'undefined' && document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur()
+      }
+    } else {
+      // Re-open (and re-focus) on the next frame so the textbox + dropdown
+      // reliably come back after every selection, no matter how many names
+      // are already picked or which closer ran during the click.
+      setComboOpen(true)
+      requestAnimationFrame(() => {
+        setComboOpen(true)
+        if (recipientInputRef.current && recipientInputRef.current.focus) {
+          recipientInputRef.current.focus()
+        }
+      })
+    }
+  }
+
+  function removeRecipient(id) {
+    setMsgRecipientVolIds(prev => prev.filter(v => v !== id))
+  }
+
+  function handleRecipientKeyDown(e, closeAfter = false) {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    // Only auto-select when the filter narrows to a single option.
+    if (comboResults.length === 1) addRecipient(comboResults[0], { closeAfter })
   }
 
   async function uploadImage(userId) {
@@ -767,88 +1172,88 @@ export function MessageTab({
     if (!msgBody.trim() && !msgImageFile) return
     setSendingMsg(true)
 
-    const imageUrl = await uploadImage(user.id)
-    if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
+    try {
+      const imageUrl = await uploadImage(user.id)
+      if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
 
-    const recipientType = msgRecipientType === 'user'      ? 'volunteer'
-                        : msgRecipientType === 'providers' ? 'role'
-                        : msgRecipientType
-    const { data: { session } } = await supabase.auth.getSession()
+      const individualIds = msgRecipientType === 'user'
+        ? [...new Set(msgRecipientVolIds.filter(id => id && id !== user?.id))]
+        : []
+      const isGroupCompose = msgRecipientType === 'user' && individualIds.length > 1
+      const recipientType = isGroupCompose                        ? 'group'
+                          : msgRecipientType === 'user'           ? 'volunteer'
+                          : msgRecipientType === 'providers'      ? 'role'
+                          : msgRecipientType
+      const accessToken = await getFreshAccessToken(supabase)
 
-    const res = await fetch('/api/send-message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({
-        recipient_type: recipientType,
-        body: msgBody.trim(),
-        image_url: imageUrl || null,
-        recipient_shift:        msgRecipientType === 'shift' ? (msgSelectedShift?.shift_time || null) : null,
-        recipient_day:          msgRecipientType === 'shift' ? (msgSelectedShift?.day || null) : null,
-        recipient_role:         msgRecipientType === 'role'      ? (msgSelectedRole || null)
-                              : msgRecipientType === 'providers' ? 'Provider'
-                              : null,
-        recipient_volunteer_id: recipientType === 'volunteer' ? (msgRecipientVolId || null) : null,
-        parent_message_id: null, // always null for new top-level compose
-      }),
-    })
+      const res = await fetch('/api/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          recipient_type: recipientType,
+          body: msgBody.trim(),
+          image_url: imageUrl || null,
+          recipient_shift:        msgRecipientType === 'shift' ? (msgSelectedShift?.shift_time || null) : null,
+          recipient_day:          msgRecipientType === 'shift' ? (msgSelectedShift?.day || null) : null,
+          recipient_role:         msgRecipientType === 'role'      ? (msgSelectedRole || null)
+                                : msgRecipientType === 'providers' ? 'Provider'
+                                : null,
+          recipient_volunteer_id: recipientType === 'volunteer' ? (individualIds[0] || null) : null,
+          recipient_volunteer_ids: isGroupCompose ? individualIds : undefined,
+          parent_message_id: null, // always null for new top-level compose
+        }),
+      })
 
-    const result = await res.json()
-    if (!res.ok) {
-      showToast(result.error || 'Failed to send', 'error')
-    } else {
-      showToast('Message sent!', 'success')
-      setMsgBody('')
-      clearImage()
-      setMsgRecipientType('admin')
-      setMsgSelectedShift(null)
-      setMsgSelectedRole(null)
-      setMsgRecipientVolId('')
-      setComboQuery('')
-      setComboOpen(false)
-      setMessages([])
-      setMsgCursor(null)
-      setHasMoreMsgs(false)
-      await fetchMessages()
-      setMsgView('inbox')
+      const result = await res.json()
+      if (!res.ok) {
+        showToast(result.error || 'Failed to send', 'error')
+      } else {
+        showToast('Message sent!', 'success')
+        setMsgBody('')
+        clearImage()
+        setMsgRecipientType('admin')
+        setMsgSelectedShift(null)
+        setMsgSelectedRole(null)
+        setMsgRecipientVolIds([])
+        setComboQuery('')
+        setComboOpen(false)
+        setMessages([])
+        setMsgCursor(null)
+        setHasMoreMsgs(false)
+        await fetchMessages()
+        setMsgView('inbox')
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to send', 'error')
+    } finally {
+      setSendingMsg(false)
     }
-    setSendingMsg(false)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-      {/* View switcher */}
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
+      {/* View switcher — matches the admin Pipeline tab style */}
+      <div style={{ display: 'flex', gap: '0.4rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
         {[['inbox', 'Inbox'], ['sent', 'Sent'], ['compose', 'Compose']].map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMsgView(key)}
             style={{
-              position: 'relative',
-              padding: '0.45rem 0.9rem',
+              padding: '0.45rem 1rem',
               borderRadius: '8px',
               fontSize: '0.85rem',
-              fontWeight: 500,
+              fontWeight: msgView === key ? 700 : 500,
               cursor: 'pointer',
               fontFamily: 'DM Sans, sans-serif',
-              background: msgView === key ? 'var(--accent)' : 'var(--surface)',
-              color:      msgView === key ? '#fff' : 'var(--muted)',
-              border:     msgView === key ? 'none' : '1px solid var(--border)',
+              background: msgView === key ? '#0369a1' + '18' : 'transparent',
+              color:      msgView === key ? '#0369a1' : 'var(--muted)',
+              border:     msgView === key ? '1px solid #0369a144' : '1px solid var(--border)',
+              transition: 'all 0.15s',
             }}
           >
             {label}
-            {key === 'inbox' && unreadThreadCount > 0 && (
-              <span style={{
-                position: 'absolute', top: '-5px', right: '-5px',
-                background: '#ef4444', color: '#fff', borderRadius: '50%',
-                width: '17px', height: '17px', fontSize: '0.65rem', fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '2px solid var(--bg)', lineHeight: 1,
-              }}>
-                {unreadThreadCount > 9 ? '9+' : unreadThreadCount}
-              </span>
-            )}
           </button>
         ))}
       </div>
@@ -856,7 +1261,28 @@ export function MessageTab({
       {/* ── INBOX ── */}
       {msgView === 'inbox' && (
         <div style={S.card}>
-          <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Inbox</h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+            <h2 style={{ fontWeight: 600, margin: 0 }}>Inbox</h2>
+            <button
+                key="mark-all-read"
+                type="button"
+                onClick={markAllThreadsRead}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '8px',
+                  fontSize: '0.78rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                  background: '#fff',
+                  color: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  marginLeft: 'auto',
+                }}
+            >
+              {markingAllRead ? 'Loading...' : 'Mark all as read'}
+            </button>
+          </div>
 
           <div
               style={{
@@ -871,6 +1297,7 @@ export function MessageTab({
               ['direct', 'Directly to me'],
               ...(isAdmin ? [['hr', 'HR']] : []),
               ['role', 'My Role'],
+              ['everyone', 'Everyone'],
             ].map(([key, label]) => (
                 <button
                     key={key}
@@ -880,14 +1307,15 @@ export function MessageTab({
                       padding: '0.35rem 0.75rem',
                       borderRadius: '100px',
                       fontSize: '0.78rem',
-                      fontWeight: 500,
+                      fontWeight: inboxFilter === key ? 700 : 500,
                       cursor: 'pointer',
                       fontFamily: 'DM Sans, sans-serif',
-                      background: inboxFilter === key ? 'var(--accent)' : 'var(--bg)',
-                      color: inboxFilter === key ? '#fff' : 'var(--muted)',
+                      background: inboxFilter === key ? '#0369a1' + '18' : 'transparent',
+                      color: inboxFilter === key ? '#0369a1' : 'var(--muted)',
                       border: inboxFilter === key
-                          ? '1px solid var(--accent)'
+                          ? '1px solid #0369a144'
                           : '1px solid var(--border)',
+                      transition: 'all 0.15s',
                     }}
                 >
                   {label}
@@ -915,6 +1343,7 @@ export function MessageTab({
                   allUsers={allUsers}
                   onReplySent={fetchMessages}
                   onMarkRead={markThreadRead}
+                  startExpanded={openThreadId === m.id}
                 />
               ))}
             </div>
@@ -945,19 +1374,25 @@ export function MessageTab({
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No sent messages yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {sentMessages.map(m => {
-                const toLabel =
-                  m.recipient_type === 'everyone' ? 'To: Everyone' :
-                  m.recipient_type === 'admin'    ? 'To: HR' :
-                  m.recipient_type === 'shift'    ? `To: ${m.recipient_day ? m.recipient_day.charAt(0).toUpperCase() + m.recipient_day.slice(1, 3) : ''} ${m.recipient_shift || ''}`.trim() :
-                  m.recipient_type === 'role'     ? `To: ${m.recipient_role}` :
-                  m.recipient_type === 'volunteer'? `To: ${allUsers.find(u => u.id === m.recipient_volunteer_id)?.full_name || 'Individual'}` :
-                  'To: ' + m.recipient_type
+              {sentMessages.map(sent => {
+                const m = sent.message
+                const getToLabel = (msg) =>
+                  msg.recipient_type === 'group' ? 'To: Group' :
+                  msg.recipient_type === 'everyone' ? 'To: Everyone' :
+                  msg.recipient_type === 'admin'    ? 'To: HR' :
+                  msg.recipient_type === 'shift'    ? `To: ${msg.recipient_day ? msg.recipient_day.charAt(0).toUpperCase() + msg.recipient_day.slice(1, 3) : ''} ${msg.recipient_shift || ''}`.trim() + ' Shift' :
+                  msg.recipient_type === 'role'     ? `To: ${msg.recipient_role}` :
+                  msg.recipient_type === 'volunteer'? `To: ${allUsers.find(u => u.id === msg.recipient_volunteer_id)?.full_name || m.sender?.full_name || 'Individual'}` :
+                  'To: ' + msg.recipient_type
+                const myReply = sent.isReplyThread
+                  ? [...sent.replies].reverse().find(r => r.sender_id === user?.id) ?? sent.replies.find(r => r.sender_id === user?.id)
+                  : null
+                const toLabel = sent.isReplyThread && myReply ? getToLabel(myReply) : getToLabel(m)
                 return (
                   <ReplyThread
                     key={m.id}
                     message={m}
-                    replies={inboxRepliesMap[m.id] || []}
+                    replies={sent.replies}
                     user={user}
                     profile={profile}
                     supabase={supabase}
@@ -968,7 +1403,10 @@ export function MessageTab({
                     allUsers={allUsers}
                     onReplySent={fetchMessages}
                     onMarkRead={markThreadRead}
-                    senderLabel={toLabel}
+                    senderLabel={sent.isReplyThread ? undefined : toLabel}
+                    collapsedLabel={sent.isReplyThread ? toLabel : undefined}
+                    startExpanded={openThreadId === m.id}
+                    previewMessage={myReply ?? null}
                   />
                 )
               })}
@@ -1007,7 +1445,7 @@ export function MessageTab({
                   ...(!isProvider && !isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
                   ...(myShiftCombos.length > 0 ? [{ value: 'shift', label: 'My Shift' }] : []),
                   ...(rolesForCompose.length > 0 ? [{ value: 'role', label: isAdmin ? 'Role' : 'My Role' }] : []),
-                  { value: 'user', label: 'Individual' },
+                  { value: 'user', label: 'Individuals' },
                 ].map(opt => (
                   <button
                     key={opt.value}
@@ -1016,16 +1454,17 @@ export function MessageTab({
                       setMsgRecipientType(opt.value)
                       setMsgSelectedShift(null)
                       setMsgSelectedRole(null)
-                      setMsgRecipientVolId('')
+                      setMsgRecipientVolIds([])
                       setComboQuery('')
                       setComboOpen(false)
                     }}
                     style={{
                       padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.85rem',
-                      fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
-                      background: msgRecipientType === opt.value ? 'var(--accent)' : 'var(--surface)',
-                      color:      msgRecipientType === opt.value ? '#fff' : 'var(--muted)',
-                      border:     msgRecipientType === opt.value ? 'none' : '1px solid var(--border)',
+                      fontWeight: msgRecipientType === opt.value ? 700 : 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                      background: msgRecipientType === opt.value ? '#0369a1' + '18' : 'transparent',
+                      color:      msgRecipientType === opt.value ? '#0369a1' : 'var(--muted)',
+                      border:     msgRecipientType === opt.value ? '1px solid #0369a144' : '1px solid var(--border)',
+                      transition: 'all 0.15s',
                     }}
                   >
                     {opt.label}
@@ -1075,31 +1514,64 @@ export function MessageTab({
                 </div>
               )}
 
-              {/* Individual user selector */}
+              {/* Individuals multi-select (email-style bubbles) */}
               {msgRecipientType === 'user' && (
                 <div style={{ marginTop: '0.75rem' }} ref={comboRef}>
-                  <label style={S.label}>Select user</label>
+                  <label style={S.label}>Select users</label>
                   {isMobile ? (
                     <>
-                      <button
-                        type="button"
+                      <div
                         onClick={() => { setComboOpen(true); setComboQuery('') }}
-                        style={{ ...S.input, textAlign: 'left', cursor: 'pointer', color: msgRecipientVolId ? 'var(--text)' : 'var(--muted)' }}
+                        style={{ ...S.input, display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', cursor: 'pointer', minHeight: '3rem' }}
                       >
-                        {msgRecipientVolId ? allUsers.find(u => u.id === msgRecipientVolId)?.full_name : 'Tap to select recipient…'}
-                      </button>
+                        {selectedRecipientUsers.map(u => (
+                          <span
+                            key={u.id}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                              padding: '0.2rem 0.3rem 0.2rem 0.6rem', borderRadius: '100px',
+                              fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif',
+                              background: '#0369a1' + '18', color: '#0369a1',
+                              border: '1px solid #0369a144',
+                            }}
+                          >
+                            {u.full_name}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${u.full_name}`}
+                              onClick={e => { e.stopPropagation(); removeRecipient(u.id) }}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: '1.1rem', height: '1.1rem', borderRadius: '50%',
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#0369a1', fontSize: '0.75rem', lineHeight: 1, padding: 0,
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          readOnly
+                          tabIndex={-1}
+                          value=""
+                          placeholder="Add recipients..."
+                          style={{ flex: '1 1 8rem', minWidth: '8rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.95rem', fontFamily: 'DM Sans, sans-serif', color: 'var(--text)', padding: 0, cursor: 'pointer' }}
+                        />
+                      </div>
                       {comboOpen && (
-                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', paddingBottom: '19%' }}>
-                          <div style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', display: 'flex', flexDirection: 'column', height: '57%' }}>
+                        <div onClick={() => { setComboOpen(false); setComboQuery('') }} style={{ position: 'fixed', inset: 0, bottom: sheetBottomOffset, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: '16px 16px 0 0', display: 'flex', flexDirection: 'column', height: `min(560px, calc(95vh - (${sheetBottomOffset || 0})))`, maxHeight: `calc(95vh - (${sheetBottomOffset || 0}))`, width: '100%' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem 0.75rem', borderBottom: '1px solid var(--border)' }}>
-                              <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Select recipient</span>
-                              <button type="button" onClick={() => setComboOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '1.2rem' }}>✕</button>
+                              <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Select recipients</span>
+                              <button type="button" onClick={() => { setComboOpen(false); setComboQuery('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '1.2rem' }}>✕</button>
                             </div>
                             <input
                               autoFocus
                               type="text"
                               value={comboQuery}
                               onChange={e => setComboQuery(e.target.value)}
+                              onKeyDown={e => handleRecipientKeyDown(e, true)}
                               placeholder="Search…"
                               style={{ ...S.input, borderRadius: 0, border: 'none', borderBottom: '1px solid var(--border)', padding: '0.75rem 1.25rem' }}
                             />
@@ -1108,7 +1580,7 @@ export function MessageTab({
                                 <button
                                   key={vol.id}
                                   type="button"
-                                  onClick={() => selectRecipient(vol)}
+                                  onClick={() => addRecipient(vol, { closeAfter: true })}
                                   style={{ width: '100%', padding: '0.75rem 1.25rem', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text)', fontFamily: 'DM Sans, sans-serif', borderBottom: '1px solid var(--border)' }}
                                 >
                                   {vol.full_name}
@@ -1121,21 +1593,57 @@ export function MessageTab({
                     </>
                   ) : (
                     <div style={{ position: 'relative' }}>
-                      <input
-                        type="text"
-                        value={comboQuery}
-                        onChange={e => { setComboQuery(e.target.value); setComboOpen(true); setMsgRecipientVolId('') }}
-                        onFocus={() => setComboOpen(true)}
-                        placeholder="Search by name…"
-                        style={S.input}
-                      />
+                      <div
+                        onClick={() => { setComboOpen(true); recipientInputRef.current?.focus?.() }}
+                        style={{ ...S.input, display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', cursor: 'text', minHeight: '3rem' }}
+                      >
+                        {selectedRecipientUsers.map(u => (
+                          <span
+                            key={u.id}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                              padding: '0.2rem 0.3rem 0.2rem 0.6rem', borderRadius: '100px',
+                              fontSize: '0.82rem', fontWeight: 600, fontFamily: 'DM Sans, sans-serif',
+                              background: '#0369a1' + '18', color: '#0369a1',
+                              border: '1px solid #0369a144',
+                            }}
+                          >
+                            {u.full_name}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${u.full_name}`}
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => removeRecipient(u.id)}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: '1.1rem', height: '1.1rem', borderRadius: '50%',
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#0369a1', fontSize: '0.75rem', lineHeight: 1, padding: 0,
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          ref={recipientInputRef}
+                          type="text"
+                          value={comboQuery}
+                          onChange={e => { setComboQuery(e.target.value); setComboOpen(true) }}
+                          onFocus={() => setComboOpen(true)}
+                          onBlur={() => { setComboQuery(''); setComboOpen(false) }}
+                          onKeyDown={handleRecipientKeyDown}
+                          placeholder="Add recipients..."
+                          style={{ flex: '1 1 8rem', minWidth: '8rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.95rem', fontFamily: 'DM Sans, sans-serif', color: 'var(--text)', padding: 0 }}
+                        />
+                      </div>
                       {comboOpen && comboResults.length > 0 && (
                         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 100, maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}>
                           {comboResults.map(vol => (
                             <button
                               key={vol.id}
                               type="button"
-                              onMouseDown={e => { e.preventDefault(); selectRecipient(vol) }}
+                              onMouseDown={e => { e.preventDefault(); addRecipient(vol) }}
                               style={{ width: '100%', padding: '0.6rem 1rem', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', textAlign: 'left', cursor: 'pointer', fontSize: '0.88rem', color: 'var(--text)', fontFamily: 'DM Sans, sans-serif' }}
                             >
                               {vol.full_name}
@@ -1190,7 +1698,7 @@ export function MessageTab({
 
             <button
               type="submit"
-              disabled={sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && !msgRecipientVolId) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)}
+              disabled={sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)}
               style={{
                 padding: '0.85rem',
                 background: 'var(--accent)',
@@ -1200,7 +1708,7 @@ export function MessageTab({
                 fontWeight: 600,
                 cursor: sendingMsg || uploadingImage ? 'not-allowed' : 'pointer',
                 fontFamily: 'DM Sans, sans-serif',
-                opacity: (!msgBody.trim() && !msgImageFile) ? 0.5 : 1,
+                opacity: (sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)) ? 0.5 : 1,
               }}
             >
               {uploadingImage ? 'Uploading image…' : sendingMsg ? 'Sending…' : 'Send Message'}
@@ -1261,3 +1769,4 @@ export function MessageTab({
     </div>
   )
 }
+

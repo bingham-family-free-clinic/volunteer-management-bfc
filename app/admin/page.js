@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS } from '../../lib/constants'
+import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
+import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import DataDashboard from '../../components/DataDashboard'
 import ClinicOpenings from '../../components/ClinicOpenings'
 import Pipeline from '../../components/Pipeline'
@@ -14,6 +15,7 @@ import Live, { computeExpectedNotClockedIn } from '../../components/Live'
 import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
+import { MessageTab } from '../../components/MessageTab'
 
 export const dynamic = 'force-dynamic'
 
@@ -374,6 +376,7 @@ function AdminDesktopHeader({
   showVolunteers, showProviders,
   openMenu, onToggleMenu, onCloseMenu,
   onSwitchView, onSignOut,
+  messagesBadge,
 }) {
   const otherMenuActive = otherItems.some(([key]) => key === activeTab)
 
@@ -406,7 +409,7 @@ function AdminDesktopHeader({
           />
         )}
 
-        {/* "Other" always renders — it's also home to Volunteer View / Sign out */}
+        {/* "Other" always renders — it's also home to Messages, Volunteer View / Sign out */}
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => onToggleMenu('other')}
@@ -419,9 +422,20 @@ function AdminDesktopHeader({
               fontSize: '0.95rem',
               fontWeight: otherMenuActive || openMenu === 'other' ? 600 : 500,
               color: otherMenuActive || openMenu === 'other' ? 'var(--text)' : 'var(--muted)',
+              position: 'relative',
             }}
           >
             Other
+            {messagesBadge > 0 && (
+              <span style={{
+                position: 'absolute', top: '-8px', right: '-14px',
+                background: '#ef4444', color: '#fff', borderRadius: '50%',
+                width: '16px', height: '16px', fontSize: '0.6rem', fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+              }}>
+                {messagesBadge > 9 ? '9+' : messagesBadge}
+              </span>
+            )}
           </button>
 
           {openMenu === 'other' && (
@@ -444,6 +458,16 @@ function AdminDesktopHeader({
                     style={dropdownItemStyle(activeTab === key)}
                   >
                     {label}
+                    {key === 'messages' && messagesBadge > 0 && (
+                      <span style={{
+                        background: '#ef4444', color: '#fff', borderRadius: '50%',
+                        minWidth: '18px', height: '18px', fontSize: '0.65rem', fontWeight: 700,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+                        padding: '0 4px',
+                      }}>
+                        {messagesBadge > 9 ? '9+' : messagesBadge}
+                      </span>
+                    )}
                   </button>
                 ))}
 
@@ -462,7 +486,7 @@ function AdminDesktopHeader({
   )
 }
 
-function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitchView, onSignOut }) {
+function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitchView, onSignOut, messagesBadge = 0 }) {
   function handleItemClick(action) {
     action()
     onClose()
@@ -555,7 +579,19 @@ function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitc
                 fontFamily: 'DM Sans, sans-serif',
               }}
             >
-              {label}
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <span>{label}</span>
+                {key === 'messages' && messagesBadge > 0 && (
+                  <span style={{
+                    background: '#ef4444', color: '#fff', borderRadius: '50%',
+                    minWidth: '20px', height: '20px', fontSize: '0.7rem', fontWeight: 700,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+                    padding: '0 5px',
+                  }}>
+                    {messagesBadge > 9 ? '9+' : messagesBadge}
+                  </span>
+                )}
+              </span>
             </button>
           ))}
 
@@ -587,7 +623,10 @@ function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitc
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const [profile, setProfile] = useState(null)
+  const [user, setUser] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
+
+  const [lastLiveRefresh, setLastLiveRefresh] = useState(null)
 
   const [volunteers, setVolunteers]     = useState([])
   const [activeShifts, setActiveShifts] = useState([])
@@ -597,6 +636,7 @@ export default function AdminPage() {
   const [loading, setLoading]           = useState(true)
   const [toast, setToast]               = useState(null)
   const [currentTime, setCurrentTime]   = useState(getMountainNow())
+  const [unreadCount, setUnreadCount]   = useState(0)
 
   const loadedTabs = useRef(new Set(['dashboard']))
 
@@ -808,6 +848,17 @@ export default function AdminPage() {
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'],
         ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
       ]
+
+  // Insert Messages as the 3rd tab (just like the volunteer page)
+  const schedIdx = tabItems.findIndex(([key]) => key === 'schedule')
+  if (schedIdx !== -1) {
+    tabItems.splice(schedIdx + 1, 0, ['messages', 'Messages'])
+  } else if (tabItems.length >= 2) {
+    tabItems.splice(2, 0, ['messages', 'Messages'])
+  }
+
+  const messagesTabEntry = tabItems.find(([key]) => key === 'messages')
+  const messagesBadge = messagesTabEntry ? unreadCount : 0
 
   // Insert Language Coverage right after Volunteers, but only for the three
   // roles allowed to see it. Works regardless of which branch above produced
@@ -1278,6 +1329,7 @@ export default function AdminPage() {
       if (key === 'hours')  loadPendingHours()
       if (key === 'audit')  loadAuditFirstPage()
       if (key === 'volunteers') { loadGuestOrgs(); loadGuestHoursTotals() }
+      if (key === 'messages') fetchMessages(user?.id)
     }
   }
 
@@ -1286,6 +1338,7 @@ export default function AdminPage() {
     async function init() {
       const { data: { session } } = await supabase.auth.getSession()
       const user = session?.user
+      setUser(user)
       if (!user) { window.location.href = '/'; return }
       // Fetch only the admin profile fields we actually use
       const { data: p } = await supabase
@@ -1299,10 +1352,11 @@ export default function AdminPage() {
         setLoading(false)
         return
       }
-      setProfile(p)
-      if (p?.default_role === 'Credentialing') setTab('providers')
-      await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
-      // Guest orgs load best-effort (tables may not exist until migrations run).
+       setProfile(p)
+       if (p?.default_role === 'Credentialing') setTab('providers')
+       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
+       fetchMessages(user.id)
+       // Guest orgs load best-effort (tables may not exist until migrations run).
       loadGuestOrgs()
       loadGuestHoursTotals()
       setLoading(false)
@@ -1311,6 +1365,95 @@ export default function AdminPage() {
     const interval = setInterval(() => setCurrentTime(getMountainNow()), 60000)
     return () => clearInterval(interval)
   }, [])
+
+  // ── Messages data fetcher ───────────────────────────────────────────
+  async function fetchMessages(userId) {
+    if (!userId) return
+    const [{ data: msgs }, { data: reads }, { data: usersData }] = await Promise.all([
+      supabase.from('messages')
+        .select(`
+          id, created_at, body, image_url,
+          recipient_type, recipient_shift, recipient_day, recipient_role,
+          recipient_volunteer_id, sender_id, parent_message_id,
+          sender:profiles!messages_sender_id_fkey(full_name, role)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(10 * 5),
+      supabase.from('message_reads').select('message_id').eq('user_id', userId),
+      supabase.from('profiles').select('id, full_name, default_role, status').order('full_name'),
+    ])
+    const fetched = msgs || []
+    const readSet = new Set((reads || []).map(r => r.message_id))
+    const topLevel = fetched.filter(m => !m.parent_message_id)
+    const repliesMap = {}
+    fetched.filter(m => m.parent_message_id).forEach(r => {
+      if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
+      repliesMap[r.parent_message_id].push(r)
+    })
+    const count = topLevel.filter(m => {
+      if (m.recipient_type === 'group' && m.sender_id !== userId && !parseGroupMemberIds(m).includes(userId)) return false
+      const isUnreadMsg = m.sender_id !== userId && !readSet.has(m.id)
+      const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== userId)
+      return isUnreadMsg || hasUnreadReplies
+    }).length
+    setUnreadCount(count)
+  }
+
+  // ── Real-time subscription: update badge immediately when new messages arrive ──
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel('messages-unread')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, () => { fetchMessages(user.id) })
+    channel.subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [user])
+  // -- Live Refresh ------------------------------------------------------------
+
+    useEffect(() => {
+        if (loading || tab !== 'dashboard') return
+
+        let refreshing = false
+
+        async function refreshLiveData() {
+            if (refreshing) return
+            refreshing = true
+
+            try {
+                await Promise.all([
+                    loadActiveShifts(),
+                    loadCallouts(),
+                    loadSchedule(),
+                ])
+
+                setLastLiveRefresh(new Date())
+            } catch (err) {
+                console.error('Live refresh failed:', err)
+            } finally {
+                refreshing = false
+            }
+        }
+
+        void refreshLiveData()
+
+        // Refresh every 5 min
+        const interval = setInterval(refreshLiveData, 5 * 60 * 1000)
+
+        function handleFocus() {
+            void refreshLiveData()
+        }
+
+        window.addEventListener('focus', handleFocus)
+
+        return () => {
+            clearInterval(interval)
+            window.removeEventListener('focus', handleFocus)
+        }
+    }, [tab, loading])
 
   // ── Audit helper ────────────────────────────────────────────────────────────
   async function audit(action, target_type, target_id, target_name, details) {
@@ -2062,6 +2205,7 @@ export default function AdminPage() {
             onCloseMenu={closeHeaderMenu}
             onSwitchView={() => { window.location.href = '/volunteer' }}
             onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
+            messagesBadge={messagesBadge}
           />
         )}
 
@@ -2084,6 +2228,28 @@ export default function AdminPage() {
         {/* Tabs — desktop tabs now live in the header's Volunteers/Providers/Other menus; mobile uses the sidebar */}
 
         {/* ── LIVE TAB ──────────────────────────────────────────────────────── */}
+
+        {tab === 'dashboard' && lastLiveRefresh && (
+            <p
+              style={{
+                  textAlign: 'right',
+                  color: 'var(--muted)',
+                  fontSize: '0.78rem',
+                  marginBottom: '0.75rem',
+                  fontFamily: 'DM Mono, monospace',
+              }}
+            >
+              Last Refreshed:{' '}
+              {lastLiveRefresh.toLocaleTimeString('en-US', {
+                  timeZone: 'America/Denver',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  second: '2-digit',
+              })}{' '}
+              {tzLabel}
+            </p>
+        )}
+
         {tab === 'dashboard' && (
           <Live
             schedule={visibleSchedule}
@@ -2450,7 +2616,7 @@ export default function AdminPage() {
                   {profile?.default_role === 'Director' && (
                     <div><label style={labelStyle}>Role</label><select value={editForm.role} onChange={e => setEditForm({...editForm, role: e.target.value})} style={inputStyle}><option value="volunteer">Volunteer</option><option value="admin">Admin</option></select></div>
                   )}
-                  {!profile?.default_role === 'Director' && (
+                  {!(profile?.default_role === 'Director') && (
                     <div>
                       <label style={labelStyle}>Role</label>
                       <p style={{ padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', fontSize: '0.95rem' }}>{editForm.role}</p>
@@ -2511,6 +2677,21 @@ export default function AdminPage() {
               />
             </div>
           </div>
+        )}
+
+        {/* ── MESSAGES TAB ──────────────────────────────────────────── */}
+        {tab === 'messages' && (
+          <MessageTab
+            user={user}
+            profile={profile}
+            supabase={supabase}
+            showToast={(text, type) => { setToast({ text, type }); setTimeout(() => setToast(null), 3500) }}
+            isMobile={isMobile}
+            getInboxMessages={getInboxMessages}
+            MAX_FILE_SIZE={MAX_FILE_SIZE}
+            schedule={schedule}
+            onUnreadCountChange={setUnreadCount}
+          />
         )}
 
         {/* ── PIPELINE ──────────────────────────────────────────────────────── */}
@@ -2917,6 +3098,7 @@ export default function AdminPage() {
           onSelectTab={switchTab}
           onSwitchView={() => window.location.href = '/volunteer'}
           onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
+          messagesBadge={messagesBadge}
         />
 
         {/* Toast */}
