@@ -174,9 +174,15 @@ function ProviderScheduleView({ supabase, providers }) {
   // Load all recurring rows once
   useEffect(() => {
     async function loadRecurring() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('provider_recurring_schedule')
         .select('provider_id, day_of_week, shift_time, week_pattern, start_date, end_date, profiles!provider_recurring_schedule_provider_id_fkey(id, full_name)')
+
+      if (error) {
+        console.error('Failed to load provider recurring schedule')
+        alert('Failed to load provider recurring schedule, staffing numbers may be inaccurate')
+      }
+
       setRecurringRows(data || [])
     }
     loadRecurring()

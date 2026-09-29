@@ -1,6 +1,8 @@
 import './globals.css'
+import Script from 'next/script'
+import { ConfirmDialogProvider } from '../lib/ConfirmDialog'
 
-const isNonProd = process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production'
+const isNonProd = process.env.NODE_ENV !== 'production' || (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production')
 const logo = isNonProd ? '/logo4.png' : '/logo3.png'
 
 export const metadata = {
@@ -29,13 +31,16 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
+        <Script src={isNonProd ? '/newrelic-staging.js' : '/newrelic-production.js'} strategy="beforeInteractive"/>
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="BFC" />
         <link rel="apple-touch-icon" href={logo} />
       </head>
       <body>
-        {children}
+        <ConfirmDialogProvider>
+          {children}
+        </ConfirmDialogProvider>
         <script
           dangerouslySetInnerHTML={{
             __html: `

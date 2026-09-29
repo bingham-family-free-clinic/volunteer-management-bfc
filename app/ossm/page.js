@@ -808,7 +808,6 @@ function dropdownItemStyle(active) {
 function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onCloseOther, onSwitchView, onSignOut }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
-      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
       <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
         {TABS.map(t => (
           <button
@@ -865,6 +864,7 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
           )}
         </div>
       </nav>
+      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
     </div>
   )
 }
@@ -872,8 +872,7 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
 function MobileTopBar({ onOpenSidebar }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-      <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
-      <button
+        <button
         onClick={onOpenSidebar}
         aria-label="Open menu"
         style={{ background: 'none', border: 'none', padding: '0.4rem', cursor: 'pointer' }}
@@ -882,6 +881,7 @@ function MobileTopBar({ onOpenSidebar }) {
           <path d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
+      <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
     </div>
   )
 }

@@ -759,11 +759,11 @@ export default function DataDashboard({ supabase }) {
     // when the guest pseudo-affiliation is selected.
     const shiftsData = isGuestOnly ? [] : await fetchAllRows(supabase, 'shifts', (q) => {
       let query = q
-        .select('volunteer_id, clock_in, clock_out, profiles!inner(affiliation)')
+        .select('volunteer_id, clock_in, clock_out, affiliation')
         .not('clock_out', 'is', null)
         .gte('clock_in', fromDate + 'T00:00:00Z')
         .lte('clock_in', toDate   + 'T23:59:59Z')
-      if (affFilter !== 'All') query = query.eq('profiles.affiliation', affFilter)
+      if (affFilter !== 'All') query = query.eq('affiliation', affFilter)
       return query
     })
 
@@ -804,13 +804,12 @@ export default function DataDashboard({ supabase }) {
     const affFilter = topAff
     const isGuestOnly = affFilter === 'guest'
     const shiftsData = isGuestOnly ? [] : await fetchAllRows(supabase, 'shifts', (q) => {
-      const joinType = affFilter !== 'All' ? 'profiles!inner' : 'profiles'
       let query = q
-        .select(`volunteer_id, clock_in, clock_out, ${joinType}(full_name, affiliation)`)
+        .select('volunteer_id, clock_in, clock_out, affiliation, profiles(full_name)')
         .not('clock_out', 'is', null)
         .gte('clock_in', fromDate + 'T00:00:00Z')
         .lte('clock_in', toDate   + 'T23:59:59Z')
-      if (affFilter !== 'All') query = query.eq('profiles.affiliation', affFilter)
+      if (affFilter !== 'All') query = query.eq('affiliation', affFilter)
       return query
     })
 
@@ -997,7 +996,7 @@ export default function DataDashboard({ supabase }) {
     const fromDate = `${weeklyChartYear}-01-01`
     const toDate   = `${weeklyChartYear}-12-31`
     const shiftsData = await fetchAllRows(supabase, 'shifts', (q) =>
-      q.select('clock_in, clock_out, profiles(affiliation)')
+      q.select('clock_in, clock_out, affiliation')
         .not('clock_out', 'is', null)
         .gte('clock_in', fromDate + 'T00:00:00Z')
         .lte('clock_in', toDate   + 'T23:59:59Z')
@@ -1014,7 +1013,7 @@ export default function DataDashboard({ supabase }) {
       const jan1 = new Date(d.getFullYear(), 0, 1)
       const weekNum = Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7)
       const key = `W${String(weekNum).padStart(2, '0')}`
-      const aff = s.profiles?.affiliation || 'volunteer'
+      const aff = s.affiliation || 'volunteer'
       const hrs = (asUTC(s.clock_out) - d) / 3600000
       const bucket = ['provider','missionary','student','intern'].includes(aff) ? aff : 'volunteer'
       ensureWeek(key)[bucket] += hrs

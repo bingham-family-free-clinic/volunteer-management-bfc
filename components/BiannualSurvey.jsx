@@ -7,7 +7,7 @@ import { DAYS, SHIFTS, ROLES } from '../lib/constants'
 // ── Survey window configuration ──────────────────────────────────────────────
 // Adjust these to change when the survey is active.
 // The survey runs during the first full Mon–Sun week of each listed month (0-indexed).
-export const SURVEY_MONTHS = [3,9]
+export const SURVEY_MONTHS = [3,10]
 
 // ── Date logic ────────────────────────────────────────────────────────────────
 export function getSurveyWindow(year, month) {

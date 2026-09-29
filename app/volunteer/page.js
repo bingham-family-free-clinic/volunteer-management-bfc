@@ -13,6 +13,7 @@ import VolunteerTasks from '../../components/VolunteerTasks'
 import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
+import { useConfirm } from '../../lib/ConfirmDialog'
 
 
 export const dynamic = 'force-dynamic'
@@ -581,7 +582,7 @@ function VolunteerPageInner() {
 
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
   const [schedule, setSchedule] = useState([])
-  const [approvedCallouts, setApprovedCallouts] = useState([])
+  const [MyCallouts, setMyCallouts] = useState([])
   const [approvedCovers, setApprovedCovers]     = useState([])
 
   // ── Callout tab state (lazy) ──────────────────────────────────────────────
@@ -593,6 +594,8 @@ function VolunteerPageInner() {
   const [calloutStartDate, setCalloutStartDate] = useState('')
   const [calloutEndDate, setCalloutEndDate]     = useState('')
   const [calloutSubmitting, setCalloutSubmitting] = useState(false)
+
+  const [calloutLoading, setCalloutLoading] = useState(false)
   const [openShifts, setOpenShifts]             = useState([])
   const [myCoverRequests, setMyCoverRequests]   = useState([])
 
@@ -680,6 +683,9 @@ function VolunteerPageInner() {
   const [trainingWeekStart]      = useState(() => currentTrainingWeekStart())
   const [trainingAvailable, setTrainingAvailable]     = useState(false)
   const [trainingAcknowledged, setTrainingAcknowledged] = useState(false)
+
+  // ── Confirmation modal hook ─────────────────────────────────────────────
+  const confirmAction = useConfirm()
 
   // Check Supabase for this week's training and whether this volunteer has
   // already acknowledged it, so the banner/badge stay correct on refresh.
@@ -958,7 +964,7 @@ function VolunteerPageInner() {
 
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
 
-    const [{ data: sched }, { data: myCallouts }, { data: myCoverReqs }] = await Promise.all([
+    const [{ data: sched }, { data: callouts }, { data: myCoverReqs }] = await Promise.all([
       supabase
         .from('schedule')
         .select('id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, volunteer_id')
@@ -966,9 +972,9 @@ function VolunteerPageInner() {
         .order('day_of_week'),
       supabase
         .from('callouts')
-        .select('id, callout_date, day_of_week, shift_time, role, reason')
+        .select('id, callout_date, day_of_week, shift_time, role, reason, status')
         .eq('volunteer_id', userId)
-        .eq('status', 'approved')
+        .neq('status', 'denied')
         .gte('callout_date', today)
         .order('callout_date', { ascending: true }),
       supabase
@@ -979,7 +985,7 @@ function VolunteerPageInner() {
     ])
     
     setSchedule(sched || [])
-    setApprovedCallouts(myCallouts || [])
+    setMyCallouts(callouts || [])
     
     const volunteerIds = [...new Set((myCoverReqs || []).map(r => r.callout?.volunteer_id).filter(Boolean))]
     let volunteerNames = {}
@@ -1005,8 +1011,13 @@ function VolunteerPageInner() {
   }, [user?.id])
 
   const fetchCalloutTab = useCallback(async () => {
-    if (!user || fetchedTabs.current.has('callout')) return
-    fetchedTabs.current.add('callout')
+    // if (!user || fetchedTabs.current.has('callout')) return
+    // fetchedTabs.current.add('callout')
+
+    setCalloutLoading(true)
+
+    setOpenShifts([])
+    setMyCoverRequests([])
 
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
     const [{ data: openSubs }, { data: myCoverReqs }] = await Promise.all([
@@ -1025,6 +1036,9 @@ function VolunteerPageInner() {
 
     setOpenShifts((openSubs || []).map(c => ({ ...c, profiles: c.volunteer })))
     setMyCoverRequests(myCoverReqs || [])
+
+    setCalloutLoading(false)
+
   }, [user])
 
   const fetchAccountTab = useCallback(async () => {
@@ -1134,12 +1148,19 @@ function VolunteerPageInner() {
       const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
       if (calloutMode === 'single') {
         const derivedDay = calloutDate ? dayNames[new Date(calloutDate + 'T12:00:00').getDay()] : null
-        const { error } = await supabase.from('callouts').insert({
+        const { data, error } = await supabase.from('callouts').insert({
           volunteer_id: user.id, callout_date: calloutDate, day_of_week: derivedDay,
           shift_time: calloutShift || null, reason: calloutReason, role: calloutRole || null,
-        })
+        }).select('id, callout_date, day_of_week, shift_time, role, reason, status').single()
+
         if (error) showToast(error.message, 'error')
-        else { showToast('Call-out submitted!', 'success'); setCalloutDate(''); setCalloutShift(''); setCalloutReason(''); setCalloutRole('') }
+        else {
+          setMyCallouts(prev =>
+            [...prev, data].sort((a, b) => new Date(a.callout_date) - new Date(b.callout_date))
+          )
+          showToast('Call-out submitted!', 'success')
+          setCalloutDate(''); setCalloutShift(''); setCalloutReason(''); setCalloutRole('')
+        }
         return
       }
       if (!calloutStartDate || !calloutEndDate) return
@@ -1161,11 +1182,38 @@ function VolunteerPageInner() {
         }
       }
       if (rows.length === 0) { showToast('No scheduled shifts found in that date range.', 'error'); return }
-      const { error } = await supabase.from('callouts').insert(rows)
+      const { data, error } = await supabase.from('callouts').insert(rows)
+        .select('id, callout_date, day_of_week, shift_time, role, reason, status')
+
       if (error) showToast(error.message, 'error')
-      else { showToast(`${rows.length} call-out${rows.length !== 1 ? 's' : ''} submitted!`, 'success'); setCalloutStartDate(''); setCalloutEndDate(''); setCalloutReason('') }
+      else {
+        setMyCallouts(prev =>
+          [...prev, ...data].sort((a, b) => new Date(a.callout_date) - new Date(b.callout_date))
+        )
+        showToast(`${rows.length} call-out${rows.length !== 1 ? 's' : ''} submitted!`, 'success')
+        setCalloutStartDate(''); setCalloutEndDate(''); setCalloutReason('')
+      }
     } finally {
       setCalloutSubmitting(false)
+    }
+  }
+
+  async function handleCancelCallout(calloutId) {
+    const ok = await confirmAction({
+      label: 'Delete Call-out?',
+      confirmText: 'yes',
+      cancelText: 'no',
+      danger: true,
+    })
+    if (!ok) return
+    const { data, error } = await supabase
+      .from('callouts')
+      .update({ status: 'denied' })
+      .eq('id', calloutId)
+    if (error) showToast(error.message, 'error')
+    else {
+      showToast('Call-out cancelled.', 'success')
+      setMyCallouts(prev => prev.filter(c => c.id !== calloutId));
     }
   }
 
@@ -1618,14 +1666,14 @@ function VolunteerPageInner() {
               )}
             </div>
 
-            {approvedCallouts.length > 0 && (
+            {MyCallouts.length > 0 && (
               <div style={S.card}>
                 <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>
-                  Approved Call-Outs
+                  Active Call-Outs
                 </h2>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {approvedCallouts.map(c => (
+                  {MyCallouts.map(c => (
                     <div
                       key={c.id}
                       style={{
@@ -1635,7 +1683,7 @@ function VolunteerPageInner() {
                         padding: '0.75rem 1rem',
                         background: 'var(--bg)',
                         borderRadius: '8px',
-                        border: '1px solid rgba(239,68,68,0.25)',
+                        border: '1px solid var(--border)',
                         gap: '0.75rem',
                         flexWrap: 'wrap',
                       }}
@@ -1652,20 +1700,7 @@ function VolunteerPageInner() {
                           {new Date(c.callout_date + 'T12:00:00').toLocaleDateString(
                             'en-US',
                             { weekday: 'short', month: 'short', day: 'numeric' }
-                          )}
-                        </span>
-
-                        <span style={{
-                          fontFamily: 'DM Mono, monospace',
-                          fontSize: '0.78rem',
-                          background: 'rgba(239,68,68,0.12)',
-                          color: '#ef4444',
-                          padding: '0.15rem 0.5rem',
-                          borderRadius: '6px',
-                          border: '1px solid rgba(239,68,68,0.25)',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {c.shift_time}
+                          )} {c.shift_time}
                         </span>
 
                         {c.role && (
@@ -1691,17 +1726,28 @@ function VolunteerPageInner() {
                       </div>
 
                       {/* RIGHT SIDE (status-style like schedule shift time) */}
-                      <span style={{
-                        fontFamily: 'DM Mono, monospace',
-                        fontSize: '0.8rem',
-                        color: '#ef4444',
-                        background: 'rgba(239,68,68,0.06)',
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: '6px',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        Call-out
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+
+                        <span style={{
+                          fontFamily: 'DM Mono, monospace',
+                          fontSize: '0.8rem',
+                          color: c.status === 'approved' ? '#02416B' : '#000000',
+                          background: c.status === 'approved' ? '#92a6b9' : '#bdbdbd',
+                          padding: '0.2rem 0.6rem',
+                          borderRadius: '6px',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {c.status === 'approved' ? 'Approved' : 'Pending'}
+                        </span>
+
+                        <button
+                          onClick={() => handleCancelCallout(c.id)}
+                          style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+                        >✕</button>
+
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1842,7 +1888,11 @@ function VolunteerPageInner() {
             <div style={S.card}>
               <h2 style={{ fontWeight: 600, marginBottom: '0.4rem' }}>Open Shifts</h2>
               <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>Shifts that need coverage — tap to volunteer.</p>
-              {openShifts.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No open shifts right now.</p> : (
+              {calloutLoading ? (
+                  <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
+                      Refreshing open shifts…
+                  </p>
+              ) : openShifts.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No open shifts right now.</p> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {openShifts.map(c => {
                     const myReq = myCoverRequests.find(r => r.callout_id === c.id)
@@ -2090,7 +2140,7 @@ function VolunteerPageInner() {
         {showNotifBanner && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: '1.5rem' }}>
             <div style={{ background: '#fff', borderRadius: '16px', padding: '1.75rem 1.5rem', maxWidth: '340px', width: '100%', textAlign: 'center', boxShadow: '0 8px 40px rgba(0,0,0,0.35)' }}>
-              <p style={{ fontSize: '1rem', fontWeight: 500, color: '#1a1a1a', lineHeight: 1.5, marginBottom: '1.5rem' }}>Enable notifications so you don't miss messages and shift reminders</p>
+              <p style={{ fontSize: '1rem', fontWeight: 500, color: '#1a1a1a', lineHeight: 1.5, marginBottom: '1.5rem' }}>Enable notifications so you don't miss messages</p>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
                 <button onClick={handleNotifBannerEnable} disabled={notifBannerLoading} style={{ flex: 1, padding: '0.75rem', background: '#02416B', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '0.9rem', cursor: notifBannerLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{notifBannerLoading ? 'Working…' : 'Yes'}</button>
                 <button onClick={handleNotifBannerDecline} disabled={notifBannerLoading} style={{ flex: 1, padding: '0.75rem', background: '#fff', color: '#02416B', border: '1px solid #02416B', borderRadius: '8px', fontWeight: 600, fontSize: '0.9rem', cursor: notifBannerLoading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>Later</button>
