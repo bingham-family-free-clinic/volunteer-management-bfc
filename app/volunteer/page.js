@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } f
 import { supabase } from '../../lib/supabase'
 import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE } from '../../lib/constants'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
-import { getInboxMessages } from '../../lib/messageUtils'
+import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import { MessageCard } from '../../components/MessageCard'
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotifications.js'
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
@@ -569,10 +569,11 @@ class DebugErrorBoundary extends Component {
 // ── Main component ────────────────────────────────────────────────────────────
 function VolunteerPageInner() {
   // ── Core auth/profile state (loaded immediately) ─────────────────────────
-  const [user, setUser]       = useState(null)
-  const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [tab, setTab]         = useState('clock')
+   const [user, setUser]       = useState(null)
+   const [profile, setProfile] = useState(null)
+   const [loading, setLoading] = useState(true)
+   const [tab, setTab]         = useState('clock')
+   const [messageId, setMessageId] = useState(null)
 
   // ── Clock tab state ───────────────────────────────────────────────────────
   const [activeShift, setActiveShift]   = useState(null)
@@ -822,6 +823,56 @@ function VolunteerPageInner() {
     initCriticalPath()
   }, [])
 
+  // ── Unread count fetcher ────────────────────────────────────────
+  async function pollUnread() {
+    if (!user) return
+    try {
+      const [{ data: msgs }, { data: reads }] = await Promise.all([
+        supabase.from('messages')
+          .select('id, sender_id, recipient_type, recipient_role, recipient_volunteer_id, parent_message_id')
+          .order('created_at', { ascending: false })
+          .limit(10 * 5),
+        supabase.from('message_reads').select('message_id').eq('user_id', user.id),
+      ])
+      const fetched = msgs || []
+      const readSet = new Set((reads || []).map(r => r.message_id))
+      const topLevel = fetched.filter(m => !m.parent_message_id)
+      const repliesMap = {}
+      fetched.filter(m => m.parent_message_id).forEach(r => {
+        if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
+        repliesMap[r.parent_message_id].push(r)
+      })
+      const count = topLevel.filter(m => {
+        if (m.recipient_type === 'group' && m.sender_id !== user.id && !parseGroupMemberIds(m).includes(user.id)) return false
+        const isUnreadMsg = m.sender_id !== user.id && !readSet.has(m.id)
+        const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
+        return isUnreadMsg || hasUnreadReplies
+      }).length
+      setUnreadCount(count)
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Poll unread count every 30s so the badge stays current ──
+  useEffect(() => {
+    pollUnread()
+    const id = setInterval(pollUnread, 30000)
+    return () => clearInterval(id)
+  }, [user])
+
+  // ── Real-time subscription: update badge immediately when new messages arrive ──
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel('messages-unread')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, () => { pollUnread() })
+    channel.subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [user])
+
   async function initCriticalPath() {
     const { data: { session } } = await supabase.auth.getSession()
     const user = session?.user
@@ -844,20 +895,30 @@ function VolunteerPageInner() {
       })
     }
 
-      const { data: open } = await supabase
-          .from('shifts')
-          .select('id, clock_in, role')
-          .eq('volunteer_id', user.id)
-          .is('clock_out', null)
-          .maybeSingle()
-      setActiveShift(open || null)
+       const { data: open } = await supabase
+           .from('shifts')
+           .select('id, clock_in, role')
+           .eq('volunteer_id', user.id)
+           .is('clock_out', null)
+           .maybeSingle()
+       setActiveShift(open || null)
 
-    setLoading(false)
+      const params = new URLSearchParams(window.location.search)
+      const msgId = params.get('messageId')
+      if (msgId) {
+        setMessageId(msgId)
+        setTab('messages')
+        params.delete('messageId')
+        const cleanUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '')
+        window.history.replaceState({}, '', cleanUrl)
+      }
+
+     setLoading(false)
 
     // Seed the unread message count badge immediately on load
     const { data: allMsgs } = await supabase
       .from('messages')
-      .select('id, sender_id, recipient_type, recipient_volunteer_id, parent_message_id')
+      .select('id, sender_id, recipient_type, recipient_role, recipient_volunteer_id, parent_message_id')
       .order('created_at', { ascending: false })
       .limit(MSG_PAGE_SIZE * 2)
     const { data: reads } = await supabase
@@ -874,10 +935,10 @@ function VolunteerPageInner() {
       repliesMap[r.parent_message_id].push(r)
     })
     const count = topLevel.filter(m => {
-      if (m.sender_id === user.id) {
-        return (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
-      }
-      return !readSet.has(m.id)
+      if (m.recipient_type === 'group' && m.sender_id !== user.id && !parseGroupMemberIds(m).includes(user.id)) return false
+      const isUnreadMsg = m.sender_id !== user.id && !readSet.has(m.id)
+      const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
+      return isUnreadMsg || hasUnreadReplies
     }).length
     setUnreadCount(count)
 
@@ -1866,9 +1927,10 @@ function VolunteerPageInner() {
             isMobile={isMobile}
             getInboxMessages={getInboxMessages}
             MAX_FILE_SIZE={MAX_FILE_SIZE}
-            SHIFTS={SHIFTS}
             schedule={schedule}
             onUnreadCountChange={setUnreadCount}
+            openMessageId={messageId}
+            sheetBottomOffset="calc(76px + env(safe-area-inset-bottom, 0px))"
           />
         )}
 
