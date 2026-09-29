@@ -593,6 +593,8 @@ function VolunteerPageInner() {
   const [calloutStartDate, setCalloutStartDate] = useState('')
   const [calloutEndDate, setCalloutEndDate]     = useState('')
   const [calloutSubmitting, setCalloutSubmitting] = useState(false)
+
+  const [calloutLoading, setCalloutLoading] = useState(false)
   const [openShifts, setOpenShifts]             = useState([])
   const [myCoverRequests, setMyCoverRequests]   = useState([])
 
@@ -948,8 +950,13 @@ function VolunteerPageInner() {
   }, [user?.id])
 
   const fetchCalloutTab = useCallback(async () => {
-    if (!user || fetchedTabs.current.has('callout')) return
-    fetchedTabs.current.add('callout')
+    // if (!user || fetchedTabs.current.has('callout')) return
+    // fetchedTabs.current.add('callout')
+
+    setCalloutLoading(true)
+
+    setOpenShifts([])
+    setMyCoverRequests([])
 
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
     const [{ data: openSubs }, { data: myCoverReqs }] = await Promise.all([
@@ -968,6 +975,9 @@ function VolunteerPageInner() {
 
     setOpenShifts((openSubs || []).map(c => ({ ...c, profiles: c.volunteer })))
     setMyCoverRequests(myCoverReqs || [])
+
+    setCalloutLoading(false)
+
   }, [user])
 
   const fetchAccountTab = useCallback(async () => {
@@ -1817,7 +1827,11 @@ function VolunteerPageInner() {
             <div style={S.card}>
               <h2 style={{ fontWeight: 600, marginBottom: '0.4rem' }}>Open Shifts</h2>
               <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>Shifts that need coverage — tap to volunteer.</p>
-              {openShifts.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No open shifts right now.</p> : (
+              {calloutLoading ? (
+                  <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
+                      Refreshing open shifts…
+                  </p>
+              ) : openShifts.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No open shifts right now.</p> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {openShifts.map(c => {
                     const myReq = myCoverRequests.find(r => r.callout_id === c.id)

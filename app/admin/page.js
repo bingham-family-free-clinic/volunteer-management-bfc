@@ -589,6 +589,8 @@ export default function AdminPage() {
   const [profile, setProfile] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
 
+  const [lastLiveRefresh, setLastLiveRefresh] = useState(null)
+
   const [volunteers, setVolunteers]     = useState([])
   const [activeShifts, setActiveShifts] = useState([])
   const [callouts, setCallouts]         = useState([])
@@ -1311,6 +1313,49 @@ export default function AdminPage() {
     const interval = setInterval(() => setCurrentTime(getMountainNow()), 60000)
     return () => clearInterval(interval)
   }, [])
+
+  // -- Live Refresh ------------------------------------------------------------
+
+    useEffect(() => {
+        if (loading || tab !== 'dashboard') return
+
+        let refreshing = false
+
+        async function refreshLiveData() {
+            if (refreshing) return
+            refreshing = true
+
+            try {
+                await Promise.all([
+                    loadActiveShifts(),
+                    loadCallouts(),
+                    loadSchedule(),
+                ])
+
+                setLastLiveRefresh(new Date())
+            } catch (err) {
+                console.error('Live refresh failed:', err)
+            } finally {
+                refreshing = false
+            }
+        }
+
+        void refreshLiveData()
+
+        // Refresh every 5 min
+        const interval = setInterval(refreshLiveData, 5 * 60 * 1000)
+
+        function handleFocus() {
+            void refreshLiveData()
+        }
+
+        window.addEventListener('focus', handleFocus)
+
+        return () => {
+            clearInterval(interval)
+            window.removeEventListener('focus', handleFocus)
+        }
+    }, [tab, loading])
 
   // ── Audit helper ────────────────────────────────────────────────────────────
   async function audit(action, target_type, target_id, target_name, details) {
@@ -2084,6 +2129,28 @@ export default function AdminPage() {
         {/* Tabs — desktop tabs now live in the header's Volunteers/Providers/Other menus; mobile uses the sidebar */}
 
         {/* ── LIVE TAB ──────────────────────────────────────────────────────── */}
+
+        {tab === 'dashboard' && lastLiveRefresh && (
+            <p
+              style={{
+                  textAlign: 'right',
+                  color: 'var(--muted)',
+                  fontSize: '0.78rem',
+                  marginBottom: '0.75rem',
+                  fontFamily: 'DM Mono, monospace',
+              }}
+            >
+              Last Refreshed:{' '}
+              {lastLiveRefresh.toLocaleTimeString('en-US', {
+                  timeZone: 'America/Denver',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  second: '2-digit',
+              })}{' '}
+              {tzLabel}
+            </p>
+        )}
+
         {tab === 'dashboard' && (
           <Live
             schedule={visibleSchedule}
@@ -2450,7 +2517,7 @@ export default function AdminPage() {
                   {profile?.default_role === 'Director' && (
                     <div><label style={labelStyle}>Role</label><select value={editForm.role} onChange={e => setEditForm({...editForm, role: e.target.value})} style={inputStyle}><option value="volunteer">Volunteer</option><option value="admin">Admin</option></select></div>
                   )}
-                  {!profile?.default_role === 'Director' && (
+                  {!(profile?.default_role === 'Director') && (
                     <div>
                       <label style={labelStyle}>Role</label>
                       <p style={{ padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--muted)', fontSize: '0.95rem' }}>{editForm.role}</p>
