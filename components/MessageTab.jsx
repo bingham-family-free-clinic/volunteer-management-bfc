@@ -9,6 +9,11 @@ import { recipientLabel, parseGroupMemberIds } from '../lib/messageUtils'
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
 
+// Typing indicator tuning (Supabase broadcast — no DB involved)
+const TYPING_THROTTLE_MS = 1500 // min gap between "typing: true" sends
+const TYPING_IDLE_MS = 3000     // no keystrokes for this long → send "typing: false"
+const TYPING_TTL_MS = 5000      // receiver drops a typer after this long without refresh
+
 // Refreshes Supabase token if expired, missing, or about to expire
 async function getFreshAccessToken(supabase) {
   let { data: { session } } = await supabase.auth.getSession()
@@ -111,6 +116,95 @@ function ReplyThread({
   const [replyFieldSizingSupported] = useState(() =>
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
   )
+
+  // ── Typing indicators (Supabase broadcast, keyed by thread root id) ───────
+  const [typers, setTypers] = useState({})          // userId -> { name, expiresAt }
+  const typingChannelRef = useRef(null)
+  const lastTypingSentRef = useRef(0)               // timestamp of last "typing: true" send
+  const typingIdleRef = useRef(null)
+
+  function sendTypingBroadcast(typing) {
+    const ch = typingChannelRef.current
+    if (!ch) return
+    try {
+      Promise.resolve(ch.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { userId: user?.id, name: profile?.full_name || 'Someone', typing },
+      })).catch(() => { /* channel not joined yet — TTL covers it */ })
+    } catch { /* ignore */ }
+  }
+
+  function sendTypingThrottled() {
+    const now = Date.now()
+    if (now - lastTypingSentRef.current < TYPING_THROTTLE_MS) return
+    lastTypingSentRef.current = now
+    sendTypingBroadcast(true)
+  }
+
+  function stopTypingNow() {
+    if (typingIdleRef.current) { clearTimeout(typingIdleRef.current); typingIdleRef.current = null }
+    if (lastTypingSentRef.current > 0) {
+      lastTypingSentRef.current = 0
+      sendTypingBroadcast(false)
+    }
+  }
+
+  function scheduleStopTyping() {
+    if (typingIdleRef.current) clearTimeout(typingIdleRef.current)
+    typingIdleRef.current = setTimeout(() => { typingIdleRef.current = null; stopTypingNow() }, TYPING_IDLE_MS)
+  }
+
+  function handleReplyInputChange(value) {
+    setReplyBody(value)
+    if (!value.trim()) { stopTypingNow(); return }
+    sendTypingThrottled()
+    scheduleStopTyping()
+  }
+
+  // Subscribe to this thread's typing broadcasts while it's expanded
+  useEffect(() => {
+    if (!expanded || !message?.id || !user?.id) return
+    const channel = supabase
+      .channel(`typing:${message.id}`)
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        const uid = payload?.userId
+        if (!uid || uid === user.id) return
+        setTypers(prev => {
+          if (payload.typing) {
+            return { ...prev, [uid]: { name: payload.name || 'Someone', expiresAt: Date.now() + TYPING_TTL_MS } }
+          }
+          if (!(uid in prev)) return prev
+          const next = { ...prev }
+          delete next[uid]
+          return next
+        })
+      })
+      .subscribe()
+    typingChannelRef.current = channel
+
+    // Expire stale typers (closed tab, dropped "typing: false" event)
+    const prune = setInterval(() => {
+      setTypers(prev => {
+        const now = Date.now()
+        const kept = Object.entries(prev).filter(([, t]) => t.expiresAt > now)
+        if (kept.length === Object.keys(prev).length) return prev
+        return Object.fromEntries(kept)
+      })
+    }, 1000)
+
+    return () => {
+      clearInterval(prune)
+      stopTypingNow()
+      typingChannelRef.current = null
+      supabase.removeChannel(channel)
+    }
+  }, [expanded, message?.id, user?.id, supabase])
+
+  // Stop announcing as soon as the composer closes (send, cancel, Escape)
+  useEffect(() => {
+    if (!replyOpen) stopTypingNow()
+  }, [replyOpen])
 
   // Clear browser notifications for a specific message ID
   async function clearNotificationForMessage(messageId) {
@@ -361,6 +455,7 @@ function ReplyThread({
   }
 
   const hasReplies = replies.length > 0
+  const typingNames = Object.values(typers).map(t => t.name)
 
   // Display name for the reply composer: in 1-on-1 threads always the
   // other person, for follow-ups the recipient of your own reply,
@@ -509,7 +604,7 @@ function ReplyThread({
       {/* ── Original message (click to collapse) ── */}
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
-          onClick={() => { setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
+          onClick={() => { stopTypingNow(); setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
       >
         <MessageCard
           m={message}
@@ -577,6 +672,37 @@ function ReplyThread({
         </div>
       )}
 
+      {/* ── Typing indicator ── */}
+      {typingNames.length > 0 && (
+        <div style={{
+          marginTop: hasReplies ? '0.35rem' : '0.5rem',
+          marginLeft: hasReplies ? '1rem' : '0',
+          paddingLeft: hasReplies ? '0.875rem' : '0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.4rem',
+          fontSize: '0.75rem',
+          color: 'var(--muted)',
+          fontStyle: 'italic',
+        }}>
+          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '2px' }}>
+            <span className="typing-dot" style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--muted)', display: 'inline-block' }} />
+            <span className="typing-dot" style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--muted)', display: 'inline-block' }} />
+            <span className="typing-dot" style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--muted)', display: 'inline-block' }} />
+          </span>
+          <span>{typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing…</span>
+          <style>{`
+            .typing-dot { animation: typing-bounce 1.2s infinite ease-in-out; }
+            .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+            .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+            @keyframes typing-bounce {
+              0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+              30% { opacity: 1; transform: translateY(-3px); }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* ── Reply composer ── */}
       {canReply && replyOpen && (
         <div style={{
@@ -598,7 +724,7 @@ function ReplyThread({
               ref={replyRef}
               autoFocus
               value={replyBody}
-              onChange={e => setReplyBody(e.target.value)}
+              onChange={e => handleReplyInputChange(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
                 if (e.key === 'Escape') { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }
@@ -805,6 +931,28 @@ export function MessageTab({
     await loadBroadcastReadCounts(fetched)
 
   }, [user, supabase])
+
+  // ── Realtime: new messages + new read receipts ─────────────────────────────
+  // Debounced so bursts (e.g. a reply-all fan-out) collapse into one refetch,
+  // which already re-resolves the sender join and broadcast read counts.
+  // The 30s poll above stays as a fallback for dropped events/reconnects.
+  useEffect(() => {
+    if (!user) return
+    let timer = null
+    const scheduleRefetch = () => {
+      if (timer) return
+      timer = setTimeout(() => { timer = null; fetchMessages() }, 500)
+    }
+    const channel = supabase
+      .channel(`messages-live:${user.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, scheduleRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reads' }, scheduleRefetch)
+      .subscribe()
+    return () => {
+      if (timer) clearTimeout(timer)
+      supabase.removeChannel(channel)
+    }
+  }, [user, supabase, fetchMessages])
 
   const markThreadRead = useCallback(async (messageId, replyIds = []) => {
     const allIds = [messageId, ...replyIds]
