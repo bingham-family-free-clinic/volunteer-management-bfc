@@ -503,7 +503,7 @@ export function MessageTab({
     if (lightboxUrl) {
       viewport.setAttribute('content', 'width=device-width, initial-scale=1')
     } else {
-      viewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no')
+      viewport.setAttribute('content', 'width=device-width, initial-scale=1')
     }
   }, [lightboxUrl])
 
