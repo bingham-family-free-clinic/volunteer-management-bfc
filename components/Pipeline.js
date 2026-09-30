@@ -207,7 +207,7 @@ const PREP_SKILL_LABELS = {
 // 'language' (max only). Categories are listed in the same order as the spec.
 const PREP_ROLES = [
   {
-    key: 'clinical', role: 'Clinical Staff', short: 'Clinical', aliases: ['clinical staff'],
+    key: 'intake', role: 'Intake', short: 'Intake', aliases: ['intake'],
     categories: [
       { kind: 'certs', label: 'Certifications', cap: 31, pts: { RN: 31, LPN: 25, MA: 21, AEMT: 19, EMT: 15, CNA: 12, ACLS: 9, BLS: 6, CPR: 4, Other: 3 } },
       { kind: 'skills', label: 'Skills', cap: 22, pts: { vitalSigns: 9, patientIntake: 5, emr: 4, medTerminology: 4 } },
@@ -268,7 +268,7 @@ const PREP_ROLES = [
 // ─── Staffing-need scoring (Applied stage) ────────────────────────────────
 // A quick "High / Moderate / Low Staffing Need" read on each applicant,
 // based on the same six clinic roles PREP_ROLES already knows how to match
-// against roles_interested (Clinical Staff, Scribe, Lab, Patient Nav.,
+// against roles_interested (Intake, Scribe, Lab, Patient Nav.,
 // Receptionist, Support Center):
 //   • High     — an open clinic slot exists for a role/day/shift combo the
 //                applicant is interested in
