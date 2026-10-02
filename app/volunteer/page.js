@@ -641,34 +641,6 @@ function VolunteerPageInner() {
   const [credForm, setCredForm]                 = useState({})
   const [savingCreds, setSavingCreds]           = useState(false)
 
-  // ── Intern report tab state (lazy) ────────────────────────────────────────
-  const [internHours, setInternHours]         = useState('')
-  const [internRole, setInternRole]           = useState('')
-  const [internProgress, setInternProgress]   = useState('')
-
-  // Auto size textboxes if browser supports it
-  const internProgressRef = useRef(null)
-  const [internProgressFieldSizingSupported] = useState(() =>
-    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
-  )
-
-  useEffect(() => {
-    if (tab !== 'internreport') return
-    const el = internProgressRef.current
-    if (!el) return
-
-    if (internProgressFieldSizingSupported) return
-    const computed = window.getComputedStyle(el)
-    const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20
-    const paddingTop = parseFloat(computed.paddingTop) || 0
-    const paddingBottom = parseFloat(computed.paddingBottom) || 0
-    const minHeight = lineHeight * 5 + paddingTop + paddingBottom
-    el.style.height = 'auto'
-    const contentHeight = el.scrollHeight
-    el.style.height = Math.max(contentHeight, minHeight) + 'px'
-  }, [tab, internProgressFieldSizingSupported])
-
-
   // ── UI state ──────────────────────────────────────────────────────────────
   const [toast, setToast]         = useState(null)
   const [lightboxUrl, setLightboxUrl] = useState(null)
@@ -1081,9 +1053,6 @@ function VolunteerPageInner() {
     if (newTab === 'schedule')    await fetchScheduleTab()
     if (newTab === 'callout')     await fetchCalloutTab()
     if (newTab === 'account')     await fetchAccountTab()
-    if (newTab === 'internreport') {
-      // Intern report only needs schedule (already fetched in critical path)
-    }
   }
 
   // ── Clock helpers ─────────────────────────────────────────────────────────
@@ -1251,45 +1220,6 @@ function VolunteerPageInner() {
     setRequestingCoverId(null)
   }
 
-  async function handleInternReport(e) {
-    e.preventDefault()
-    if (!internHours || !internRole || !internProgress.trim()) return
-    setSubmittingInternReport(true)
-    try {
-      const hours   = parseFloat(internHours)
-      const clockOut = new Date()
-      const clockIn  = new Date(clockOut.getTime() - hours * 3600000)
-      const { error: shiftError } = await supabase.from('shifts').insert({
-        volunteer_id: user.id, clock_in: clockIn.toISOString(), clock_out: clockOut.toISOString(), role: internRole, affiliation: profile?.affiliation || null,
-      })
-      if (shiftError) throw shiftError
-
-      const { data: directors } = await supabase.from('profiles').select('id').eq('default_role', 'Director')
-      const { data: { session } } = await supabase.auth.getSession()
-      const sendPromises = (directors || []).map(director =>
-        fetch('/api/send-message', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-          body: JSON.stringify({
-            recipient_type: 'volunteer',
-            recipient_volunteer_id: director.id,
-            body: `📋 Weekly Intern Report from ${profile?.full_name}\n\nHours logged: ${hours}h as ${internRole}\n\nWeekly Progress:\n${internProgress.trim()}`,
-            image_url: null,
-          }),
-        })
-      )
-      await Promise.all(sendPromises)
-      showToast('Weekly report submitted!', 'success')
-      setInternHours(''); setInternRole(''); setInternProgress('')
-      // Invalidate account tab
-      fetchedTabs.current.delete('account')
-    } catch (err) {
-      showToast(err.message || 'Failed to submit report', 'error')
-    } finally {
-      setSubmittingInternReport(false)
-    }
-  }
-
   async function handleSaveCreds(e) {
     e.preventDefault()
     setSavingCreds(true)
@@ -1365,7 +1295,6 @@ function VolunteerPageInner() {
     ['schedule', 'Schedule'],
     ['callout', 'Call-Out'],
     ['messages', 'Messages'],
-    ...(isIntern ? [['internreport', 'Report Hours']] : []),
     ...(profile?.team ? [['tasks', 'Tasks']] : []),
     ['account', 'Account'],
     ...(trainingAvailable ? [['training', 'Training']] : []),
@@ -1932,34 +1861,6 @@ function VolunteerPageInner() {
             openMessageId={messageId}
             sheetBottomOffset="calc(76px + env(safe-area-inset-bottom, 0px))"
           />
-        )}
-
-        {/* ── INTERN REPORT TAB ───────────────────────────────────────────── */}
-        {tab === 'internreport' && isIntern && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ ...S.card, borderColor: 'var(--accent)', background: 'rgba(2,65,107,0.04)' }}>
-              <h2 style={{ fontWeight: 600, marginBottom: '0.4rem' }}>Weekly Hours Report</h2>
-              <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>Log your hours for the week and send a progress update to your internship coordinator.</p>
-              <form onSubmit={handleInternReport} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div>
-                  <label style={S.label}>Role</label>
-                  <select value={internRole} onChange={e => setInternRole(e.target.value)} required style={S.input}>
-                    <option value="">— Select role —</option>
-                    {[...ROLES, "Intern"].map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </div>
-                <div><label style={S.label}>Hours Worked This Week</label><input type="number" min="0.5" max="60" step="0.5" value={internHours} onChange={e => setInternHours(e.target.value)} required placeholder="e.g. 20" style={S.input} /></div>
-                <div>
-                  <label style={S.label}>Weekly Progress <span style={{ textTransform: 'none', color: '#ef4444' }}>*</span></label>
-                  <textarea ref={internProgressRef} value={internProgress} onChange={e => setInternProgress(e.target.value)} rows={5} required placeholder="Describe what you worked on this week, any challenges, and goals for next week..." style={{ ...S.input, resize: internProgressFieldSizingSupported ? 'none' : 'vertical', overflowY: 'auto', overflowX: 'hidden', fieldSizing: 'content', minBlockSize: '5lh' }} />
-                  <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.35rem' }}>This will be sent directly to your internship coordinator.</p>
-                </div>
-                <button type="submit" disabled={submittingInternReport || !internHours || !internRole || !internProgress.trim()} style={{ padding: '0.85rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: submittingInternReport ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: (!internHours || !internRole || !internProgress.trim()) ? 0.5 : 1 }}>
-                  {submittingInternReport ? 'Submitting…' : 'Submit Weekly Report'}
-                </button>
-              </form>
-            </div>
-          </div>
         )}
 
         {tab === 'tasks' && (
