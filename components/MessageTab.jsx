@@ -9,10 +9,10 @@ import { recipientLabel, parseGroupMemberIds } from '../lib/messageUtils'
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
 
-// Typing indicator tuning (Supabase broadcast — no DB involved)
+// Typing indicator tuning
 const TYPING_THROTTLE_MS = 1500 // min gap between "typing: true" sends
-const TYPING_IDLE_MS = 3000     // no keystrokes for this long → send "typing: false"
-const TYPING_TTL_MS = 5000      // receiver drops a typer after this long without refresh
+const TYPING_IDLE_MS = 7000     // no keystrokes for this long → send "typing: false"
+const TYPING_TTL_MS = 9000      // receiver drops a typer after this long without refresh
 
 // Refreshes Supabase token if expired, missing, or about to expire
 async function getFreshAccessToken(supabase) {
@@ -287,6 +287,52 @@ function ReplyThread({
     onMarkRead(message.id, replies.map(r => r.id))
     clearNotificationForMessage(message.id)
   }, [startExpanded])
+
+  // Realtime arrivals: a reply that lands while this thread is already
+  // expanded gets the same treatment as expandThread — highlight it (the
+  // highlight keeps the blue styling after read state clears) and mark the
+  // thread read immediately, so the user doesn't have to collapse/re-expand
+  // to clear the unread state.
+  const knownReplyIdsRef = useRef(null)   // reply ids seen on a previous run
+  const latestReplyAtRef = useRef(null)   // newest reply created_at seen so far
+  useEffect(() => {
+    if (knownReplyIdsRef.current === null) {
+      // First run: everything already attached is history, not a new arrival.
+      knownReplyIdsRef.current = new Set(replies.map(r => r.id))
+      latestReplyAtRef.current = replies.reduce(
+        (max, r) => (!max || Date.parse(r.created_at) > Date.parse(max) ? r.created_at : max),
+        null
+      )
+      return
+    }
+    const fresh = replies.filter(r => !knownReplyIdsRef.current.has(r.id))
+    if (fresh.length === 0) return
+    fresh.forEach(r => knownReplyIdsRef.current.add(r.id))
+
+    // Older rows trickling in from "Load older messages" are not arrivals.
+    const baseline = Date.parse(latestReplyAtRef.current ?? message.created_at)
+    const incoming = fresh.filter(r =>
+      Date.parse(r.created_at) > baseline &&
+      r.sender_id !== user?.id &&
+      !readMessageIds.has(r.id)
+    )
+    incoming.forEach(r => {
+      if (!latestReplyAtRef.current || Date.parse(r.created_at) > Date.parse(latestReplyAtRef.current)) {
+        latestReplyAtRef.current = r.created_at
+      }
+    })
+    // Collapsed threads keep their normal unread flow (blue dot, and
+    // expandThread highlights + marks read when opened).
+    if (incoming.length === 0 || !expanded) return
+
+    setLocallyHighlightedReplies(prev => {
+      const next = new Set(prev)
+      incoming.forEach(r => next.add(r.id))
+      return next
+    })
+    onMarkRead(message.id, replies.map(r => r.id))
+    clearNotificationForMessage(message.id)
+  }, [replies, expanded, readMessageIds, message.id, message.created_at, user, onMarkRead])
 
   const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
   const isHighlighted = locallyHighlightedReplies.has(message.id)
