@@ -812,6 +812,8 @@ export function MessageTab({
   const [inboxFilter, setInboxFilter] = useState('all')
   const [filterOpen, setFilterOpen] = useState(false)
   const filterRef = useRef(null)
+  const [inboxSearch, setInboxSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
   const [markingAllRead, setMarkingAllRead] = useState(false)
 
   // Compose state
@@ -1390,6 +1392,39 @@ export function MessageTab({
   ]
   const activeFilterLabel = (inboxFilterOptions.find(([key]) => key === inboxFilter) ?? inboxFilterOptions[0])[1]
 
+  // Inbox text search — matches sender name, recipient, or message body across
+  // the whole thread (top-level + replies). Plain substring, re-run on every
+  // keystroke, applied after the category filter.
+  const inboxSearchQuery = inboxSearch.trim().toLowerCase()
+  function threadMatchesSearch(topMsg, replies, q) {
+    const msgs = [topMsg, ...(replies || [])]
+    return msgs.some(m => {
+      const senderName = (
+        m.sender?.full_name || allUsers.find(u => u.id === m.sender_id)?.full_name || ''
+      ).toLowerCase()
+      let recip
+      if (m.recipient_type === 'volunteer') {
+        recip = m.recipient_volunteer_id === user?.id
+          ? 'you'
+          : (allUsers.find(u => u.id === m.recipient_volunteer_id)?.full_name || 'individual')
+      } else if (m.recipient_type === 'group') {
+        const names = parseGroupMemberIds(m)
+          .map(id => allUsers.find(u => u.id === id)?.full_name)
+          .filter(Boolean)
+        recip = names.length ? `group ${names.join(' ')}` : 'group'
+      } else {
+        recip = recipientLabel(m) // Everyone, Admin, role, shift, missionaries…
+      }
+      const body = (m.body || '').toLowerCase()
+      return senderName.includes(q) || recip.toLowerCase().includes(q) || body.includes(q)
+    })
+  }
+  const searchedInboxThreads = inboxSearchQuery
+    ? filteredInboxThreads.filter(m =>
+        threadMatchesSearch(m, inboxRepliesMap[m.id], inboxSearchQuery)
+      )
+    : filteredInboxThreads
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1444,99 +1479,175 @@ export function MessageTab({
             </button>
           </div>
 
-          {/* Filter dropdown — rounded rectangle matching the Inbox/Sent/Compose tabs */}
-          <div
-            ref={filterRef}
-            style={{ position: 'relative', width: 'fit-content', marginBottom: '1.25rem' }}
-          >
-            <button
-              type="button"
-              onClick={() => setFilterOpen(o => !o)}
-              aria-haspopup="listbox"
-              aria-expanded={filterOpen}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.6rem',
-                padding: '0.45rem 1rem',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: 'DM Sans, sans-serif',
-                background: '#0369a1' + '18',
-                color: '#0369a1',
-                border: '1px solid #0369a144',
-                transition: 'all 0.15s',
-              }}
+          {/* Filter dropdown + message search */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+            <div
+              ref={filterRef}
+              style={{ position: 'relative', width: 'fit-content' }}
             >
-              {activeFilterLabel}
-              <span style={{
-                fontSize: '0.7rem',
-                lineHeight: 1,
-                transform: filterOpen ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.15s',
-              }}>˅</span>
-            </button>
-
-            {filterOpen && (
-              <div
-                role="listbox"
+              <button
+                type="button"
+                onClick={() => setFilterOpen(o => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={filterOpen}
                 style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 0.35rem)',
-                  left: 0,
-                  minWidth: '100%',
-                  zIndex: 30,
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.6rem',
+                  padding: '0.45rem 1rem',
                   borderRadius: '8px',
-                  boxShadow: '0 8px 24px rgba(2,65,107,0.12)',
-                  padding: '0.25rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.15rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                  background: '#fff',
+                  color: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  transition: 'all 0.15s',
                 }}
               >
-                {inboxFilterOptions.map(([key, label]) => {
-                  const isActive = inboxFilter === key
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      role="option"
-                      aria-selected={isActive}
-                      onClick={() => { setInboxFilter(key); setFilterOpen(false) }}
-                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
-                      onMouseLeave={e => { e.currentTarget.style.background = isActive ? '#0369a1' + '18' : 'transparent' }}
-                      style={{
-                        padding: '0.45rem 0.9rem',
-                        borderRadius: '6px',
-                        fontSize: '0.85rem',
-                        fontWeight: isActive ? 700 : 500,
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        fontFamily: 'DM Sans, sans-serif',
-                        background: isActive ? '#0369a1' + '18' : 'transparent',
-                        color: isActive ? '#0369a1' : 'var(--muted)',
-                        border: 'none',
-                        transition: 'background 0.15s',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  )
-                })}
+                {activeFilterLabel}
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  transform: filterOpen ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.15s',
+                }}>
+                  {/* Solid down caret with slightly rounded corners */}
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor"
+                       strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+                    <polygon points="3.5,5.5 12.5,5.5 8,11.5" />
+                  </svg>
+                </span>
+              </button>
+
+              {filterOpen && (
+                <div
+                  role="listbox"
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 0.35rem)',
+                    left: 0,
+                    minWidth: '100%',
+                    zIndex: 30,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    boxShadow: '0 8px 24px rgba(2,65,107,0.12)',
+                    padding: '0.25rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.15rem',
+                  }}
+                >
+                  {inboxFilterOptions.map(([key, label]) => {
+                    const isActive = inboxFilter === key
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        onClick={() => { setInboxFilter(key); setFilterOpen(false) }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = isActive ? '#0369a1' + '18' : 'transparent' }}
+                        style={{
+                          padding: '0.45rem 0.9rem',
+                          borderRadius: '6px',
+                          fontSize: '0.85rem',
+                          fontWeight: isActive ? 700 : 500,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontFamily: 'DM Sans, sans-serif',
+                          background: isActive ? '#0369a1' + '18' : 'transparent',
+                          color: isActive ? '#0369a1' : 'var(--muted)',
+                          border: 'none',
+                          transition: 'background 0.15s',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Message search — collapsed circle button, expands into a gray pill bar */}
+            {!searchOpen ? (
+              <button
+                type="button"
+                title="Search messages"
+                aria-label="Search messages"
+                onClick={() => setSearchOpen(true)}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '50%',
+                  border: 'none',
+                  background: 'transparent',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 0,
+                  cursor: 'pointer',
+                  color: 'var(--muted)',
+                  transition: 'background 0.15s',
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M21 21l-4.35-4.35" />
+                </svg>
+              </button>
+            ) : (
+              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <span style={{
+                  position: 'absolute',
+                  left: '0.85rem',
+                  display: 'inline-flex',
+                  color: 'var(--muted)',
+                  pointerEvents: 'none',
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M21 21l-4.35-4.35" />
+                  </svg>
+                </span>
+                <input
+                  autoFocus
+                  type="text"
+                  value={inboxSearch}
+                  onChange={e => setInboxSearch(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') { setInboxSearch(''); setSearchOpen(false) } }}
+                  onBlur={() => { if (!inboxSearch.trim()) setSearchOpen(false) }}
+                  placeholder="Search..."
+                  style={{
+                    width: '16rem',
+                    maxWidth: '100%',
+                    padding: '0.5rem 1rem 0.5rem 2.25rem',
+                    background: 'var(--bg)',
+                    border: '1px solid transparent',
+                    borderRadius: '100px',
+                    color: 'var(--text)',
+                    fontSize: '0.85rem',
+                    fontFamily: 'DM Sans, sans-serif',
+                    outline: 'none',
+                  }}
+                />
               </div>
             )}
           </div>
 
-
-          {filteredInboxThreads.length === 0 ? (
+          {searchedInboxThreads.length === 0 ? (
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No messages</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {filteredInboxThreads.map(m => (
+              {searchedInboxThreads.map(m => (
                 <ReplyThread
                   key={m.id}
                   message={m}
