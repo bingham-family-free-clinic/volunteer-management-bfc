@@ -814,6 +814,7 @@ export function MessageTab({
   const filterRef = useRef(null)
   const [inboxSearch, setInboxSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const searchInputRef = useRef(null)
   const [markingAllRead, setMarkingAllRead] = useState(false)
 
   // Compose state
@@ -1425,6 +1426,27 @@ export function MessageTab({
       )
     : filteredInboxThreads
 
+  // Auto-deepen search: freeze how many threads the unsearched inbox shows at
+  // the moment a query starts, then keep pulling older pages until the search
+  // has that many results (or messages run out). Without this, search would
+  // only ever see the ~50 messages loaded so far.
+  const searchTargetRef = useRef(null)
+  useEffect(() => {
+    if (inboxSearchQuery) {
+      if (searchTargetRef.current === null) searchTargetRef.current = filteredInboxThreads.length
+    } else {
+      searchTargetRef.current = null
+    }
+  }, [inboxSearchQuery])
+
+  useEffect(() => {
+    if (!inboxSearchQuery || searchTargetRef.current === null) return
+    if (searchedInboxThreads.length >= searchTargetRef.current) return
+    if (!hasMoreMsgs || loadingMoreMsgs) return
+    const t = setTimeout(() => { loadMoreMessages() }, 150)
+    return () => clearTimeout(t)
+  }, [inboxSearchQuery, searchedInboxThreads.length, hasMoreMsgs, loadingMoreMsgs, msgCursor])
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1597,7 +1619,7 @@ export function MessageTab({
                   transition: 'background 0.15s',
                 }}
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <circle cx="11" cy="11" r="7" />
                   <path d="M21 21l-4.35-4.35" />
@@ -1611,25 +1633,27 @@ export function MessageTab({
                   display: 'inline-flex',
                   color: 'var(--muted)',
                   pointerEvents: 'none',
+                  zIndex: 1,
                 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                        strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <circle cx="11" cy="11" r="7" />
                     <path d="M21 21l-4.35-4.35" />
                   </svg>
                 </span>
                 <input
+                  ref={searchInputRef}
                   autoFocus
                   type="text"
                   value={inboxSearch}
                   onChange={e => setInboxSearch(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Escape') { setInboxSearch(''); setSearchOpen(false) } }}
+                  onKeyDown={e => { if (e.key === 'Escape') setInboxSearch('') }}
                   onBlur={() => { if (!inboxSearch.trim()) setSearchOpen(false) }}
                   placeholder="Search..."
                   style={{
                     width: '16rem',
                     maxWidth: '100%',
-                    padding: '0.5rem 1rem 0.5rem 2.25rem',
+                    padding: '0.5rem 2.4rem 0.5rem 2.35rem',
                     background: 'var(--bg)',
                     border: '1px solid transparent',
                     borderRadius: '100px',
@@ -1637,8 +1661,45 @@ export function MessageTab({
                     fontSize: '0.85rem',
                     fontFamily: 'DM Sans, sans-serif',
                     outline: 'none',
+                    animation: 'inbox-search-expand 0.25s ease',
                   }}
                 />
+                {/* Close button — empties the query and collapses the bar */}
+                {inboxSearch.length > 0 && (
+                  <button
+                    type="button"
+                    title="Close search"
+                    aria-label="Close search"
+                    onMouseDown={e => e.preventDefault()} // avoid the blur-close race
+                    onClick={() => { setInboxSearch(''); setSearchOpen(false) }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(17,17,17,0.08)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                    style={{
+                      position: 'absolute',
+                      right: '0.55rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      width: '18px',
+                      height: '18px',
+                      borderRadius: '50%',
+                      border: 'none',
+                      background: 'transparent',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: 0,
+                      cursor: 'pointer',
+                      color: 'var(--muted)',
+                      transition: 'background 0.15s',
+                      zIndex: 1,
+                    }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
               </div>
             )}
           </div>

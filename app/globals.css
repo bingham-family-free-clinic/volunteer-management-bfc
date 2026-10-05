@@ -28,3 +28,9 @@ body {
 }
 
 .mono { font-family: 'DM Mono', monospace; }
+
+/* Inbox search bar: grows from the 34px circle trigger into a pill */
+@keyframes inbox-search-expand {
+  from { width: 34px; }
+  to   { width: 16rem; }
+}
