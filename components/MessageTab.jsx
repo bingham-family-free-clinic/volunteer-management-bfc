@@ -1626,7 +1626,7 @@ export function MessageTab({
                 </svg>
               </button>
             ) : (
-              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <div className="inbox-search-wrap" style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <span style={{
                   position: 'absolute',
                   left: '0.85rem',
@@ -1643,6 +1643,7 @@ export function MessageTab({
                 </span>
                 <input
                   ref={searchInputRef}
+                  className="inbox-search-input"
                   autoFocus
                   type="text"
                   value={inboxSearch}
@@ -1653,7 +1654,7 @@ export function MessageTab({
                   style={{
                     width: '16rem',
                     maxWidth: '100%',
-                    padding: '0.5rem 2.4rem 0.5rem 2.35rem',
+                    padding: '0.5rem 2.9rem 0.5rem 2.35rem',
                     background: 'var(--bg)',
                     border: '1px solid transparent',
                     borderRadius: '100px',
@@ -1661,7 +1662,6 @@ export function MessageTab({
                     fontSize: '0.85rem',
                     fontFamily: 'DM Sans, sans-serif',
                     outline: 'none',
-                    animation: 'inbox-search-expand 0.25s ease',
                   }}
                 />
                 {/* Close button — empties the query and collapses the bar */}
@@ -1676,11 +1676,11 @@ export function MessageTab({
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                     style={{
                       position: 'absolute',
-                      right: '0.55rem',
+                      right: '0.5rem',
                       top: '50%',
                       transform: 'translateY(-50%)',
-                      width: '18px',
-                      height: '18px',
+                      width: '28px',
+                      height: '28px',
                       borderRadius: '50%',
                       border: 'none',
                       background: 'transparent',
@@ -1694,8 +1694,8 @@ export function MessageTab({
                       zIndex: 1,
                     }}
                   >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M18 6L6 18M6 6l12 12" />
                     </svg>
                   </button>
