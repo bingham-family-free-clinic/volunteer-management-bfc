@@ -594,53 +594,6 @@ function ReplyThread({
             </div>
           )}
         </div>
-
-        {/* Inline reply button — only for replyable threads.
-            Group senders have no regular reply on their own message, so their
-            collapsed entry opens Reply All instead of a self-reply. */}
-        {canReply && (
-          <button
-            onClick={e => {
-              e.stopPropagation()
-              replyScrollPosRef.current = window.scrollY
-              setLocallyHighlightedReplies(new Set())
-              setExpanded(true)
-              onMarkRead(message.id, replies.map(r => r.id))
-              clearNotificationForMessage(message.id)
-              setReplyToId(null)
-              setIsReplyAll(isGroupMessageSender)
-              setFollowUpId(null)
-              setReplyOpen(true)
-            }}
-            title={isGroupMessageSender ? "Reply All" : "Reply"}
-            style={{
-              flexShrink: 0,
-              alignSelf: 'center',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem',
-              padding: '0.2rem 0.55rem',
-              background: 'none',
-              border: '1px solid var(--border)',
-              borderRadius: '100px',
-              color: 'var(--muted)',
-              fontSize: '0.7rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: 'DM Sans, sans-serif',
-              transition: 'border-color 0.15s, color 0.15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-          >
-            <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 14 4 9 9 4" />
-              <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-            </svg>
-            {isGroupMessageSender ? "Reply All" : "Reply"}
-          </button>
-        )}
-
       </div>
     )
   }
@@ -857,6 +810,8 @@ export function MessageTab({
   const [allUsers, setAllUsers]               = useState(allUsersProp)
   const [lightboxUrl, setLightboxUrl]         = useState(null)
   const [inboxFilter, setInboxFilter] = useState('all')
+  const [filterOpen, setFilterOpen] = useState(false)
+  const filterRef = useRef(null)
   const [markingAllRead, setMarkingAllRead] = useState(false)
 
   // Compose state
@@ -911,6 +866,7 @@ export function MessageTab({
     if (user) fetchMessages()
     function handleMouseDown(e) {
       if (comboRef.current && !comboRef.current.contains(e.target)) setComboOpen(false)
+      if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false)
     }
     document.addEventListener('mousedown', handleMouseDown)
     return () => document.removeEventListener('mousedown', handleMouseDown)
@@ -1424,6 +1380,16 @@ export function MessageTab({
     }
   }
 
+  // ── Inbox filter dropdown ──────────────────────────────────────────────────
+  const inboxFilterOptions = [
+    ['all', 'All'],
+    ['direct', 'Directly to me'],
+    ...(isAdmin ? [['hr', 'HR']] : []),
+    ['role', 'My Role'],
+    ['everyone', 'Everyone'],
+  ]
+  const activeFilterLabel = (inboxFilterOptions.find(([key]) => key === inboxFilter) ?? inboxFilterOptions[0])[1]
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1478,43 +1444,91 @@ export function MessageTab({
             </button>
           </div>
 
+          {/* Filter dropdown — rounded rectangle matching the Inbox/Sent/Compose tabs */}
           <div
-              style={{
-                display: 'flex',
-                gap: '0.5rem',
-                flexWrap: 'wrap',
-                marginBottom: '1.25rem',
-              }}
+            ref={filterRef}
+            style={{ position: 'relative', width: 'fit-content', marginBottom: '1.25rem' }}
           >
-            {[
-              ['all', 'All'],
-              ['direct', 'Directly to me'],
-              ...(isAdmin ? [['hr', 'HR']] : []),
-              ['role', 'My Role'],
-              ['everyone', 'Everyone'],
-            ].map(([key, label]) => (
-                <button
-                    key={key}
-                    type="button"
-                    onClick={() => setInboxFilter(key)}
-                    style={{
-                      padding: '0.35rem 0.75rem',
-                      borderRadius: '100px',
-                      fontSize: '0.78rem',
-                      fontWeight: inboxFilter === key ? 700 : 500,
-                      cursor: 'pointer',
-                      fontFamily: 'DM Sans, sans-serif',
-                      background: inboxFilter === key ? '#0369a1' + '18' : 'transparent',
-                      color: inboxFilter === key ? '#0369a1' : 'var(--muted)',
-                      border: inboxFilter === key
-                          ? '1px solid #0369a144'
-                          : '1px solid var(--border)',
-                      transition: 'all 0.15s',
-                    }}
-                >
-                  {label}
-                </button>
-            ))}
+            <button
+              type="button"
+              onClick={() => setFilterOpen(o => !o)}
+              aria-haspopup="listbox"
+              aria-expanded={filterOpen}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                padding: '0.45rem 1rem',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'DM Sans, sans-serif',
+                background: '#0369a1' + '18',
+                color: '#0369a1',
+                border: '1px solid #0369a144',
+                transition: 'all 0.15s',
+              }}
+            >
+              {activeFilterLabel}
+              <span style={{
+                fontSize: '0.7rem',
+                lineHeight: 1,
+                transform: filterOpen ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.15s',
+              }}>˅</span>
+            </button>
+
+            {filterOpen && (
+              <div
+                role="listbox"
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 0.35rem)',
+                  left: 0,
+                  minWidth: '100%',
+                  zIndex: 30,
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  boxShadow: '0 8px 24px rgba(2,65,107,0.12)',
+                  padding: '0.25rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.15rem',
+                }}
+              >
+                {inboxFilterOptions.map(([key, label]) => {
+                  const isActive = inboxFilter === key
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      onClick={() => { setInboxFilter(key); setFilterOpen(false) }}
+                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = isActive ? '#0369a1' + '18' : 'transparent' }}
+                      style={{
+                        padding: '0.45rem 0.9rem',
+                        borderRadius: '6px',
+                        fontSize: '0.85rem',
+                        fontWeight: isActive ? 700 : 500,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontFamily: 'DM Sans, sans-serif',
+                        background: isActive ? '#0369a1' + '18' : 'transparent',
+                        color: isActive ? '#0369a1' : 'var(--muted)',
+                        border: 'none',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
 
