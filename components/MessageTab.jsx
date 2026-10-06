@@ -2010,7 +2010,7 @@ export function MessageTab({
                 const getToLabel = (msg) =>
                   msg.recipient_type === 'group' ? 'To: Group' :
                   msg.recipient_type === 'everyone' ? 'To: Everyone' :
-                  msg.recipient_type === 'admin'    ? 'To: HR' :
+                  msg.recipient_type === 'admin'    ? 'To: Admins' :
                   msg.recipient_type === 'shift'    ? `To: ${msg.recipient_day ? msg.recipient_day.charAt(0).toUpperCase() + msg.recipient_day.slice(1, 3) : ''} ${msg.recipient_shift || ''}`.trim() + ' Shift' :
                   msg.recipient_type === 'role'     ? `To: ${msg.recipient_role}` :
                   msg.recipient_type === 'volunteer'? `To: ${allUsers.find(u => u.id === msg.recipient_volunteer_id)?.full_name || m.sender?.full_name || 'Individual'}` :
@@ -2070,13 +2070,13 @@ export function MessageTab({
               <label style={S.label}>Send to</label>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 {[
-                  { value: 'admin',    label: 'HR' },
+                  { value: 'user', label: 'Individuals' },
                   ...(isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
                   ...(isProvider && !isAdmin ? [{ value: 'providers', label: 'All Providers' }] : []),
                   ...(!isProvider && !isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
+                  { value: 'admin',    label: 'HR' },
                   ...(myShiftCombos.length > 0 ? [{ value: 'shift', label: 'My Shift' }] : []),
                   ...(rolesForCompose.length > 0 ? [{ value: 'role', label: isAdmin ? 'Role' : 'My Role' }] : []),
-                  { value: 'user', label: 'Individuals' },
                 ].map(opt => (
                   <button
                     key={opt.value}
