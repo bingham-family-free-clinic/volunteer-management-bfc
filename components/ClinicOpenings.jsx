@@ -20,6 +20,7 @@ export default function ClinicOpenings({ onClose }) {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [filter,  setFilter]  = useState('all') // 'all' | day name | shift string
+  const [roleFilter, setRoleFilter] = useState('all') // 'all' | Role name
 
   useEffect(() => { fetchOpenings() }, [])
   
@@ -67,11 +68,22 @@ export default function ClinicOpenings({ onClose }) {
   const presentDays   = [...new Set(data.map(r => r.day))]
   const presentShifts = [...new Set(data.map(r => r.shift))]
 
-  const filtered = filter === 'all'
-    ? data
-    : data.filter(r => r.day === filter || r.shift === filter)
+  const filtered = data.filter(row => {
+    const matchesDayOrShift =
+        filter === 'all' ||
+        row.day === filter ||
+        row.shift === filter
 
-  // Group for display: day → shift → rows
+    const matchesRole =
+        roleFilter === 'all' ||
+        row.role === roleFilter
+
+    return matchesDayOrShift && matchesRole
+  })
+
+
+
+    // Group for display: day → shift → rows
   const grouped = {}
   for (const row of filtered) {
     if (!grouped[row.day]) grouped[row.day] = {}
@@ -120,6 +132,34 @@ export default function ClinicOpenings({ onClose }) {
           {presentShifts.map(s => (
             <button key={s} onClick={() => setFilter(filter === s ? 'all' : s)} style={{ ...pill(filter === s), fontFamily: 'DM Mono, monospace' }}>{SHIFT_LABEL[s]}</button>
           ))}
+          <span style={{ color: 'var(--border)', fontSize: '0.85rem' }}>|</span>
+          <span style={{
+            fontSize: '0.75rem',
+            color: 'var(--muted)',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+          }}>
+  Role
+</span>
+          <select
+              value={roleFilter}
+              onChange={e => setRoleFilter(e.target.value)}
+              style={{
+                padding: '0.4rem 0.75rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                fontFamily: 'DM Sans, sans-serif',
+                fontSize: '0.82rem',
+              }}
+          >
+            <option value="all">All roles</option>
+            {Object.keys(ROLE_SUGGESTIONS).map(role => (
+                <option key={role} value={role}>{role}</option>
+            ))}
+          </select>
         </div>
       )}
 
