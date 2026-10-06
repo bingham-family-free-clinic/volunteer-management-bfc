@@ -62,7 +62,7 @@ function formatBody(text) {
   })
 }
 
-export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, canReplyAll, replyOpen, onReply, onReplyAll, isHighlighted, recipientLabel: recipientLabelProp, groupMemberNames }) {
+export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, onReply, isHighlighted, recipientLabel: recipientLabelProp, groupMemberNames }) {
   const isUnread =
     readMessageIds &&
     !readMessageIds.has(m.id) &&
@@ -81,73 +81,8 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
     ? <strong style={{ fontWeight: 700 }}>{text}</strong>
     : text
 
-  // ── Reply / Reply All header layout ────────────────────────────────────────
-  // With both buttons side by side the header is one line tall. Once the
-  // "To:" label has to drop onto its own line there is a free row of height,
-  // so Reply stacks underneath Reply All instead. The pair is then taken out
-  // of flow (absolutely positioned, centred on where the lone Reply button
-  // sits) so the card only grows by the relocated "To:" line.
-  const headerRef = useRef(null)
-  const sentInfoRef = useRef(null)
-  const toInfoRef = useRef(null)
-  const buttonsRef = useRef(null)
-  const replyBtnRef = useRef(null)
-  const replyAllBtnRef = useRef(null)
-  const [stacked, setStacked] = useState(false)
-  const [gutter, setGutter] = useState(0)
-  const [stackOffset, setStackOffset] = useState(0)
-
-  const showReply = Boolean(canReply) && !replyOpen
-  const showReplyAll = Boolean(canReplyAll) && !replyOpen
-  const bothButtonsVisible = showReply && showReplyAll
-  // Stacked buttons have to live inside the height the "To:" line frees up,
-  // so they shed a little vertical padding rather than growing the card.
-  const btnPadding = stacked ? '0.05rem 0.55rem' : '0.15rem 0.55rem'
-
-  useEffect(() => {
-    const header = headerRef.current
-    const sentInfo = sentInfoRef.current
-    const toInfo = toInfoRef.current
-    if (!header || !sentInfo || !toInfo || !bothButtonsVisible) {
-      setStacked(false)
-      setGutter(0)
-      setStackOffset(0)
-      return
-    }
-
-    let alive = true
-    const HEADER_GAP = 6.4 // gap between the info column and the buttons
-
-    const evaluate = () => {
-      if (!alive) return
-      const wrapped = toInfo.getBoundingClientRect().top > sentInfo.getBoundingClientRect().top + 2
-      if (wrapped && !stacked) {
-        // Measured while still laid out in a row, before we switch modes.
-        const replyWidth = replyBtnRef.current?.offsetWidth || 0
-        const replyAllWidth = replyAllBtnRef.current?.offsetWidth || 0
-        const stackWidth = Math.max(replyWidth, replyAllWidth)
-        const rowWidth = buttonsRef.current?.offsetWidth || stackWidth
-        setGutter(rowWidth + HEADER_GAP)
-        setStackOffset((replyWidth - stackWidth) / 2)
-        setStacked(true)
-      } else if (!wrapped && stacked) {
-        setGutter(0)
-        setStackOffset(0)
-        setStacked(false)
-      }
-    }
-
-    evaluate()
-    const observer = new ResizeObserver(evaluate)
-    observer.observe(header)
-    window.addEventListener('resize', evaluate)
-    if (document.fonts?.ready) document.fonts.ready.then(evaluate).catch(() => {})
-    return () => {
-      alive = false
-      observer.disconnect()
-      window.removeEventListener('resize', evaluate)
-    }
-  }, [bothButtonsVisible, stacked, recipientLabelProp, m.id])
+  // ── Reply header layout ────────────────────────────────────────────────────
+  const showReply = Boolean(canReply)
 
   useEffect(() => {
     if (!groupOpen) return
@@ -168,7 +103,6 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
       }}
     >
       <div
-        ref={headerRef}
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -178,7 +112,6 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           gap: '0.4rem',
           minHeight: '24px',
           position: 'relative',
-          paddingRight: stacked ? gutter : 0,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: '1 1 0%', minWidth: 0 }}>
@@ -214,14 +147,14 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
               fontFamily: 'DM Mono, monospace',
             }}
           >
-            <span ref={sentInfoRef} style={{ whiteSpace: 'nowrap' }}>
+            <span style={{ whiteSpace: 'nowrap' }}>
               {formatDateTime(m.created_at)}{recipientLabelProp ? ',' : ''}
             </span>
             {!isGroupChat && recipientLabelProp && (
-              <span ref={toInfoRef} style={{ whiteSpace: 'nowrap' }}>{toPrefix}{emphasise(toName)}</span>
+              <span style={{ whiteSpace: 'nowrap' }}>{toPrefix}{emphasise(toName)}</span>
             )}
             {isGroupChat && recipientLabelProp && (
-              <span ref={toInfoRef} style={{ whiteSpace: 'nowrap' }}>To:{' '}
+              <span style={{ whiteSpace: 'nowrap' }}>To:{' '}
               <span ref={groupRef} style={{ position: 'relative', display: 'inline-block' }}>
                 <button
                   onClick={e => { e.stopPropagation(); setGroupOpen(o => !o) }}
@@ -278,61 +211,20 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
         </div>
 
         <div
-          ref={buttonsRef}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem',
-            ...(stacked
-              ? {
-                  position: 'absolute',
-                  right: stackOffset,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  flexDirection: 'column',
-                  gap: '0.15rem',
-                }
-              : null),
           }}
         >
-          {showReplyAll && (
-            <button
-              ref={replyAllBtnRef}
-              onClick={e => { e.stopPropagation(); onReplyAll?.() }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                padding: btnPadding,
-                background: 'none',
-                border: '1px solid var(--border)',
-                borderRadius: '100px',
-                color: 'var(--muted)',
-                fontSize: '0.8rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: 'DM Sans, sans-serif',
-                transition: 'border-color 0.15s, color 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-            >
-              <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 14 4 9 9 4" />
-                <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-              </svg>
-              Reply All
-            </button>
-          )}
           {showReply && (
             <button
-              ref={replyBtnRef}
               onClick={e => { e.stopPropagation(); onReply?.() }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.25rem',
-                padding: btnPadding,
+                padding: '0.15rem 0.55rem',
                 background: 'none',
                 border: '1px solid var(--border)',
                 borderRadius: '100px',

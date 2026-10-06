@@ -99,24 +99,38 @@ function ReplyThread({
     replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)
   )
   const [expanded, setExpanded]     = useState(startExpanded)
-  // Sync expanded with startExpanded so deep-linked threads expand
-  // even if MessageTab mounts before openMessageId is set
   useEffect(() => { setExpanded(startExpanded) }, [startExpanded])
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
   const [replyToId, setReplyToId]     = useState(null)
+  // Which audience the composer is addressed to: true → the message's whole
+  // audience, false → just the person the Reply button was clicked on.
   const [isReplyAll, setIsReplyAll]   = useState(false)
-  const [followUpId, setFollowUpId]   = useState(null)
+  const [targetMenuOpen, setTargetMenuOpen] = useState(false)
   const [locallyHighlightedReplies, setLocallyHighlightedReplies] = useState(new Set())
 
-  const isGroupMessageSender = message.sender_id === user?.id && message.recipient_type !== 'volunteer'
-  const isGroupThread = message.recipient_type === 'group'
   const isDirectThread = message.recipient_type === 'volunteer'
-  // In a 1-on-1 thread the "other person" is whoever isn't the viewer.
-  const otherParticipantId = isDirectThread
-    ? (message.sender_id === user?.id ? message.recipient_volunteer_id : message.sender_id)
-    : null
+
+  // ── Thread audience size ──────────────────────────────────────────────────
+  // Count the recipients and taylor the reply logic
+  const isMultiPersonThread = (() => {
+    const type = message.recipient_type
+    if (type && type !== 'volunteer' && type !== 'group') return true
+    const ids = new Set()
+    const collect = (m) => {
+      if (!m) return
+      if (m.sender_id) ids.add(m.sender_id)
+      if (m.recipient_type === 'volunteer') {
+        if (m.recipient_volunteer_id) ids.add(m.recipient_volunteer_id)
+      } else if (m.recipient_type === 'group') {
+        parseGroupMemberIds(m).forEach(id => ids.add(id))
+      }
+    }
+    collect(message)
+    replies.forEach(collect)
+    return ids.size > 2
+  })()
 
   // Auto size textboxes if browser supports it
   const replyRef = useRef(null)
@@ -432,8 +446,7 @@ function ReplyThread({
       .sort((a, b) => a.localeCompare(b))
   }
 
-  // Recipient pill: show for every message, prefixed with "To: ".
-  // Resolved per message (original or each reply), not from the thread root.
+  // Recipient info: show for every message, prefixed with "To: ".
   function getRecipientLabel(m) {
     if (!m) return null
     if (m.recipient_type === 'volunteer') {
@@ -444,94 +457,53 @@ function ReplyThread({
     return `To: ${recipientLabel(m)}`
   }
 
+  // The message whose Reply button opened the composer: the thread root or
+  // one of its replies. `replyToId` holds that message's id.
+  function clickedReplyMessage() {
+    if (!replyToId) return null
+    if (replyToId === message.id) return message
+    return replies.find(r => r.id === replyToId) || null
+  }
+
+  // A message addressed to more than one person can be answered either for the
+  // whole audience or for its sender alone; the composer's "Replying to …"
+  // dropdown switches between those two.
+  function replyDropdownActive(clicked) {
+    return Boolean(clicked) &&
+      clicked.recipient_type !== 'volunteer' &&
+      clicked.sender_id !== user?.id
+  }
+
   // Who the reply currently in the composer will be sent to. Shared by the
   // send path and the typing indicator so announcements match the real audience.
   function resolveReplyTarget() {
-    const targetReply = replies.find(r => r.id === replyToId)
-    const followUpReply = followUpId ? replies.find(r => r.id === followUpId) : null
+    const clicked = clickedReplyMessage()
     if (isReplyAll) {
+      // The whole audience of the message being answered
+      const src = clicked || message
       return { target: {
-        recipient_type: message.recipient_type,
-        recipient_day: message.recipient_day,
-        recipient_shift: message.recipient_shift,
-        recipient_role: message.recipient_role,
-        recipient_volunteer_id: message.recipient_volunteer_id,
+        recipient_type: src.recipient_type,
+        recipient_day: src.recipient_day,
+        recipient_shift: src.recipient_shift,
+        recipient_role: src.recipient_role,
+        recipient_volunteer_id: src.recipient_volunteer_id,
         // Group threads store members as JSON — the API requires the id
-        // array, so forward it explicitly.
-        recipient_volunteer_ids: message.recipient_type === 'group'
-          ? parseGroupMemberIds(message)
+        // array, to forward it explicitly.
+        recipient_volunteer_ids: src.recipient_type === 'group'
+          ? parseGroupMemberIds(src)
           : undefined,
       } }
     }
-    if (followUpReply && followUpReply.sender_id === user?.id) {
-      // Follow-up on own reply: reply to that reply's recipient, not yourself.
-      if (followUpReply.recipient_type !== 'volunteer') {
-        return { target: {
-          recipient_type: followUpReply.recipient_type,
-          recipient_day: followUpReply.recipient_day,
-          recipient_shift: followUpReply.recipient_shift,
-          recipient_role: followUpReply.recipient_role,
-          recipient_volunteer_id: followUpReply.recipient_volunteer_id,
-          recipient_volunteer_ids: followUpReply.recipient_type === 'group'
-            ? parseGroupMemberIds(followUpReply)
-            : undefined,
-        } }
-      }
-      if (!followUpReply.recipient_volunteer_id || followUpReply.recipient_volunteer_id === user?.id) {
-        return { error: "Could not determine who to follow up with" }
-      }
-      return { target: {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: followUpReply.recipient_volunteer_id,
-      } }
+    if (!clicked) return { error: "Could not determine who to reply to" }
+    // One person: whoever sent the message you answered — or its recipient when
+    // you sent it yourself.
+    if (clicked.sender_id !== user?.id) {
+      return { target: { recipient_type: 'volunteer', recipient_volunteer_id: clicked.sender_id } }
     }
-    if (isDirectThread) {
-      // 1-on-1: always reply to the other person in the string, never yourself.
-      // This prevents self-only replies when replying in a thread you started.
-      let otherId = otherParticipantId
-      if (!otherId || otherId === user?.id) {
-        const candidate = targetReply?.sender_id && targetReply.sender_id !== user?.id
-          ? targetReply.sender_id
-          : null
-        otherId = candidate
-          ?? (message.sender_id !== user?.id ? message.sender_id : message.recipient_volunteer_id)
-      }
-      if (!otherId || otherId === user?.id) return { error: 'Could not determine the other person in this conversation' }
-      return { target: {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: otherId,
-      } }
+    if (clicked.recipient_type === 'volunteer' && clicked.recipient_volunteer_id && clicked.recipient_volunteer_id !== user?.id) {
+      return { target: { recipient_type: 'volunteer', recipient_volunteer_id: clicked.recipient_volunteer_id } }
     }
-    if (isGroupThread && targetReply) {
-      // Group threads: a Reply on someone else's reply goes to that person,
-      // never to another replier or yourself.
-      if (targetReply.sender_id === user?.id) return { error: "You can't reply to yourself" }
-      return { target: {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: targetReply.sender_id,
-      } }
-    }
-    if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
-      // Broadcast threads (everyone/HR/shift/role): a recipient's Reply always
-      // goes to the thread sender, never to another replier (or yourself).
-      if (message.sender_id === user?.id) return { error: "Use Reply All to respond to your own message" }
-      return { target: {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: message.sender_id,
-      } }
-    }
-    if (targetReply) {
-      if (targetReply.sender_id === user?.id) return { error: "You can't reply to yourself" }
-      return { target: {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: targetReply.sender_id,
-      } }
-    }
-    if (message.sender_id === user?.id) return { error: "Use Reply All to respond to your own group message" }
-    return { target: {
-      recipient_type: 'volunteer',
-      recipient_volunteer_id: message.sender_id,
-    } }
+    return { error: "Could not determine who to reply to" }
   }
 
   async function handleSendReply() {
@@ -560,11 +532,7 @@ function ReplyThread({
         showToast(result.error || 'Failed to send reply', 'error')
       } else {
         showToast('Reply sent!', 'success')
-        setReplyBody('')
-        setReplyOpen(false)
-        setReplyToId(null)
-        setIsReplyAll(false)
-        setFollowUpId(null)
+        closeReply()
         onReplySent()
       }
     } catch (err) {
@@ -575,54 +543,63 @@ function ReplyThread({
   }
 
   const hasReplies = replies.length > 0
-  // Group threads read as two sections: every reply-all first, then the direct
-  // messages behind a divider. The divider only renders when there is at least
-  // one DM — with no reply-alls it separates the DMs from the root message.
-  const replyAlls = isGroupThread ? replies.filter(r => r.recipient_type !== 'volunteer') : []
-  const directReplies = isGroupThread ? replies.filter(r => r.recipient_type === 'volunteer') : replies
-  const orderedReplies = isGroupThread ? [...replyAlls, ...directReplies] : replies
-  const showDirectLabel = isGroupThread && directReplies.length > 0
+  // Multi-recipient threads read as two sections: every reply-all first, then
+  // the direct messages behind a divider.
+  const isMultiAudienceThread = !isDirectThread
+  const replyAlls = isMultiAudienceThread ? replies.filter(r => r.recipient_type !== 'volunteer') : []
+  const directReplies = isMultiAudienceThread ? replies.filter(r => r.recipient_type === 'volunteer') : replies
+  const orderedReplies = isMultiAudienceThread ? [...replyAlls, ...directReplies] : replies
+  const showDirectLabel = isMultiAudienceThread && directReplies.length > 0
   const lastReplyId = replies[replies.length - 1]?.id
   const typingNames = Object.values(typers).map(t => t.name)
 
-  // Display name for the reply composer: in 1-on-1 threads always the
-  // other person, for follow-ups the recipient of your own reply,
-  // otherwise the sender of the message being replied to.
-  const replyTargetName = (() => {
-    if (isReplyAll) return null
-    if (followUpId) {
-      const f = replies.find(r => r.id === followUpId)
-      if (f?.sender_id === user?.id) {
-        // Own group/broadcast reply: the plain Reply keeps that reply's
-        // audience, so name the audience rather than a person.
-        if (f.recipient_type !== 'volunteer') return recipientLabel(f)
-        if (f.recipient_volunteer_id === user?.id) return 'User'
-        return allUsers.find(u => u.id === f.recipient_volunteer_id)?.full_name ?? 'User'
-      }
-    }
-    if (isDirectThread) {
-      const other = allUsers.find(u => u.id === otherParticipantId)
-      if (other?.full_name) return other.full_name
-      if (replyToId) {
-        const t = replies.find(r => r.id === replyToId)
-        if (t?.sender_id && t.sender_id !== user?.id) return t.sender?.full_name ?? 'User'
-      }
-      if (message.sender_id !== user?.id) return message.sender?.full_name ?? 'User'
-      const recip = allUsers.find(u => u.id === message.recipient_volunteer_id)
-      return recip?.full_name ?? 'User'
-    }
-    // Group threads: a Reply on someone's reply goes to that person; a Reply
-    // on the thread root goes to the thread sender.
-    if (isGroupThread && replyToId) {
-      return replies.find(r => r.id === replyToId)?.sender?.full_name ?? 'User'
-    }
-    // Recipient view in broadcast threads: replies always go to the thread sender.
-    if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
-      return message.sender?.full_name ?? 'User'
-    }
-    if (replyToId) return replies.find(r => r.id === replyToId)?.sender?.full_name ?? 'User'
-    return message.sender?.full_name ?? 'User'
-  })()
+  // ── Reply target ──────────────────────────────────────────────────────────
+  const nameOf = (id) => allUsers.find(u => u.id === id)?.full_name ?? 'User'
+  const replyClicked = clickedReplyMessage()
+  // Only somebody else's multi-recipient message offers both audiences — your
+  // own message can only be answered for its crowd, a direct message only for
+  // the one person on the other end.
+  const replyActive = replyDropdownActive(replyClicked)
+  const replyAudienceName = recipientLabel(replyClicked || message)
+  const replyPersonName = replyClicked
+    ? (replyClicked.sender_id !== user?.id
+        ? (replyClicked.sender?.full_name ?? nameOf(replyClicked.sender_id))
+        : nameOf(replyClicked.recipient_volunteer_id))
+    : 'User'
+  const replyTargetName = isReplyAll ? replyAudienceName : replyPersonName
+  const replyTargetOptions = replyActive
+    ? [
+        { replyAll: true, label: replyAudienceName },
+        { replyAll: false, label: replyPersonName },
+      ]
+    : [{ replyAll: isReplyAll, label: replyTargetName }]
+  // Emphasise the crowd half of a reply the same way the "To:" line does —
+  // "Replying to **Group**" against a plain "Replying to Jon Doe".
+  const audienceIsMulti = isMultiRecipient(replyClicked || message)
+  const boldTarget = (text, isAudience) =>
+    isAudience && audienceIsMulti
+      ? <strong style={{ fontWeight: 700 }}>{text}</strong>
+      : text
+
+  // Open the composer on a message.
+  const startReply = (msg) => {
+    stopTypingNow()
+    setLocallyHighlightedReplies(new Set())
+    replyScrollPosRef.current = window.scrollY
+    setReplyToId(msg.id)
+    setIsReplyAll(msg.recipient_type !== 'volunteer')
+    setReplyOpen(true)
+    // Switching targets mid-draft keeps the text and the caret where they were.
+    if (replyOpen) requestAnimationFrame(() => replyRef.current?.focus())
+  }
+
+  const closeReply = () => {
+    setReplyOpen(false)
+    setReplyBody('')
+    setReplyToId(null)
+    setIsReplyAll(false)
+    setTargetMenuOpen(false)
+  }
 
   const expandThread = () => {
     const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
@@ -693,7 +670,7 @@ function ReplyThread({
       {/* ── Original message (click to collapse) ── */}
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
-          onClick={() => { stopTypingNow(); setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
+          onClick={() => { stopTypingNow(); setLocallyHighlightedReplies(new Set()); setExpanded(false); closeReply() }}
       >
         <MessageCard
           m={message}
@@ -701,11 +678,8 @@ function ReplyThread({
           user={user}
           setLightboxUrl={setLightboxUrl}
           senderLabel={senderLabel}
-          canReply={canReply && !isGroupMessageSender}
-          canReplyAll={isGroupMessageSender || isGroupThread}
-          replyOpen={replyOpen}
-          onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(false); setFollowUpId(null); setReplyOpen(true) }}
-          onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(true); setFollowUpId(null); setReplyOpen(true) }}
+          canReply={canReply}
+          onReply={() => startReply(message)}
           isHighlighted={isHighlighted}
           recipientLabel={getRecipientLabel(message)}
           groupMemberNames={message.recipient_type === 'group' ? getGroupMemberNames(message) : null}
@@ -724,34 +698,11 @@ function ReplyThread({
           gap: '0.5rem',
         }}>
           {orderedReplies.map((reply, idx) => {
-            const replyIsAdmin = reply.sender?.role === 'admin' || false
             const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
             const isMostRecent = reply.id === lastReplyId
-            const isMostRecentReply = true
-            const isOwnReply = reply.sender_id === user?.id
-            const ownReplyIsGroup = isOwnReply && reply.recipient_type !== 'volunteer'
-            const replyIsGroup = reply.recipient_type !== 'volunteer'
-            let replyCanReply, replyCanReplyAll
-            if (isGroupThread) {
-              if (replyIsGroup) {
-                // Sent to the whole group: always offer Reply All. The original
-                // sender gets only it — someone else's group message has no
-                // single target for a plain Reply — while every recipient gets
-                // both buttons (their plain Reply goes to that replier).
-                replyCanReplyAll = true
-                replyCanReply = canReply && !isGroupMessageSender
-              } else {
-                // Direct message inside the thread → plain Reply only.
-                replyCanReplyAll = false
-                replyCanReply = canReply
-              }
-            } else if (isGroupMessageSender) {
-              replyCanReply = isOwnReply ? !ownReplyIsGroup : true
-              replyCanReplyAll = ownReplyIsGroup
-            } else {
-              replyCanReply = canReply && isMostRecent && isMostRecentReply
-              replyCanReplyAll = false
-            }
+            // Threads with more than two people offer a Reply on every message;
+            // a plain two-person conversation only on its first and last.
+            const replyCanReply = isMultiPersonThread ? canReply : (canReply && isMostRecent)
             const showDivider = showDirectLabel && idx === replyAlls.length
             return (
               <Fragment key={reply.id}>
@@ -772,10 +723,7 @@ function ReplyThread({
                     setLightboxUrl={setLightboxUrl}
                     isHighlighted={isReplyHighlighted}
                     canReply={replyCanReply}
-                    canReplyAll={replyCanReplyAll}
-                    replyOpen={replyOpen}
-                    onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; if (isOwnReply && (isGroupThread || isGroupMessageSender)) { setReplyToId(null); setIsReplyAll(false); setFollowUpId(reply.id) } else { setReplyToId(reply.id); setIsReplyAll(false); setFollowUpId(null) } setReplyOpen(true) }}
-                    onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setFollowUpId(null); setIsReplyAll(true); setReplyOpen(true) }}
+                    onReply={() => startReply(reply)}
                     recipientLabel={getRecipientLabel(reply)}
                     groupMemberNames={reply.recipient_type === 'group' ? getGroupMemberNames(reply) : null}
                   />
@@ -842,9 +790,9 @@ function ReplyThread({
               onChange={e => handleReplyInputChange(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
-                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }
+                if (e.key === 'Escape') closeReply()
               }}
-              placeholder={isReplyAll ? (message.recipient_type === 'group' ? 'Replying to Group…' : 'Replying to Everyone…') : `Replying to ${replyTargetName}…`}
+              placeholder={`Replying to ${replyTargetName}…`}
               rows={2}
               style={{
                 ...S.input,
@@ -857,9 +805,104 @@ function ReplyThread({
                 padding: '0.6rem 0.75rem',
               }}
             />
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                {/* Who this draft goes to. Offers both audiences only when the
+                    message you replied to went to a crowd *and* someone else
+                    sent it — otherwise it is a label with nothing to switch. */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={replyActive && targetMenuOpen}
+                    onClick={() => { if (replyActive) setTargetMenuOpen(o => !o) }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      maxWidth: '15rem',
+                      padding: '0.35rem 0.6rem',
+                      background: '#fff',
+                      border: '1px solid var(--border)',
+                      borderRadius: '7px',
+                      color: replyActive ? 'var(--text)' : 'var(--muted)',
+                      fontSize: '0.78rem',
+                      fontWeight: 500,
+                      cursor: replyActive ? 'pointer' : 'default',
+                      fontFamily: 'DM Sans, sans-serif',
+                    }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      Replying to {boldTarget(replyTargetName, isReplyAll)}
+                    </span>
+                    {replyActive && (
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        aria-hidden="true"
+                        style={{ flexShrink: 0, transform: targetMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}
+                      >
+                        <polygon points="3.5,5.5 12.5,5.5 8,11.5" />
+                      </svg>
+                    )}
+                  </button>
+                  {replyActive && targetMenuOpen && (
+                    <div
+                      role="listbox"
+                      style={{
+                        position: 'absolute',
+                        bottom: 'calc(100% + 0.35rem)',
+                        left: 0,
+                        zIndex: 60,
+                        minWidth: '100%',
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '8px',
+                        boxShadow: '0 8px 24px rgba(2,65,107,0.12)',
+                        padding: '0.25rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.15rem',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {replyTargetOptions.map(opt => {
+                        const selected = opt.replyAll === isReplyAll
+                        return (
+                          <button
+                            key={String(opt.replyAll)}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => setIsReplyAll(opt.replyAll)}
+                            style={{
+                              padding: '0.3rem 0.5rem',
+                              background: selected ? 'rgba(2,65,107,0.08)' : 'transparent',
+                              border: 'none',
+                              borderRadius: '6px',
+                              color: 'var(--text)',
+                              fontSize: '0.78rem',
+                              fontWeight: selected ? 700 : 500,
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              whiteSpace: 'nowrap',
+                              fontFamily: 'DM Sans, sans-serif',
+                            }}
+                          >
+                            Replying to {boldTarget(opt.label, opt.replyAll)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
                 <button
-                  onClick={() => { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
+                  onClick={closeReply}
                   style={{
                   padding: '0.35rem 0.75rem',
                   background: 'none',
@@ -1768,7 +1811,8 @@ export function MessageTab({
                   style={{
                     width: '16rem',
                     maxWidth: '100%',
-                    padding: '0.5rem 2.9rem 0.5rem 2.35rem',
+                    height: '34px',
+                    padding: '0 2.9rem 0 2.35rem',
                     background: 'var(--bg)',
                     border: '1px solid transparent',
                     borderRadius: '100px',
