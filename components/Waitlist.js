@@ -565,7 +565,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
 
             <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22` }}>
-              <p style={{ ...labelStyle, marginBottom: '0.75rem' }}>Preferred Roles <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(leave blank for any role)</span></p>
+              <p style={{ ...labelStyle, marginBottom: '0.75rem' }}>Trained Roles <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(leave blank for any role)</span></p>
               <RolePicker selected={editRoles} onChange={setEditRoles} />
             </div>
 
@@ -639,7 +639,7 @@ export default function Waitlist({ supabase, profile, onAssigned }) {
             </div>
 
             <div style={{ padding: '1rem 1.25rem', borderRadius: '10px', background: 'var(--bg)', border: `1px solid ${C.blue}22` }}>
-              <p style={{ ...labelStyle, marginBottom: '0.75rem' }}>Preferred Roles <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></p>
+              <p style={{ ...labelStyle, marginBottom: '0.75rem' }}>Trained Roles <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></p>
               <RolePicker selected={manualRoles} onChange={setManualRoles} />
             </div>
 
