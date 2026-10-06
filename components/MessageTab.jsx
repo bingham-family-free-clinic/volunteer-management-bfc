@@ -91,6 +91,7 @@ function ReplyThread({
   collapsedLabel,
   startExpanded = false,
   previewMessage,
+  searchQuery = '',
 }) {
   const isUnread = readMessageIds && (
     // Received message not yet read
@@ -109,6 +110,17 @@ function ReplyThread({
   const [isReplyAll, setIsReplyAll]   = useState(false)
   const [targetMenuOpen, setTargetMenuOpen] = useState(false)
   const [locallyHighlightedReplies, setLocallyHighlightedReplies] = useState(new Set())
+  const targetMenuRef = useRef(null)
+
+  // Close the "Replying to …" dropdown menu when clicking outside it.
+  useEffect(() => {
+    if (!targetMenuOpen) return
+    const onDown = (e) => {
+      if (targetMenuRef.current && !targetMenuRef.current.contains(e.target)) setTargetMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [targetMenuOpen])
 
   const isDirectThread = message.recipient_type === 'volunteer'
 
@@ -397,7 +409,7 @@ function ReplyThread({
     clearNotificationForMessage(message.id)
   }, [replies, expanded, readMessageIds, message.id, message.created_at, user, onMarkRead])
 
-  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
+  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '(Image)'
   const isHighlighted = locallyHighlightedReplies.has(message.id)
   const replyCount = replies.length
 
@@ -412,7 +424,28 @@ function ReplyThread({
   const previewSource = previewMessage ?? latestUnreadReply ?? message
   const previewSnippet = previewSource.body
     ? previewSource.body.replace(/\n/g, ' ')
-    : '📎 Image'
+    : '(Image)'
+  // ── Search hit preview ────────────────────────────────────────────────────
+  // While searching, a thread whose *contents* match renders one line per hit
+  // in the whole thread: the matched word in bold, then the rest of that
+  // message up to the card edge. Threads that only match a name keep the
+  // normal preview.
+  const searchNeedle = searchQuery ? searchQuery.replace(/\n/g, ' ') : ''
+  const searchHits = searchNeedle
+    ? [message, ...replies].flatMap(m => {
+        // Flatten newlines first so indices line up 1:1 with the lower-cased
+        // copy used for matching.
+        const body = (m.body || '').replace(/\n/g, ' ')
+        const hay = body.toLowerCase()
+        const hits = []
+        let from = 0
+        for (let at = hay.indexOf(searchNeedle, from); at !== -1; at = hay.indexOf(searchNeedle, from)) {
+          hits.push({ match: body.slice(at, at + searchNeedle.length), rest: body.slice(at + searchNeedle.length) })
+          from = at + searchNeedle.length
+        }
+        return hits
+      })
+    : []
   const previewSenderName = latestUnreadReply
     ? (latestUnreadReply.sender?.full_name || 'HR')
     : (senderLabel || message.sender?.full_name || 'Unknown')
@@ -588,6 +621,7 @@ function ReplyThread({
     replyScrollPosRef.current = window.scrollY
     setReplyToId(msg.id)
     setIsReplyAll(msg.recipient_type !== 'volunteer')
+    setTargetMenuOpen(false)
     setReplyOpen(true)
     // Switching targets mid-draft keeps the text and the caret where they were.
     if (replyOpen) requestAnimationFrame(() => replyRef.current?.focus())
@@ -649,15 +683,28 @@ function ReplyThread({
             </div>
           {/* Line 2: reply count + snippet (only rendered if there is content) */}
           {(replyCount > 0 || bodySnippet) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
+            <div style={{ display: 'flex', alignItems: searchHits.length ? 'flex-start' : 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
               {replyCount > 0 && (
-                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0, marginTop: searchHits.length ? '0.18rem' : 0 }}>
                   {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
                 </span>
               )}
-              <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {previewSnippet}
-              </span>
+              {searchHits.length > 0 ? (
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                  {searchHits.map((hit, i) => (
+                    <div
+                      key={i}
+                      style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      <strong style={{ fontWeight: 700 }}>{hit.match}</strong>{hit.rest}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {previewSnippet}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -879,7 +926,7 @@ function ReplyThread({
                             type="button"
                             role="option"
                             aria-selected={selected}
-                            onClick={() => setIsReplyAll(opt.replyAll)}
+                            onClick={() => { setIsReplyAll(opt.replyAll); setTargetMenuOpen(false) }}
                             style={{
                               padding: '0.3rem 0.5rem',
                               background: selected ? 'rgba(2,65,107,0.08)' : 'transparent',
@@ -1882,6 +1929,7 @@ export function MessageTab({
                   onReplySent={fetchMessages}
                   onMarkRead={markThreadRead}
                   startExpanded={openThreadId === m.id}
+                  searchQuery={inboxSearchQuery}
                 />
               ))}
             </div>
@@ -2130,7 +2178,7 @@ export function MessageTab({
                       )}
                     </>
                   ) : (
-                    <div style={{ position: 'relative' }}>
+                <div ref={targetMenuRef} style={{ position: 'relative' }}>
                       <div
                         onClick={() => { setComboOpen(true); recipientInputRef.current?.focus?.() }}
                         style={{ ...S.input, display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', cursor: 'text', minHeight: '3rem' }}
