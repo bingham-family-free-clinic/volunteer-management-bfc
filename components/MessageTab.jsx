@@ -1034,7 +1034,7 @@ export function MessageTab({
   // Compose state
   const [msgView, setMsgView]                 = useState('inbox')
   const [msgBody, setMsgBody]                 = useState('')
-  const [msgRecipientType, setMsgRecipientType] = useState('admin')
+  const [msgRecipientType, setMsgRecipientType] = useState('user')
   const [msgSelectedShift, setMsgSelectedShift] = useState(null)
   const [msgSelectedRole, setMsgSelectedRole]   = useState(null)
   const [msgRecipientVolIds, setMsgRecipientVolIds] = useState([])
@@ -1572,16 +1572,20 @@ export function MessageTab({
   async function handleSendMessage(e) {
     e.preventDefault()
     if (!msgBody.trim() && !msgFiles.length) return
+    const individualIds = msgRecipientType === 'user'
+      ? [...new Set(msgRecipientVolIds.filter(id => id && id !== user?.id))]
+      : []
+    const isGroupCompose = msgRecipientType === 'user' && individualIds.length > 1
+    if (msgRecipientType === 'user' && individualIds.length === 0) {
+      showToast('Choose at least one person to send to.', 'error')
+      return
+    }
     setSendingMsg(true)
 
     try {
       const attachments = await uploadFiles(user.id)
       if (msgFiles.length && !attachments) { setSendingMsg(false); return }
 
-      const individualIds = msgRecipientType === 'user'
-        ? [...new Set(msgRecipientVolIds.filter(id => id && id !== user?.id))]
-        : []
-      const isGroupCompose = msgRecipientType === 'user' && individualIds.length > 1
       const recipientType = isGroupCompose                        ? 'group'
                           : msgRecipientType === 'user'           ? 'volunteer'
                           : msgRecipientType === 'providers'      ? 'role'
@@ -1613,7 +1617,7 @@ export function MessageTab({
         showToast('Message sent!', 'success')
         setMsgBody('')
         clearFiles()
-        setMsgRecipientType('admin')
+        setMsgRecipientType('user')
         setMsgSelectedShift(null)
         setMsgSelectedRole(null)
         setMsgRecipientVolIds([])
