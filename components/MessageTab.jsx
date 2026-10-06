@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { MessageCard } from './MessageCard'
 import { formatDateTime } from '../lib/timeUtils'
 import { ROLES } from '../lib/constants'
-import { recipientLabel, parseGroupMemberIds, isMultiRecipient, splitToLabel } from '../lib/messageUtils'
+import { recipientLabel, parseGroupMemberIds, isMultiRecipient, splitToLabel, parseAttachments, isImageAttachment, serializeAttachments, typeFromName } from '../lib/messageUtils'
 
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
@@ -409,7 +409,15 @@ function ReplyThread({
     clearNotificationForMessage(message.id)
   }, [replies, expanded, readMessageIds, message.id, message.created_at, user, onMarkRead])
 
-  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '(Image)'
+  // Collapsed-preview placeholder for a message with no text: images stay
+  // "(Image)", anything else reads "(File)".
+  const attachmentLabel = (msg) => {
+    const atts = parseAttachments(msg?.image_url)
+    if (!atts.length) return '(Image)'
+    return atts.every(isImageAttachment) ? '(Image)' : '(File)'
+  }
+
+  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : attachmentLabel(message)
   const isHighlighted = locallyHighlightedReplies.has(message.id)
   const replyCount = replies.length
 
@@ -424,7 +432,7 @@ function ReplyThread({
   const previewSource = previewMessage ?? latestUnreadReply ?? message
   const previewSnippet = previewSource.body
     ? previewSource.body.replace(/\n/g, ' ')
-    : '(Image)'
+    : attachmentLabel(previewSource)
   // ── Search hit preview ────────────────────────────────────────────────────
   // While searching, a thread whose *contents* match renders one line per hit
   // in the whole thread: the matched word in bold, then the rest of that
@@ -1031,9 +1039,9 @@ export function MessageTab({
   const [msgSelectedRole, setMsgSelectedRole]   = useState(null)
   const [msgRecipientVolIds, setMsgRecipientVolIds] = useState([])
   const [sendingMsg, setSendingMsg]           = useState(false)
-  const [msgImageFile, setMsgImageFile]       = useState(null)
-  const [msgImagePreview, setMsgImagePreview] = useState(null)
-  const [uploadingImage, setUploadingImage]   = useState(false)
+  // Pending attachments: [{ id, file, name, type, previewUrl }]
+  const [msgFiles, setMsgFiles]               = useState([])
+  const [uploadingFiles, setUploadingFiles]   = useState(false)
   const [comboQuery, setComboQuery]           = useState('')
   const [comboOpen, setComboOpen]             = useState(false)
   const fileInputRef = useRef(null)
@@ -1455,18 +1463,42 @@ export function MessageTab({
   // Providers can message the Provider role group.
   const rolesForCompose = isAdmin ? ROLES : isProvider ? ['Provider', ...myRoles.filter(r => r !== 'Provider')] : myRoles
 
-  // ── Image helpers ──────────────────────────────────────────────────────────
-  function handleImageSelect(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (MAX_FILE_SIZE && file.size > MAX_FILE_SIZE) { showToast('Image must be under 5 MB', 'error'); return }
-    setMsgImageFile(file)
-    setMsgImagePreview(URL.createObjectURL(file))
+  // ── File attachment helpers ────────────────────────────────────────────────
+  function handleFileSelect(e) {
+    const picked = Array.from(e.target.files || [])
+    // Reset so selecting the same file again still fires onChange.
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (!picked.length) return
+
+    const added = []
+    for (const file of picked) {
+      if (MAX_FILE_SIZE && file.size > MAX_FILE_SIZE) {
+        showToast(`${file.name} is too large — files must be under 5 MB`, 'error')
+        continue
+      }
+      const type = file.type || typeFromName(file.name)
+      added.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        file,
+        name: file.name,
+        type,
+        previewUrl: type.startsWith('image/') ? URL.createObjectURL(file) : null,
+      })
+    }
+    if (added.length) setMsgFiles(prev => [...prev, ...added])
   }
 
-  function clearImage() {
-    setMsgImageFile(null)
-    setMsgImagePreview(null)
+  function removeFile(id) {
+    setMsgFiles(prev => {
+      const gone = prev.find(f => f.id === id)
+      if (gone && gone.previewUrl) URL.revokeObjectURL(gone.previewUrl)
+      return prev.filter(f => f.id !== id)
+    })
+  }
+
+  function clearFiles() {
+    msgFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl) })
+    setMsgFiles([])
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -1509,29 +1541,42 @@ export function MessageTab({
     if (comboResults.length === 1) addRecipient(comboResults[0], { closeAfter })
   }
 
-  async function uploadImage(userId) {
-    if (!msgImageFile) return null
-    setUploadingImage(true)
-    const ext = msgImageFile.name.split('.').pop()
-    const path = `${userId}/${Date.now()}.${ext}`
-    const { error } = await supabase.storage
-      .from('message-images')
-      .upload(path, msgImageFile, { contentType: msgImageFile.type, upsert: false })
-    setUploadingImage(false)
-    if (error) { showToast('Image upload failed: ' + error.message, 'error'); return null }
-    const { data: { publicUrl } } = supabase.storage.from('message-images').getPublicUrl(path)
-    return publicUrl
+  // Uploads every pending attachment. Returns [{ url, name, type }] on
+  // success, or null if any single upload failed (a toast explains which).
+  async function uploadFiles(userId) {
+    if (!msgFiles.length) return []
+    setUploadingFiles(true)
+    try {
+      const out = []
+      for (let i = 0; i < msgFiles.length; i++) {
+        const f = msgFiles[i]
+        const safe = (f.name || 'file').replace(/[^\w.-]+/g, '_').slice(-60) || 'file'
+        const path = `${userId}/${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}_${safe}`
+        const { error } = await supabase.storage
+          .from('message-images')
+          .upload(path, f.file, { contentType: f.type || 'application/octet-stream', upsert: false })
+        if (error) {
+          showToast(`${f.name} failed to upload: ${error.message}`, 'error')
+          return null
+        }
+        const { data: { publicUrl } } = supabase.storage.from('message-images').getPublicUrl(path)
+        out.push({ url: publicUrl, name: f.name, type: f.type })
+      }
+      return out
+    } finally {
+      setUploadingFiles(false)
+    }
   }
 
   // ── Send new top-level message ─────────────────────────────────────────────
   async function handleSendMessage(e) {
     e.preventDefault()
-    if (!msgBody.trim() && !msgImageFile) return
+    if (!msgBody.trim() && !msgFiles.length) return
     setSendingMsg(true)
 
     try {
-      const imageUrl = await uploadImage(user.id)
-      if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
+      const attachments = await uploadFiles(user.id)
+      if (msgFiles.length && !attachments) { setSendingMsg(false); return }
 
       const individualIds = msgRecipientType === 'user'
         ? [...new Set(msgRecipientVolIds.filter(id => id && id !== user?.id))]
@@ -1549,7 +1594,7 @@ export function MessageTab({
         body: JSON.stringify({
           recipient_type: recipientType,
           body: msgBody.trim(),
-          image_url: imageUrl || null,
+          image_url: serializeAttachments(attachments),
           recipient_shift:        msgRecipientType === 'shift' ? (msgSelectedShift?.shift_time || null) : null,
           recipient_day:          msgRecipientType === 'shift' ? (msgSelectedShift?.day || null) : null,
           recipient_role:         msgRecipientType === 'role'      ? (msgSelectedRole || null)
@@ -1567,7 +1612,7 @@ export function MessageTab({
       } else {
         showToast('Message sent!', 'success')
         setMsgBody('')
-        clearImage()
+        clearFiles()
         setMsgRecipientType('admin')
         setMsgSelectedShift(null)
         setMsgSelectedRole(null)
@@ -2256,35 +2301,64 @@ export function MessageTab({
               />
             </div>
 
-            {/* Image attachment */}
+            {/* File attachments */}
             <div>
-              <label style={S.label}>Attach image (optional)</label>
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
-              {!msgImagePreview ? (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{ ...S.input, cursor: 'pointer', color: 'var(--muted)', textAlign: 'left' }}
-                >
-                  Choose image…
-                </button>
-              ) : (
-                <div style={{ position: 'relative', display: 'inline-block' }}>
-                  <img src={msgImagePreview} alt="Preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px', border: '1px solid var(--border)' }} />
-                  <button
-                    type="button"
-                    onClick={clearImage}
-                    style={{ position: 'absolute', top: '0.35rem', right: '0.35rem', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', color: '#fff', width: '24px', height: '24px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    ✕
-                  </button>
+              <label style={S.label}>ATTACH FILE</label>
+              <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} style={{ display: 'none' }} />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ ...S.input, cursor: 'pointer', color: 'var(--muted)', textAlign: 'left' }}
+              >
+                Add file...
+              </button>
+
+              {msgFiles.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {msgFiles.map(f => (
+                    <div
+                      key={f.id}
+                      style={{
+                        position: 'relative',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        padding: '0.5rem',
+                        border: '1px solid var(--border)',
+                        borderRadius: '8px',
+                        background: 'var(--bg)',
+                      }}
+                    >
+                      {f.previewUrl ? (
+                        <img src={f.previewUrl} alt="" style={{ width: '46px', height: '46px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)', flexShrink: 0 }} />
+                      ) : (
+                        <span style={{ width: '46px', height: '46px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--muted)' }}>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 3 14 8 19 8" />
+                          </svg>
+                        </span>
+                      )}
+                      <span style={{ fontSize: '0.87rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: '1.75rem' }}>
+                        {f.name}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${f.name}`}
+                        onClick={() => removeFile(f.id)}
+                        style={{ position: 'absolute', top: '0.35rem', right: '0.35rem', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', color: '#fff', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
 
             <button
               type="submit"
-              disabled={sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)}
+              disabled={sendingMsg || uploadingFiles || (!msgBody.trim() && msgFiles.length === 0) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)}
               style={{
                 padding: '0.85rem',
                 background: 'var(--accent)',
@@ -2292,12 +2366,12 @@ export function MessageTab({
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: 600,
-                cursor: sendingMsg || uploadingImage ? 'not-allowed' : 'pointer',
+                cursor: sendingMsg || uploadingFiles ? 'not-allowed' : 'pointer',
                 fontFamily: 'DM Sans, sans-serif',
-                opacity: (sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)) ? 0.5 : 1,
+                opacity: (sendingMsg || uploadingFiles || (!msgBody.trim() && msgFiles.length === 0) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)) ? 0.5 : 1,
               }}
             >
-              {uploadingImage ? 'Uploading image…' : sendingMsg ? 'Sending…' : 'Send Message'}
+              {uploadingFiles ? 'Uploading files…' : sendingMsg ? 'Sending…' : 'Send Message'}
             </button>
           </form>
         </div>
