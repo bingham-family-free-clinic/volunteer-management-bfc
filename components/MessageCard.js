@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { formatDateTime } from '../lib/timeUtils'
-import { recipientLabel } from '../lib/messageUtils'
+import { recipientLabel, isMultiRecipient, splitToLabel } from '../lib/messageUtils'
 
 // Matches http/https URLs
 const URL_REGEX = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&/=]*)/g
@@ -72,7 +72,14 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
   // Group chats (Individuals tab, 2+ people) show an inline "To: Group"
   // toggle that overlays the member list Gmail-style. Clicking out collapses.
   const isGroupChat = m.recipient_type === 'group'
-  const groupShort = (recipientLabelProp || '').replace(/^To:\s*/, '') || 'Group'
+  const [toPrefix, toName] = splitToLabel(recipientLabelProp || '')
+  const groupShort = toName || 'Group'
+  // Only the recipient's name is bolded when the message goes to more than one
+  // person ("To: **Everyone**", "To: **Group**"); the "To: " prefix and the
+  // group's expand caret stay plain.
+  const emphasise = text => isMultiRecipient(m)
+    ? <strong style={{ fontWeight: 700 }}>{text}</strong>
+    : text
 
   // ── Reply / Reply All header layout ────────────────────────────────────────
   // With both buttons side by side the header is one line tall. Once the
@@ -211,7 +218,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
               {formatDateTime(m.created_at)}{recipientLabelProp ? ',' : ''}
             </span>
             {!isGroupChat && recipientLabelProp && (
-              <span ref={toInfoRef} style={{ whiteSpace: 'nowrap' }}>{recipientLabelProp}</span>
+              <span ref={toInfoRef} style={{ whiteSpace: 'nowrap' }}>{toPrefix}{emphasise(toName)}</span>
             )}
             {isGroupChat && recipientLabelProp && (
               <span ref={toInfoRef} style={{ whiteSpace: 'nowrap' }}>To:{' '}
@@ -231,7 +238,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {groupShort} {groupOpen ? '˄' : '˅'}
+                  {emphasise(groupShort)} {groupOpen ? '˄' : '˅'}
                 </button>
                 {groupOpen && (
                   <span

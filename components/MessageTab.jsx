@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { MessageCard } from './MessageCard'
 import { formatDateTime } from '../lib/timeUtils'
 import { ROLES } from '../lib/constants'
-import { recipientLabel, parseGroupMemberIds } from '../lib/messageUtils'
+import { recipientLabel, parseGroupMemberIds, isMultiRecipient, splitToLabel } from '../lib/messageUtils'
 
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
@@ -13,6 +13,14 @@ const BROADCAST_TYPES = ['everyone', 'role', 'shift']
 const TYPING_THROTTLE_MS = 1500 // min gap between "typing: true" sends
 const TYPING_IDLE_MS = 7000     // no keystrokes for this long → send "typing: false"
 const TYPING_TTL_MS = 9000      // receiver drops a typer after this long without refresh
+
+// Audience comparison for typing broadcasts. null = whole thread, [] = nobody.
+function sameTargets(a, b) {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every(id => b.includes(id))
+  }
+  return a === b
+}
 
 // Refreshes Supabase token if expired, missing, or about to expire
 async function getFreshAccessToken(supabase) {
@@ -119,35 +127,65 @@ function ReplyThread({
   )
 
   // ── Typing indicators (Supabase broadcast, keyed by thread root id) ───────
+  // Everyone in the thread hears these broadcasts, so each one carries the ids
+  // the reply currently in the composer is addressed to and listeners drop
+  // anything not meant for them. A group member who will only ever see the
+  // thread (not a direct reply inside it) no longer sees the indicator.
   const [typers, setTypers] = useState({})          // userId -> { name, expiresAt }
   const typingChannelRef = useRef(null)
   const lastTypingSentRef = useRef(0)               // timestamp of last "typing: true" send
+  const lastTypingTargetsRef = useRef(null)         // audience of that send
   const typingIdleRef = useRef(null)
 
-  function sendTypingBroadcast(typing) {
+  // Recipient ids for the reply being composed.
+  //   null → every subscriber of the thread (broadcast audiences: everyone/HR…)
+  //   []   → nobody (audience could not be resolved)
+  function replyTargetIds() {
+    const { target, error } = resolveReplyTarget()
+    if (error || !target) return []
+    if (target.recipient_type === 'group') {
+      const ids = target.recipient_volunteer_ids
+      return Array.isArray(ids) && ids.length ? ids : []
+    }
+    if (target.recipient_volunteer_id) return [target.recipient_volunteer_id]
+    return null
+  }
+
+  function sendTypingBroadcast(typing, targets) {
     const ch = typingChannelRef.current
     if (!ch) return
     try {
       Promise.resolve(ch.send({
         type: 'broadcast',
         event: 'typing',
-        payload: { userId: user?.id, name: profile?.full_name || 'Someone', typing },
+        payload: { userId: user?.id, name: profile?.full_name || 'Someone', typing, targets: targets ?? null },
       })).catch(() => { /* channel not joined yet — TTL covers it */ })
     } catch { /* ignore */ }
   }
 
   function sendTypingThrottled() {
+    const targets = replyTargetIds()
     const now = Date.now()
-    if (now - lastTypingSentRef.current < TYPING_THROTTLE_MS) return
+    const prev = lastTypingTargetsRef.current
+    // Audience changed mid-typing (Reply → Reply All, a different replier…):
+    // retire the old indicator so nobody keeps a stale one.
+    if (lastTypingSentRef.current > 0 && !sameTargets(prev, targets)) {
+      sendTypingBroadcast(false, prev)
+      lastTypingSentRef.current = 0
+      lastTypingTargetsRef.current = null
+    }
+    if (lastTypingSentRef.current > 0 && now - lastTypingSentRef.current < TYPING_THROTTLE_MS) return
     lastTypingSentRef.current = now
-    sendTypingBroadcast(true)
+    lastTypingTargetsRef.current = targets
+    sendTypingBroadcast(true, targets)
   }
 
   function stopTypingNow() {
     if (typingIdleRef.current) { clearTimeout(typingIdleRef.current); typingIdleRef.current = null }
     if (lastTypingSentRef.current > 0) {
       lastTypingSentRef.current = 0
-      sendTypingBroadcast(false)
+      sendTypingBroadcast(false, lastTypingTargetsRef.current)
+      lastTypingTargetsRef.current = null
     }
   }
 
@@ -171,7 +209,17 @@ function ReplyThread({
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
         const uid = payload?.userId
         if (!uid || uid === user.id) return
+        // Keep only typers whose current reply is addressed to me.
+        // Missing/`null` targets = broadcast audience = the whole thread.
+        const targets = Array.isArray(payload?.targets) ? payload.targets : null
+        const forMe = !targets || targets.includes(user.id)
         setTypers(prev => {
+          if (!forMe) {
+            if (!(uid in prev)) return prev
+            const next = { ...prev }
+            delete next[uid]
+            return next
+          }
           if (payload.typing) {
             return { ...prev, [uid]: { name: payload.name || 'Someone', expiresAt: Date.now() + TYPING_TTL_MS } }
           }
@@ -365,6 +413,12 @@ function ReplyThread({
   const previewRecipientText = previewRecipientLabel && previewRecipientLabel !== collapsedLabel
     ? previewRecipientLabel
     : null
+  // Same emphasis rule as the expanded card: a multi-person audience bolds
+  // just the name ("To: **Group**"), a direct message stays plain.
+  const [previewToPrefix, previewToName] = splitToLabel(previewRecipientText || '')
+  const previewRecipientName = previewRecipientText && isMultiRecipient(previewSource)
+    ? <strong style={{ fontWeight: 700 }}>{previewToName}</strong>
+    : previewToName
 
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
@@ -390,15 +444,13 @@ function ReplyThread({
     return `To: ${recipientLabel(m)}`
   }
 
-  async function handleSendReply() {
-    if (!replyBody.trim()) return
-    setSending(true)
+  // Who the reply currently in the composer will be sent to. Shared by the
+  // send path and the typing indicator so announcements match the real audience.
+  function resolveReplyTarget() {
     const targetReply = replies.find(r => r.id === replyToId)
     const followUpReply = followUpId ? replies.find(r => r.id === followUpId) : null
-    const abort = (msg) => { showToast(msg, 'error'); setSending(false) }
-    let replyTarget
     if (isReplyAll) {
-      replyTarget = {
+      return { target: {
         recipient_type: message.recipient_type,
         recipient_day: message.recipient_day,
         recipient_shift: message.recipient_shift,
@@ -409,11 +461,12 @@ function ReplyThread({
         recipient_volunteer_ids: message.recipient_type === 'group'
           ? parseGroupMemberIds(message)
           : undefined,
-      }
-    } else if (followUpReply && followUpReply.sender_id === user?.id) {
+      } }
+    }
+    if (followUpReply && followUpReply.sender_id === user?.id) {
       // Follow-up on own reply: reply to that reply's recipient, not yourself.
       if (followUpReply.recipient_type !== 'volunteer') {
-        replyTarget = {
+        return { target: {
           recipient_type: followUpReply.recipient_type,
           recipient_day: followUpReply.recipient_day,
           recipient_shift: followUpReply.recipient_shift,
@@ -422,15 +475,17 @@ function ReplyThread({
           recipient_volunteer_ids: followUpReply.recipient_type === 'group'
             ? parseGroupMemberIds(followUpReply)
             : undefined,
-        }
-      } else {
-        if (!followUpReply.recipient_volunteer_id || followUpReply.recipient_volunteer_id === user?.id) return abort("Could not determine who to follow up with")
-        replyTarget = {
-          recipient_type: 'volunteer',
-          recipient_volunteer_id: followUpReply.recipient_volunteer_id,
-        }
+        } }
       }
-    } else if (isDirectThread) {
+      if (!followUpReply.recipient_volunteer_id || followUpReply.recipient_volunteer_id === user?.id) {
+        return { error: "Could not determine who to follow up with" }
+      }
+      return { target: {
+        recipient_type: 'volunteer',
+        recipient_volunteer_id: followUpReply.recipient_volunteer_id,
+      } }
+    }
+    if (isDirectThread) {
       // 1-on-1: always reply to the other person in the string, never yourself.
       // This prevents self-only replies when replying in a thread you started.
       let otherId = otherParticipantId
@@ -441,40 +496,50 @@ function ReplyThread({
         otherId = candidate
           ?? (message.sender_id !== user?.id ? message.sender_id : message.recipient_volunteer_id)
       }
-      if (!otherId || otherId === user?.id) return abort('Could not determine the other person in this conversation')
-      replyTarget = {
+      if (!otherId || otherId === user?.id) return { error: 'Could not determine the other person in this conversation' }
+      return { target: {
         recipient_type: 'volunteer',
         recipient_volunteer_id: otherId,
-      }
-    } else if (isGroupThread && targetReply) {
+      } }
+    }
+    if (isGroupThread && targetReply) {
       // Group threads: a Reply on someone else's reply goes to that person,
       // never to another replier or yourself.
-      if (targetReply.sender_id === user?.id) return abort("You can't reply to yourself")
-      replyTarget = {
+      if (targetReply.sender_id === user?.id) return { error: "You can't reply to yourself" }
+      return { target: {
         recipient_type: 'volunteer',
         recipient_volunteer_id: targetReply.sender_id,
-      }
-    } else if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
+      } }
+    }
+    if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
       // Broadcast threads (everyone/HR/shift/role): a recipient's Reply always
       // goes to the thread sender, never to another replier (or yourself).
-      if (message.sender_id === user?.id) return abort("Use Reply All to respond to your own message")
-      replyTarget = {
+      if (message.sender_id === user?.id) return { error: "Use Reply All to respond to your own message" }
+      return { target: {
         recipient_type: 'volunteer',
         recipient_volunteer_id: message.sender_id,
-      }
-    } else if (targetReply) {
-      if (targetReply.sender_id === user?.id) return abort("You can't reply to yourself")
-      replyTarget = {
+      } }
+    }
+    if (targetReply) {
+      if (targetReply.sender_id === user?.id) return { error: "You can't reply to yourself" }
+      return { target: {
         recipient_type: 'volunteer',
         recipient_volunteer_id: targetReply.sender_id,
-      }
-    } else {
-      if (message.sender_id === user?.id) return abort("Use Reply All to respond to your own group message")
-      replyTarget = {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: message.sender_id,
-      }
+      } }
     }
+    if (message.sender_id === user?.id) return { error: "Use Reply All to respond to your own group message" }
+    return { target: {
+      recipient_type: 'volunteer',
+      recipient_volunteer_id: message.sender_id,
+    } }
+  }
+
+  async function handleSendReply() {
+    if (!replyBody.trim()) return
+    setSending(true)
+    const abort = (msg) => { showToast(msg, 'error'); setSending(false) }
+    const { target: replyTarget, error } = resolveReplyTarget()
+    if (error) return abort(error)
     try {
       const accessToken = await getFreshAccessToken(supabase)
       const res = await fetch('/api/send-message', {
@@ -510,6 +575,14 @@ function ReplyThread({
   }
 
   const hasReplies = replies.length > 0
+  // Group threads read as two sections: every reply-all first, then the direct
+  // messages behind a divider. The divider only renders when there is at least
+  // one DM — with no reply-alls it separates the DMs from the root message.
+  const replyAlls = isGroupThread ? replies.filter(r => r.recipient_type !== 'volunteer') : []
+  const directReplies = isGroupThread ? replies.filter(r => r.recipient_type === 'volunteer') : replies
+  const orderedReplies = isGroupThread ? [...replyAlls, ...directReplies] : replies
+  const showDirectLabel = isGroupThread && directReplies.length > 0
+  const lastReplyId = replies[replies.length - 1]?.id
   const typingNames = Object.values(typers).map(t => t.name)
 
   // Display name for the reply composer: in 1-on-1 threads always the
@@ -519,7 +592,10 @@ function ReplyThread({
     if (isReplyAll) return null
     if (followUpId) {
       const f = replies.find(r => r.id === followUpId)
-      if (f?.sender_id === user?.id && f?.recipient_type === 'volunteer') {
+      if (f?.sender_id === user?.id) {
+        // Own group/broadcast reply: the plain Reply keeps that reply's
+        // audience, so name the audience rather than a person.
+        if (f.recipient_type !== 'volunteer') return recipientLabel(f)
         if (f.recipient_volunteer_id === user?.id) return 'User'
         return allUsers.find(u => u.id === f.recipient_volunteer_id)?.full_name ?? 'User'
       }
@@ -590,7 +666,7 @@ function ReplyThread({
               <span style={{ display: 'inline-flex', flexWrap: 'wrap', columnGap: '0.35rem', fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
                 <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(previewSource.created_at)}{previewRecipientText ? ',' : ''}</span>
                 {previewRecipientText && (
-                  <span style={{ whiteSpace: 'nowrap' }}>{previewRecipientText}</span>
+                  <span style={{ whiteSpace: 'nowrap' }}>{previewToPrefix}{previewRecipientName}</span>
                 )}
               </span>
             </div>
@@ -647,22 +723,28 @@ function ReplyThread({
           flexDirection: 'column',
           gap: '0.5rem',
         }}>
-          {replies.map((reply, idx) => {
+          {orderedReplies.map((reply, idx) => {
             const replyIsAdmin = reply.sender?.role === 'admin' || false
             const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
-            const isMostRecent = idx === replies.length - 1
+            const isMostRecent = reply.id === lastReplyId
             const isMostRecentReply = true
             const isOwnReply = reply.sender_id === user?.id
-            // A reply's audience decides its button: a reply sent to the whole
-            // group gets Reply All when it's yours, everything else gets a
-            // regular Reply.
             const ownReplyIsGroup = isOwnReply && reply.recipient_type !== 'volunteer'
+            const replyIsGroup = reply.recipient_type !== 'volunteer'
             let replyCanReply, replyCanReplyAll
             if (isGroupThread) {
-              // Group chats give every reply exactly one button, so recipients
-              // get the same options as the thread sender.
-              replyCanReplyAll = ownReplyIsGroup
-              replyCanReply = canReply && !ownReplyIsGroup
+              if (replyIsGroup) {
+                // Sent to the whole group: always offer Reply All. The original
+                // sender gets only it — someone else's group message has no
+                // single target for a plain Reply — while every recipient gets
+                // both buttons (their plain Reply goes to that replier).
+                replyCanReplyAll = true
+                replyCanReply = canReply && !isGroupMessageSender
+              } else {
+                // Direct message inside the thread → plain Reply only.
+                replyCanReplyAll = false
+                replyCanReply = canReply
+              }
             } else if (isGroupMessageSender) {
               replyCanReply = isOwnReply ? !ownReplyIsGroup : true
               replyCanReplyAll = ownReplyIsGroup
@@ -670,8 +752,18 @@ function ReplyThread({
               replyCanReply = canReply && isMostRecent && isMostRecentReply
               replyCanReplyAll = false
             }
+            const showDivider = showDirectLabel && idx === replyAlls.length
             return (
-              <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start', minWidth: 0, maxWidth: '100%' }}>
+              <Fragment key={reply.id}>
+                {showDivider && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.15rem 0' }}>
+                    <span style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                      Direct Messages
+                    </span>
+                    <span style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                  </div>
+                )}
+                <div ref={isMostRecent ? mostRecentReplyRef : undefined} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start', minWidth: 0, maxWidth: '100%' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1, minWidth: 0, maxWidth: '100%' }}>
                   <MessageCard
                     m={reply}
@@ -689,6 +781,7 @@ function ReplyThread({
                   />
                 </div>
               </div>
+              </Fragment>
             )
           })}
         </div>
@@ -1077,15 +1170,13 @@ export function MessageTab({
         if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
         repliesMap[r.parent_message_id].push(r)
       })
-    // Sort each reply thread: the sender's reply-alls float above direct
-    // messages to/from the sender, chronological within each group.
-    const byId = new Map(validMsgs.map(m => [m.id, m]))
+    // Sort each reply thread: every reply-all floats above the direct
+    // messages, no matter who sent it, chronological within each group.
     Object.keys(repliesMap).forEach(k => {
-      const parentSenderId = byId.get(k)?.sender_id
-      const isBroadcast = (r) => parentSenderId && r.sender_id === parentSenderId && r.recipient_type !== 'volunteer'
+      const isReplyAll = (r) => r.recipient_type !== 'volunteer'
       repliesMap[k].sort((a, b) => {
-        const ag = isBroadcast(a) ? 0 : 1
-        const bg = isBroadcast(b) ? 0 : 1
+        const ag = isReplyAll(a) ? 0 : 1
+        const bg = isReplyAll(b) ? 0 : 1
         if (ag !== bg) return ag - bg
         return new Date(a.created_at) - new Date(b.created_at)
       })
