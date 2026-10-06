@@ -277,7 +277,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           key={att.url}
           src={att.url}
           alt={att.name || 'Attached image'}
-          onClick={() => setLightboxUrl(att.url)}
+          onClick={e => { e.stopPropagation(); setLightboxUrl(att.url) }}
           style={{
             maxWidth: '100%',
             maxHeight: '260px',
@@ -296,6 +296,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           style={{
             display: 'flex',
             flexDirection: 'column',
+            alignItems: 'flex-start',
             gap: '0.35rem',
             marginTop: (hasBody || imageAttachments.length) ? '0.5rem' : 0,
           }}
@@ -305,13 +306,13 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
               key={att.url}
               type="button"
               title={`Download ${att.name}`}
-              onClick={() => downloadAttachment(att)}
+              onClick={e => { e.stopPropagation(); downloadAttachment(att) }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '0.75rem',
-                width: '100%',
+                gap: '0.5rem',
+                width: 'fit-content',
+                maxWidth: '100%',
                 height: '2.25rem',
                 padding: '0 0.7rem',
                 background: 'var(--bg)',
