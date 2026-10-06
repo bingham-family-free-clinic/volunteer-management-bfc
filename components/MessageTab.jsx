@@ -856,7 +856,7 @@ function ReplyThread({
                 {/* Who this draft goes to. Offers both audiences only when the
                     message you replied to went to a crowd *and* someone else
                     sent it — otherwise it is a label with nothing to switch. */}
-                <div style={{ position: 'relative' }}>
+                <div ref={targetMenuRef} style={{ position: 'relative' }}>
                   <button
                     type="button"
                     aria-haspopup="listbox"
@@ -2178,7 +2178,7 @@ export function MessageTab({
                       )}
                     </>
                   ) : (
-                <div ref={targetMenuRef} style={{ position: 'relative' }}>
+                <div style={{ position: 'relative' }}>
                       <div
                         onClick={() => { setComboOpen(true); recipientInputRef.current?.focus?.() }}
                         style={{ ...S.input, display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', cursor: 'text', minHeight: '3rem' }}
