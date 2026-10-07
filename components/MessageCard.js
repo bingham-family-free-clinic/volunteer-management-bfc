@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { formatDateTime } from '../lib/timeUtils'
-import { recipientLabel } from '../lib/messageUtils'
+import { recipientLabel, isMultiRecipient, splitToLabel, parseAttachments, isImageAttachment, downloadAttachment } from '../lib/messageUtils'
 
 // Matches http/https URLs
 const URL_REGEX = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&/=]*)/g
@@ -62,7 +62,7 @@ function formatBody(text) {
   })
 }
 
-export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, canReplyAll, replyOpen, onReply, onReplyAll, isHighlighted, recipientLabel: recipientLabelProp, groupMemberNames }) {
+export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLabel, canReply, onReply, isHighlighted, recipientLabel: recipientLabelProp, groupMemberNames }) {
   const isUnread =
     readMessageIds &&
     !readMessageIds.has(m.id) &&
@@ -72,7 +72,26 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
   // Group chats (Individuals tab, 2+ people) show an inline "To: Group"
   // toggle that overlays the member list Gmail-style. Clicking out collapses.
   const isGroupChat = m.recipient_type === 'group'
-  const groupShort = (recipientLabelProp || '').replace(/^To:\s*/, '') || 'Group'
+  const [toPrefix, toName] = splitToLabel(recipientLabelProp || '')
+  const groupShort = toName || 'Group'
+  // Only the recipient's name is bolded when the message goes to more than one
+  // person ("To: **Everyone**", "To: **Group**"); the "To: " prefix and the
+  // group's expand caret stay plain.
+  const emphasise = text => isMultiRecipient(m)
+    ? <strong style={{ fontWeight: 700 }}>{text}</strong>
+    : text
+
+  // ── Reply header layout ────────────────────────────────────────────────────
+  const showReply = Boolean(canReply)
+
+  // Attachments live in image_url as JSON (legacy rows hold a bare image URL).
+  // Images stack vertically after the text; every other file gets its own
+  // one-line download card below them.
+  const attachments = parseAttachments(m.image_url)
+  const imageAttachments = attachments.filter(isImageAttachment)
+  const fileAttachments = attachments.filter(a => !isImageAttachment(a))
+  const hasBody = Boolean(m.body)
+  const hasAttachments = attachments.length > 0
 
   useEffect(() => {
     if (!groupOpen) return
@@ -101,6 +120,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           flexWrap: 'wrap',
           gap: '0.4rem',
           minHeight: '24px',
+          position: 'relative',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: '1 1 0%', minWidth: 0 }}>
@@ -140,7 +160,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
               {formatDateTime(m.created_at)}{recipientLabelProp ? ',' : ''}
             </span>
             {!isGroupChat && recipientLabelProp && (
-              <span style={{ whiteSpace: 'nowrap' }}>{recipientLabelProp}</span>
+              <span style={{ whiteSpace: 'nowrap' }}>{toPrefix}{emphasise(toName)}</span>
             )}
             {isGroupChat && recipientLabelProp && (
               <span style={{ whiteSpace: 'nowrap' }}>To:{' '}
@@ -160,7 +180,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {groupShort} {groupOpen ? '˄' : '˅'}
+                  {emphasise(groupShort)} {groupOpen ? '˄' : '˅'}
                 </button>
                 {groupOpen && (
                   <span
@@ -199,9 +219,14 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-
-          {canReply && !replyOpen && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          {showReply && (
             <button
               onClick={e => { e.stopPropagation(); onReply?.() }}
               style={{
@@ -229,34 +254,6 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
               Reply
             </button>
           )}
-          {canReplyAll && !replyOpen && (
-            <button
-              onClick={e => { e.stopPropagation(); onReplyAll?.() }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                padding: '0.15rem 0.55rem',
-                background: 'none',
-                border: '1px solid var(--border)',
-                borderRadius: '100px',
-                color: 'var(--muted)',
-                fontSize: '0.8rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: 'DM Sans, sans-serif',
-                transition: 'border-color 0.15s, color 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-            >
-              <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 14 4 9 9 4" />
-                <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-              </svg>
-              Reply All
-            </button>
-          )}
         </div>
       </div>
 
@@ -266,7 +263,7 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
             fontSize: '0.92rem',
             lineHeight: 1.5,
             margin: 0,
-            marginBottom: m.image_url ? '0.75rem' : 0,
+            marginBottom: hasAttachments ? '0.75rem' : 0,
             overflowWrap: 'break-word',
             wordBreak: 'break-word',
           }}
@@ -275,11 +272,12 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
         </div>
       )}
 
-      {m.image_url && (
+      {imageAttachments.map((att, idx) => (
         <img
-          src={m.image_url}
-          alt="Attached"
-          onClick={() => setLightboxUrl(m.image_url)}
+          key={att.url}
+          src={att.url}
+          alt={att.name || 'Attached image'}
+          onClick={e => { e.stopPropagation(); setLightboxUrl(att.url) }}
           style={{
             maxWidth: '100%',
             maxHeight: '260px',
@@ -288,9 +286,68 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
             cursor: 'zoom-in',
             border: '1px solid var(--border)',
             display: 'block',
-            marginTop: m.body ? '0.5rem' : 0,
+            marginTop: (hasBody || idx > 0) ? '0.5rem' : 0,
           }}
         />
+      ))}
+
+      {fileAttachments.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: '0.35rem',
+            marginTop: (hasBody || imageAttachments.length) ? '0.5rem' : 0,
+          }}
+        >
+          {fileAttachments.map(att => (
+            <button
+              key={att.url}
+              type="button"
+              title={`Download ${att.name}`}
+              onClick={e => { e.stopPropagation(); downloadAttachment(att) }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                width: 'fit-content',
+                maxWidth: '100%',
+                height: '2.25rem',
+                padding: '0 0.7rem',
+                background: 'var(--bg)',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: 'DM Sans, sans-serif',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  color: '#0369a1',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {att.name || 'File'}
+              </span>
+              <svg
+                width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                style={{ flexShrink: 0 }}
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )
