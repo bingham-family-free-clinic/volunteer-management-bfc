@@ -116,7 +116,7 @@ export default function ResetPasswordPage() {
             <p>Verifying your reset link…</p>
             <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>
               If nothing happens, your link may have expired.{' '}
-              <a href="/forgot-password" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+              <a href="/" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
                 Request a new one.
               </a>
             </p>
