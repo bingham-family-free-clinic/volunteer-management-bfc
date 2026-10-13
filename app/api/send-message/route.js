@@ -115,8 +115,11 @@ export async function POST(req) {
         if (Array.isArray(parsed)) raw = parsed
       } catch { /* ignore, validated below */ }
     }
-    groupMemberIds = [...new Set(raw.filter(id => typeof id === 'string' && id && id !== user.id))].sort()
-    if (groupMemberIds.length === 0) {
+    // The stored list is the FULL membership, including the sender — self is
+    // excluded only when delivering below. Otherwise reply-alls would keep
+    // dropping the original sender and the member list would stay incomplete.
+    groupMemberIds = [...new Set([...raw.filter(id => typeof id === 'string' && id), user.id])].sort()
+    if (groupMemberIds.filter(id => id !== user.id).length === 0) {
       return Response.json({ error: 'Select at least one recipient.' }, { status: 400 })
     }
   }
@@ -198,7 +201,7 @@ export async function POST(req) {
     recipientUserIds = [...new Set((data || []).map(s => s.volunteer_id))]
 
   } else if (recipient_type === 'group') {
-    recipientUserIds = groupMemberIds
+    recipientUserIds = groupMemberIds.filter(id => id !== user.id)
 
   } else if (
     (recipient_type === 'volunteer' || recipient_type === 'user') &&
@@ -232,7 +235,7 @@ export async function POST(req) {
   const senderName = senderProfile?.full_name?.split(' ')[0] ?? 'Someone'
   const notifPayload = JSON.stringify({
     title: `Message from ${senderName}`,
-    body:  (body?.trim() || '📎 Image').slice(0, 120),
+    body:  (body?.trim() || (image_url ? '📎 Attachment' : '')).slice(0, 120),
     url:   `/volunteer?messageId=${message.id}`,
   })
 
