@@ -278,6 +278,36 @@ const PREP_ROLES = [
 const STAFFING_ROLES = PREP_ROLES.map(r => r.role)
 const STAFFING_WAITLIST_THRESHOLD = 4
 
+// Every role that can ever need clinic coverage: any role with a capacity
+// above zero on any day/shift. Zero-capacity roles (Mental Health,
+// Young Support) and roles with no capacity configured at all (e.g.
+// Information Systems) can never have an open shift, so they never match.
+const MATCH_ROLES = Object.keys(ROLE_SUGGESTIONS).filter(role =>
+  DAYS.some(day => SHIFTS.some(shift => (getRoleCapacity(day, shift, role) ?? 0) > 0))
+)
+
+// Normalized interests for schedulable roles outside the six scored clinic
+// roles (which getApplicantStaffingRoles already covers).
+const MATCH_ROLE_ALIASES = {
+  'float': 'Float',
+  'clinical supervisor': 'Clinical Supervisor',
+}
+
+// Canonical schedulable roles the applicant expressed interest in, deduped,
+// in the order listed. Extends getApplicantStaffingRoles (left untouched for
+// preparedness scoring) with the MATCH_ROLES above.
+function getApplicantMatchRoles(applicant) {
+  const roles = getApplicantStaffingRoles(applicant)
+  const seen = new Set(roles)
+  for (const label of prepToList(applicant?.roles_interested).map(normText)) {
+    const role = MATCH_ROLE_ALIASES[label]
+    if (!role || seen.has(role) || !MATCH_ROLES.includes(role)) continue
+    seen.add(role)
+    roles.push(role)
+  }
+  return roles
+}
+
 // Canonical clinic roles (matching PREP_ROLES aliases) the applicant expressed
 // interest in, deduped, in the order listed.
 function getApplicantStaffingRoles(applicant) {
@@ -293,16 +323,16 @@ function getApplicantStaffingRoles(applicant) {
   return roles
 }
 
-// Set of "day-shift-role" keys (role limited to STAFFING_ROLES) that
-// currently have an unfilled clinic slot — mirrors the openings math in
-// ClinicOpenings.jsx / Waitlist.js's computeAvailableSlots.
+// Set of "day-shift-role" keys (role limited to MATCH_ROLES — every role the
+// schedule can need) that currently have an unfilled clinic slot — mirrors
+// the openings math in ClinicOpenings.jsx / Waitlist.js's computeAvailableSlots.
 function computeOpenStaffingSlotSet(scheduleRows) {
   const today = new Date().toISOString().split('T')[0]
   const activeRows = (scheduleRows || []).filter(r => r.end_date == null || r.end_date > today)
   const set = new Set()
   for (const day of DAYS) {
     for (const shift of SHIFTS) {
-      for (const role of STAFFING_ROLES) {
+      for (const role of MATCH_ROLES) {
         const required = getRoleCapacity(day, shift, role)
         if (!required) continue
         const slotRows = activeRows.filter(r =>
@@ -323,9 +353,9 @@ function computeOpenStaffingSlotSet(scheduleRows) {
 // (same convention Waitlist.js/computeAvailableSlots uses for empty prefs).
 function computeWaitlistRoleCounts(waitlistRows) {
   const counts = {}
-  for (const role of STAFFING_ROLES) counts[role] = 0
+  for (const role of MATCH_ROLES) counts[role] = 0
   for (const entry of (waitlistRows || [])) {
-    const roles = (entry.preferred_roles?.length > 0) ? entry.preferred_roles : STAFFING_ROLES
+    const roles = (entry.preferred_roles?.length > 0) ? entry.preferred_roles : MATCH_ROLES
     for (const role of roles) {
       if (counts[role] !== undefined) counts[role] += 1
     }
@@ -336,7 +366,7 @@ function computeWaitlistRoleCounts(waitlistRows) {
 // Returns 'high' | 'moderate' | 'low', or null if the applicant hasn't
 // expressed interest in any of the six scored clinic roles.
 function getStaffingNeedLevel(applicant, openSlotSet, waitlistCounts) {
-  const roles = getApplicantStaffingRoles(applicant)
+  const roles = getApplicantMatchRoles(applicant)
   if (roles.length === 0) return null
 
   const statedSlots = getStatedAvailability(applicant)
@@ -358,7 +388,7 @@ function getStaffingNeedLevel(applicant, openSlotSet, waitlistCounts) {
 // canonical role even when nothing matches. Empty when the applicant listed
 // no recognized clinic roles.
 function getOpenShiftLines(applicant, openSlotSet) {
-  const roles = getApplicantStaffingRoles(applicant)
+  const roles = getApplicantMatchRoles(applicant)
   if (roles.length === 0) return []
   const statedSlots = getStatedAvailability(applicant)
   const slots = statedSlots.length > 0 ? statedSlots : ALL_SLOTS
