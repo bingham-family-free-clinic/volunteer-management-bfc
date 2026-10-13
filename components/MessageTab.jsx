@@ -479,9 +479,14 @@ function ReplyThread({
   const isThreadSender = message.sender_id === user?.id
   const canReply = Boolean(user?.id)
 
-  // Group chat member names (Individuals tab, 2+ people), alphabetical.
+  // Group chat member names (Individuals tab, 2+ people), alphabetical —
+  // everyone in the group except the person viewing, so each member sees
+  // all the other participants. The row sender is unioned in because older
+  // rows stored member lists without them.
   function getGroupMemberNames(m) {
-    return parseGroupMemberIds(m)
+    const viewerId = user?.id
+    return [...new Set([...parseGroupMemberIds(m), m?.sender_id])]
+      .filter(id => id && id !== viewerId)
       .map(id => allUsers.find(u => u.id === id)?.full_name)
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b))
@@ -529,9 +534,11 @@ function ReplyThread({
         recipient_role: src.recipient_role,
         recipient_volunteer_id: src.recipient_volunteer_id,
         // Group threads store members as JSON — the API requires the id
-        // array, to forward it explicitly.
+        // array, to forward it explicitly. The source sender is unioned in
+        // because stored lists predate full membership (composers excluded
+        // themselves), so a reply-all reaches everyone, not everyone-but-them.
         recipient_volunteer_ids: src.recipient_type === 'group'
-          ? parseGroupMemberIds(src)
+          ? [...new Set([...parseGroupMemberIds(src), src.sender_id].filter(Boolean))]
           : undefined,
       } }
     }
