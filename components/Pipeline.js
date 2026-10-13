@@ -353,6 +353,30 @@ function getStaffingNeedLevel(applicant, openSlotSet, waitlistCounts) {
   return 'low'
 }
 
+// Per-role open day-shift slots matching the applicant's interested role(s)
+// + stated shift(s) — [{ role, labels: ['Mon 10-2', ...] }], one entry per
+// canonical role even when nothing matches. Empty when the applicant listed
+// no recognized clinic roles.
+function getOpenShiftLines(applicant, openSlotSet) {
+  const roles = getApplicantStaffingRoles(applicant)
+  if (roles.length === 0) return []
+  const statedSlots = getStatedAvailability(applicant)
+  const slots = statedSlots.length > 0 ? statedSlots : ALL_SLOTS
+  return roles.map(role => ({
+    role,
+    labels: slots
+      .filter(s => openSlotSet.has(`${s.day}-${s.shift}-${role}`))
+      .map(s => s.label),
+  }))
+}
+
+// Number of unfilled day-shift-role clinic slots matching the applicant's
+// interested role(s) + stated shift(s). Same flexible-availability convention
+// as getStaffingNeedLevel: no shifts checked = available for all slots.
+function countOpenShiftMatches(applicant, openSlotSet) {
+  return getOpenShiftLines(applicant, openSlotSet).reduce((n, line) => n + line.labels.length, 0)
+}
+
 const STAFFING_NEED_STYLE = {
   high:     { label: 'High Staffing Need',     color: C.primary },
   moderate: { label: 'Moderate Staffing Need', color: C.blue    },
@@ -2586,8 +2610,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       // Alphabetical by full name.
       return [...base].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
     }
-    // Default (applied): preserve existing order (created_at desc from DB)
-    return base
+    // Default (applied): most placeable first — applicants whose availability +
+    // interested roles match the most open clinic slots — then newest first.
+    return [...base].sort((x, y) =>
+      countOpenShiftMatches(y, staffingOpenSlots) - countOpenShiftMatches(x, staffingOpenSlots) ||
+      new Date(y.created_at) - new Date(x.created_at)
+    )
   })()
   const stageCounts        = STAGES.reduce((acc, s) => { acc[s] = applicants.filter(a => a.stage === s).length; return acc }, {})
 
@@ -2656,6 +2684,19 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     return (
       <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: color + '18', color, border: `1px solid ${color}44`, whiteSpace: 'nowrap' }}>
         {label}
+      </span>
+    )
+  }
+
+  // Applied-stage-only pill: how many open clinic slots line up with the
+  // applicant's interested role(s) + shift(s). Renders nothing when there's
+  // no match (or no listed roles).
+  function OpenShiftsBadge({ applicant }) {
+    const n = countOpenShiftMatches(applicant, staffingOpenSlots)
+    if (n === 0) return null
+    return (
+      <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: C.blue + '18', color: C.blue, border: `1px solid ${C.blue}44`, whiteSpace: 'nowrap' }}>
+        Available For {n} Open Shift{n === 1 ? '' : 's'}
       </span>
     )
   }
@@ -3362,6 +3403,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
     const checklistCount    = CHECKLIST_ITEMS.filter(i => checklist[i.key]).length
     const s1 = step1Valid()
+    const openShiftLines = isApplied ? getOpenShiftLines(applicant, staffingOpenSlots) : []
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -3418,6 +3460,26 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               </div>
           }
         </div>
+
+        {/* Open Shifts — Applied stage; each interested role with the open
+            shifts the applicant is available for */}
+        {isApplied && openShiftLines.length > 0 && (
+          <div style={{ ...card, padding: '1rem 1.25rem' }}>
+            <p style={secLabel}>Open Shifts</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {openShiftLines.map(({ role, labels }) => (
+                <div key={role} style={{ padding: '0.65rem 0.9rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <p style={{ fontSize: '0.88rem', lineHeight: 1.5 }}>
+                    <span style={{ fontWeight: 600 }}>{role}: </span>
+                    <span style={labels.length ? { color: 'var(--text)' } : { color: 'var(--muted)', fontStyle: 'italic' }}>
+                      {labels.length ? labels.join(', ') : 'none'}
+                    </span>
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Preparedness — Applied stage; breakdown opens on click */}
         {isApplied && <PreparednessPanel key={applicant.id} applicant={applicant} card={card} secLabel={secLabel} />}
@@ -3786,7 +3848,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         {a.stage === 'applied' && <StaffingNeedBadge applicant={a} />}
-                        <StagePill stage={a.stage} />
+                        {a.stage === 'applied' && <OpenShiftsBadge applicant={a} />}
+                        {a.stage !== 'applied' && <StagePill stage={a.stage} />}
                         {a.created_at && <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{new Date(a.created_at).toLocaleDateString()}</span>}
                         <span style={{ color: 'var(--muted)' }}>›</span>
                       </div>
