@@ -28,3 +28,25 @@ body {
 }
 
 .mono { font-family: 'DM Mono', monospace; }
+
+/* Inbox search bar: grows from the 34px circle trigger into a pill */
+@keyframes inbox-search-expand {
+  from { width: 34px; }
+  to   { width: 16rem; }
+}
+
+.inbox-search-input {
+  animation: inbox-search-expand 0.25s ease;
+}
+
+@media (max-width: 640px) {
+  /* Claim a full row first so the wrap happens instantly, then the width
+     animation plays out on its own line instead of mid-jump. */
+  .inbox-search-wrap {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+  .inbox-search-input {
+    animation-delay: 0.08s;
+  }
+}

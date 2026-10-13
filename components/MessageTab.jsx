@@ -1,13 +1,26 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { MessageCard } from './MessageCard'
 import { formatDateTime } from '../lib/timeUtils'
 import { ROLES } from '../lib/constants'
-import { recipientLabel, parseGroupMemberIds } from '../lib/messageUtils'
+import { recipientLabel, parseGroupMemberIds, isMultiRecipient, splitToLabel, parseAttachments, isImageAttachment, serializeAttachments, typeFromName } from '../lib/messageUtils'
 
 const MSG_PAGE_SIZE = 10
 const BROADCAST_TYPES = ['everyone', 'role', 'shift']
+
+// Typing indicator tuning
+const TYPING_THROTTLE_MS = 1500 // min gap between "typing: true" sends
+const TYPING_IDLE_MS = 7000     // no keystrokes for this long → send "typing: false"
+const TYPING_TTL_MS = 9000      // receiver drops a typer after this long without refresh
+
+// Audience comparison for typing broadcasts. null = whole thread, [] = nobody.
+function sameTargets(a, b) {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every(id => b.includes(id))
+  }
+  return a === b
+}
 
 // Refreshes Supabase token if expired, missing, or about to expire
 async function getFreshAccessToken(supabase) {
@@ -78,6 +91,7 @@ function ReplyThread({
   collapsedLabel,
   startExpanded = false,
   previewMessage,
+  searchQuery = '',
 }) {
   const isUnread = readMessageIds && (
     // Received message not yet read
@@ -86,23 +100,49 @@ function ReplyThread({
     replies.some(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id)
   )
   const [expanded, setExpanded]     = useState(startExpanded)
-  // Sync expanded with startExpanded so deep-linked threads expand
-  // even if MessageTab mounts before openMessageId is set
   useEffect(() => { setExpanded(startExpanded) }, [startExpanded])
   const [replyOpen, setReplyOpen]   = useState(false)
   const [replyBody, setReplyBody]   = useState('')
   const [sending, setSending]       = useState(false)
   const [replyToId, setReplyToId]     = useState(null)
+  // Which audience the composer is addressed to: true → the message's whole
+  // audience, false → just the person the Reply button was clicked on.
   const [isReplyAll, setIsReplyAll]   = useState(false)
-  const [followUpId, setFollowUpId]   = useState(null)
+  const [targetMenuOpen, setTargetMenuOpen] = useState(false)
   const [locallyHighlightedReplies, setLocallyHighlightedReplies] = useState(new Set())
+  const targetMenuRef = useRef(null)
 
-  const isGroupMessageSender = message.sender_id === user?.id && message.recipient_type !== 'volunteer'
+  // Close the "Replying to …" dropdown menu when clicking outside it.
+  useEffect(() => {
+    if (!targetMenuOpen) return
+    const onDown = (e) => {
+      if (targetMenuRef.current && !targetMenuRef.current.contains(e.target)) setTargetMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [targetMenuOpen])
+
   const isDirectThread = message.recipient_type === 'volunteer'
-  // In a 1-on-1 thread the "other person" is whoever isn't the viewer.
-  const otherParticipantId = isDirectThread
-    ? (message.sender_id === user?.id ? message.recipient_volunteer_id : message.sender_id)
-    : null
+
+  // ── Thread audience size ──────────────────────────────────────────────────
+  // Count the recipients and taylor the reply logic
+  const isMultiPersonThread = (() => {
+    const type = message.recipient_type
+    if (type && type !== 'volunteer' && type !== 'group') return true
+    const ids = new Set()
+    const collect = (m) => {
+      if (!m) return
+      if (m.sender_id) ids.add(m.sender_id)
+      if (m.recipient_type === 'volunteer') {
+        if (m.recipient_volunteer_id) ids.add(m.recipient_volunteer_id)
+      } else if (m.recipient_type === 'group') {
+        parseGroupMemberIds(m).forEach(id => ids.add(id))
+      }
+    }
+    collect(message)
+    replies.forEach(collect)
+    return ids.size > 2
+  })()
 
   // Auto size textboxes if browser supports it
   const replyRef = useRef(null)
@@ -111,6 +151,135 @@ function ReplyThread({
   const [replyFieldSizingSupported] = useState(() =>
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
   )
+
+  // ── Typing indicators (Supabase broadcast, keyed by thread root id) ───────
+  // Everyone in the thread hears these broadcasts, so each one carries the ids
+  // the reply currently in the composer is addressed to and listeners drop
+  // anything not meant for them. A group member who will only ever see the
+  // thread (not a direct reply inside it) no longer sees the indicator.
+  const [typers, setTypers] = useState({})          // userId -> { name, expiresAt }
+  const typingChannelRef = useRef(null)
+  const lastTypingSentRef = useRef(0)               // timestamp of last "typing: true" send
+  const lastTypingTargetsRef = useRef(null)         // audience of that send
+  const typingIdleRef = useRef(null)
+
+  // Recipient ids for the reply being composed.
+  //   null → every subscriber of the thread (broadcast audiences: everyone/HR…)
+  //   []   → nobody (audience could not be resolved)
+  function replyTargetIds() {
+    const { target, error } = resolveReplyTarget()
+    if (error || !target) return []
+    if (target.recipient_type === 'group') {
+      const ids = target.recipient_volunteer_ids
+      return Array.isArray(ids) && ids.length ? ids : []
+    }
+    if (target.recipient_volunteer_id) return [target.recipient_volunteer_id]
+    return null
+  }
+
+  function sendTypingBroadcast(typing, targets) {
+    const ch = typingChannelRef.current
+    if (!ch) return
+    try {
+      Promise.resolve(ch.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { userId: user?.id, name: profile?.full_name || 'Someone', typing, targets: targets ?? null },
+      })).catch(() => { /* channel not joined yet — TTL covers it */ })
+    } catch { /* ignore */ }
+  }
+
+  function sendTypingThrottled() {
+    const targets = replyTargetIds()
+    const now = Date.now()
+    const prev = lastTypingTargetsRef.current
+    // Audience changed mid-typing (Reply → Reply All, a different replier…):
+    // retire the old indicator so nobody keeps a stale one.
+    if (lastTypingSentRef.current > 0 && !sameTargets(prev, targets)) {
+      sendTypingBroadcast(false, prev)
+      lastTypingSentRef.current = 0
+      lastTypingTargetsRef.current = null
+    }
+    if (lastTypingSentRef.current > 0 && now - lastTypingSentRef.current < TYPING_THROTTLE_MS) return
+    lastTypingSentRef.current = now
+    lastTypingTargetsRef.current = targets
+    sendTypingBroadcast(true, targets)
+  }
+
+  function stopTypingNow() {
+    if (typingIdleRef.current) { clearTimeout(typingIdleRef.current); typingIdleRef.current = null }
+    if (lastTypingSentRef.current > 0) {
+      lastTypingSentRef.current = 0
+      sendTypingBroadcast(false, lastTypingTargetsRef.current)
+      lastTypingTargetsRef.current = null
+    }
+  }
+
+  function scheduleStopTyping() {
+    if (typingIdleRef.current) clearTimeout(typingIdleRef.current)
+    typingIdleRef.current = setTimeout(() => { typingIdleRef.current = null; stopTypingNow() }, TYPING_IDLE_MS)
+  }
+
+  function handleReplyInputChange(value) {
+    setReplyBody(value)
+    if (!value.trim()) { stopTypingNow(); return }
+    sendTypingThrottled()
+    scheduleStopTyping()
+  }
+
+  // Subscribe to this thread's typing broadcasts while it's expanded
+  useEffect(() => {
+    if (!expanded || !message?.id || !user?.id) return
+    const channel = supabase
+      .channel(`typing:${message.id}`)
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        const uid = payload?.userId
+        if (!uid || uid === user.id) return
+        // Keep only typers whose current reply is addressed to me.
+        // Missing/`null` targets = broadcast audience = the whole thread.
+        const targets = Array.isArray(payload?.targets) ? payload.targets : null
+        const forMe = !targets || targets.includes(user.id)
+        setTypers(prev => {
+          if (!forMe) {
+            if (!(uid in prev)) return prev
+            const next = { ...prev }
+            delete next[uid]
+            return next
+          }
+          if (payload.typing) {
+            return { ...prev, [uid]: { name: payload.name || 'Someone', expiresAt: Date.now() + TYPING_TTL_MS } }
+          }
+          if (!(uid in prev)) return prev
+          const next = { ...prev }
+          delete next[uid]
+          return next
+        })
+      })
+      .subscribe()
+    typingChannelRef.current = channel
+
+    // Expire stale typers (closed tab, dropped "typing: false" event)
+    const prune = setInterval(() => {
+      setTypers(prev => {
+        const now = Date.now()
+        const kept = Object.entries(prev).filter(([, t]) => t.expiresAt > now)
+        if (kept.length === Object.keys(prev).length) return prev
+        return Object.fromEntries(kept)
+      })
+    }, 1000)
+
+    return () => {
+      clearInterval(prune)
+      stopTypingNow()
+      typingChannelRef.current = null
+      supabase.removeChannel(channel)
+    }
+  }, [expanded, message?.id, user?.id, supabase])
+
+  // Stop announcing as soon as the composer closes (send, cancel, Escape)
+  useEffect(() => {
+    if (!replyOpen) stopTypingNow()
+  }, [replyOpen])
 
   // Clear browser notifications for a specific message ID
   async function clearNotificationForMessage(messageId) {
@@ -194,7 +363,61 @@ function ReplyThread({
     clearNotificationForMessage(message.id)
   }, [startExpanded])
 
-  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : '📎 Image'
+  // Realtime arrivals: a reply that lands while this thread is already
+  // expanded gets the same treatment as expandThread — highlight it (the
+  // highlight keeps the blue styling after read state clears) and mark the
+  // thread read immediately, so the user doesn't have to collapse/re-expand
+  // to clear the unread state.
+  const knownReplyIdsRef = useRef(null)   // reply ids seen on a previous run
+  const latestReplyAtRef = useRef(null)   // newest reply created_at seen so far
+  useEffect(() => {
+    if (knownReplyIdsRef.current === null) {
+      // First run: everything already attached is history, not a new arrival.
+      knownReplyIdsRef.current = new Set(replies.map(r => r.id))
+      latestReplyAtRef.current = replies.reduce(
+        (max, r) => (!max || Date.parse(r.created_at) > Date.parse(max) ? r.created_at : max),
+        null
+      )
+      return
+    }
+    const fresh = replies.filter(r => !knownReplyIdsRef.current.has(r.id))
+    if (fresh.length === 0) return
+    fresh.forEach(r => knownReplyIdsRef.current.add(r.id))
+
+    // Older rows trickling in from "Load older messages" are not arrivals.
+    const baseline = Date.parse(latestReplyAtRef.current ?? message.created_at)
+    const incoming = fresh.filter(r =>
+      Date.parse(r.created_at) > baseline &&
+      r.sender_id !== user?.id &&
+      !readMessageIds.has(r.id)
+    )
+    incoming.forEach(r => {
+      if (!latestReplyAtRef.current || Date.parse(r.created_at) > Date.parse(latestReplyAtRef.current)) {
+        latestReplyAtRef.current = r.created_at
+      }
+    })
+    // Collapsed threads keep their normal unread flow (blue dot, and
+    // expandThread highlights + marks read when opened).
+    if (incoming.length === 0 || !expanded) return
+
+    setLocallyHighlightedReplies(prev => {
+      const next = new Set(prev)
+      incoming.forEach(r => next.add(r.id))
+      return next
+    })
+    onMarkRead(message.id, replies.map(r => r.id))
+    clearNotificationForMessage(message.id)
+  }, [replies, expanded, readMessageIds, message.id, message.created_at, user, onMarkRead])
+
+  // Collapsed-preview placeholder for a message with no text: images stay
+  // "(Image)", anything else reads "(File)".
+  const attachmentLabel = (msg) => {
+    const atts = parseAttachments(msg?.image_url)
+    if (!atts.length) return '(Image)'
+    return atts.every(isImageAttachment) ? '(Image)' : '(File)'
+  }
+
+  const bodySnippet = message.body ? message.body.replace(/\n/g, ' ') : attachmentLabel(message)
   const isHighlighted = locallyHighlightedReplies.has(message.id)
   const replyCount = replies.length
 
@@ -209,7 +432,28 @@ function ReplyThread({
   const previewSource = previewMessage ?? latestUnreadReply ?? message
   const previewSnippet = previewSource.body
     ? previewSource.body.replace(/\n/g, ' ')
-    : '📎 Image'
+    : attachmentLabel(previewSource)
+  // ── Search hit preview ────────────────────────────────────────────────────
+  // While searching, a thread whose *contents* match renders one line per hit
+  // in the whole thread: the matched word in bold, then the rest of that
+  // message up to the card edge. Threads that only match a name keep the
+  // normal preview.
+  const searchNeedle = searchQuery ? searchQuery.replace(/\n/g, ' ') : ''
+  const searchHits = searchNeedle
+    ? [message, ...replies].flatMap(m => {
+        // Flatten newlines first so indices line up 1:1 with the lower-cased
+        // copy used for matching.
+        const body = (m.body || '').replace(/\n/g, ' ')
+        const hay = body.toLowerCase()
+        const hits = []
+        let from = 0
+        for (let at = hay.indexOf(searchNeedle, from); at !== -1; at = hay.indexOf(searchNeedle, from)) {
+          hits.push({ match: body.slice(at, at + searchNeedle.length), rest: body.slice(at + searchNeedle.length) })
+          from = at + searchNeedle.length
+        }
+        return hits
+      })
+    : []
   const previewSenderName = latestUnreadReply
     ? (latestUnreadReply.sender?.full_name || 'HR')
     : (senderLabel || message.sender?.full_name || 'Unknown')
@@ -224,6 +468,12 @@ function ReplyThread({
   const previewRecipientText = previewRecipientLabel && previewRecipientLabel !== collapsedLabel
     ? previewRecipientLabel
     : null
+  // Same emphasis rule as the expanded card: a multi-person audience bolds
+  // just the name ("To: **Group**"), a direct message stays plain.
+  const [previewToPrefix, previewToName] = splitToLabel(previewRecipientText || '')
+  const previewRecipientName = previewRecipientText && isMultiRecipient(previewSource)
+    ? <strong style={{ fontWeight: 700 }}>{previewToName}</strong>
+    : previewToName
 
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
@@ -237,8 +487,7 @@ function ReplyThread({
       .sort((a, b) => a.localeCompare(b))
   }
 
-  // Recipient pill: show for every message, prefixed with "To: ".
-  // Resolved per message (original or each reply), not from the thread root.
+  // Recipient info: show for every message, prefixed with "To: ".
   function getRecipientLabel(m) {
     if (!m) return null
     if (m.recipient_type === 'volunteer') {
@@ -249,83 +498,61 @@ function ReplyThread({
     return `To: ${recipientLabel(m)}`
   }
 
+  // The message whose Reply button opened the composer: the thread root or
+  // one of its replies. `replyToId` holds that message's id.
+  function clickedReplyMessage() {
+    if (!replyToId) return null
+    if (replyToId === message.id) return message
+    return replies.find(r => r.id === replyToId) || null
+  }
+
+  // A message addressed to more than one person can be answered either for the
+  // whole audience or for its sender alone; the composer's "Replying to …"
+  // dropdown switches between those two.
+  function replyDropdownActive(clicked) {
+    return Boolean(clicked) &&
+      clicked.recipient_type !== 'volunteer' &&
+      clicked.sender_id !== user?.id
+  }
+
+  // Who the reply currently in the composer will be sent to. Shared by the
+  // send path and the typing indicator so announcements match the real audience.
+  function resolveReplyTarget() {
+    const clicked = clickedReplyMessage()
+    if (isReplyAll) {
+      // The whole audience of the message being answered
+      const src = clicked || message
+      return { target: {
+        recipient_type: src.recipient_type,
+        recipient_day: src.recipient_day,
+        recipient_shift: src.recipient_shift,
+        recipient_role: src.recipient_role,
+        recipient_volunteer_id: src.recipient_volunteer_id,
+        // Group threads store members as JSON — the API requires the id
+        // array, to forward it explicitly.
+        recipient_volunteer_ids: src.recipient_type === 'group'
+          ? parseGroupMemberIds(src)
+          : undefined,
+      } }
+    }
+    if (!clicked) return { error: "Could not determine who to reply to" }
+    // One person: whoever sent the message you answered — or its recipient when
+    // you sent it yourself.
+    if (clicked.sender_id !== user?.id) {
+      return { target: { recipient_type: 'volunteer', recipient_volunteer_id: clicked.sender_id } }
+    }
+    if (clicked.recipient_type === 'volunteer' && clicked.recipient_volunteer_id && clicked.recipient_volunteer_id !== user?.id) {
+      return { target: { recipient_type: 'volunteer', recipient_volunteer_id: clicked.recipient_volunteer_id } }
+    }
+    return { error: "Could not determine who to reply to" }
+  }
+
   async function handleSendReply() {
     if (!replyBody.trim()) return
     setSending(true)
-    const targetReply = replies.find(r => r.id === replyToId)
-    const followUpReply = followUpId ? replies.find(r => r.id === followUpId) : null
     const abort = (msg) => { showToast(msg, 'error'); setSending(false) }
-    let replyTarget
-    if (isReplyAll) {
-      replyTarget = {
-        recipient_type: message.recipient_type,
-        recipient_day: message.recipient_day,
-        recipient_shift: message.recipient_shift,
-        recipient_role: message.recipient_role,
-        recipient_volunteer_id: message.recipient_volunteer_id,
-        // Group threads store members as JSON — the API requires the id
-        // array, so forward it explicitly.
-        recipient_volunteer_ids: message.recipient_type === 'group'
-          ? parseGroupMemberIds(message)
-          : undefined,
-      }
-    } else if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
-      // Recipient view in group threads: every Reply button sends a direct
-      // reply to the thread sender, never to another replier (or yourself).
-      if (message.sender_id === user?.id) return abort("Use Reply All to respond to your own group message")
-      replyTarget = {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: message.sender_id,
-      }
-    } else if (followUpReply && followUpReply.sender_id === user?.id) {
-      // Follow-up on own reply: reply to that reply's recipient, not yourself.
-      if (followUpReply.recipient_type !== 'volunteer') {
-        replyTarget = {
-          recipient_type: followUpReply.recipient_type,
-          recipient_day: followUpReply.recipient_day,
-          recipient_shift: followUpReply.recipient_shift,
-          recipient_role: followUpReply.recipient_role,
-          recipient_volunteer_id: followUpReply.recipient_volunteer_id,
-          recipient_volunteer_ids: followUpReply.recipient_type === 'group'
-            ? parseGroupMemberIds(followUpReply)
-            : undefined,
-        }
-      } else {
-        if (!followUpReply.recipient_volunteer_id || followUpReply.recipient_volunteer_id === user?.id) return abort("Could not determine who to follow up with")
-        replyTarget = {
-          recipient_type: 'volunteer',
-          recipient_volunteer_id: followUpReply.recipient_volunteer_id,
-        }
-      }
-    } else if (isDirectThread) {
-      // 1-on-1: always reply to the other person in the string, never yourself.
-      // This prevents self-only replies when replying in a thread you started.
-      let otherId = otherParticipantId
-      if (!otherId || otherId === user?.id) {
-        const candidate = targetReply?.sender_id && targetReply.sender_id !== user?.id
-          ? targetReply.sender_id
-          : null
-        otherId = candidate
-          ?? (message.sender_id !== user?.id ? message.sender_id : message.recipient_volunteer_id)
-      }
-      if (!otherId || otherId === user?.id) return abort('Could not determine the other person in this conversation')
-      replyTarget = {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: otherId,
-      }
-    } else if (targetReply) {
-      if (targetReply.sender_id === user?.id) return abort("You can't reply to yourself")
-      replyTarget = {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: targetReply.sender_id,
-      }
-    } else {
-      if (message.sender_id === user?.id) return abort("Use Reply All to respond to your own group message")
-      replyTarget = {
-        recipient_type: 'volunteer',
-        recipient_volunteer_id: message.sender_id,
-      }
-    }
+    const { target: replyTarget, error } = resolveReplyTarget()
+    if (error) return abort(error)
     try {
       const accessToken = await getFreshAccessToken(supabase)
       const res = await fetch('/api/send-message', {
@@ -346,11 +573,7 @@ function ReplyThread({
         showToast(result.error || 'Failed to send reply', 'error')
       } else {
         showToast('Reply sent!', 'success')
-        setReplyBody('')
-        setReplyOpen(false)
-        setReplyToId(null)
-        setIsReplyAll(false)
-        setFollowUpId(null)
+        closeReply()
         onReplySent()
       }
     } catch (err) {
@@ -361,37 +584,64 @@ function ReplyThread({
   }
 
   const hasReplies = replies.length > 0
+  // Multi-recipient threads read as two sections: every reply-all first, then
+  // the direct messages behind a divider.
+  const isMultiAudienceThread = !isDirectThread
+  const replyAlls = isMultiAudienceThread ? replies.filter(r => r.recipient_type !== 'volunteer') : []
+  const directReplies = isMultiAudienceThread ? replies.filter(r => r.recipient_type === 'volunteer') : replies
+  const orderedReplies = isMultiAudienceThread ? [...replyAlls, ...directReplies] : replies
+  const showDirectLabel = isMultiAudienceThread && directReplies.length > 0
+  const lastReplyId = replies[replies.length - 1]?.id
+  const typingNames = Object.values(typers).map(t => t.name)
 
-  // Display name for the reply composer: in 1-on-1 threads always the
-  // other person, for follow-ups the recipient of your own reply,
-  // otherwise the sender of the message being replied to.
-  const replyTargetName = (() => {
-    if (isReplyAll) return null
-    if (followUpId) {
-      const f = replies.find(r => r.id === followUpId)
-      if (f?.sender_id === user?.id && f?.recipient_type === 'volunteer') {
-        if (f.recipient_volunteer_id === user?.id) return 'User'
-        return allUsers.find(u => u.id === f.recipient_volunteer_id)?.full_name ?? 'User'
-      }
-    }
-    if (isDirectThread) {
-      const other = allUsers.find(u => u.id === otherParticipantId)
-      if (other?.full_name) return other.full_name
-      if (replyToId) {
-        const t = replies.find(r => r.id === replyToId)
-        if (t?.sender_id && t.sender_id !== user?.id) return t.sender?.full_name ?? 'User'
-      }
-      if (message.sender_id !== user?.id) return message.sender?.full_name ?? 'User'
-      const recip = allUsers.find(u => u.id === message.recipient_volunteer_id)
-      return recip?.full_name ?? 'User'
-    }
-    // Recipient view in group threads: replies always go to the thread sender.
-    if (!isGroupMessageSender && message.recipient_type !== 'volunteer') {
-      return message.sender?.full_name ?? 'User'
-    }
-    if (replyToId) return replies.find(r => r.id === replyToId)?.sender?.full_name ?? 'User'
-    return message.sender?.full_name ?? 'User'
-  })()
+  // ── Reply target ──────────────────────────────────────────────────────────
+  const nameOf = (id) => allUsers.find(u => u.id === id)?.full_name ?? 'User'
+  const replyClicked = clickedReplyMessage()
+  // Only somebody else's multi-recipient message offers both audiences — your
+  // own message can only be answered for its crowd, a direct message only for
+  // the one person on the other end.
+  const replyActive = replyDropdownActive(replyClicked)
+  const replyAudienceName = recipientLabel(replyClicked || message)
+  const replyPersonName = replyClicked
+    ? (replyClicked.sender_id !== user?.id
+        ? (replyClicked.sender?.full_name ?? nameOf(replyClicked.sender_id))
+        : nameOf(replyClicked.recipient_volunteer_id))
+    : 'User'
+  const replyTargetName = isReplyAll ? replyAudienceName : replyPersonName
+  const replyTargetOptions = replyActive
+    ? [
+        { replyAll: true, label: replyAudienceName },
+        { replyAll: false, label: replyPersonName },
+      ]
+    : [{ replyAll: isReplyAll, label: replyTargetName }]
+  // Emphasise the crowd half of a reply the same way the "To:" line does —
+  // "Replying to **Group**" against a plain "Replying to Jon Doe".
+  const audienceIsMulti = isMultiRecipient(replyClicked || message)
+  const boldTarget = (text, isAudience) =>
+    isAudience && audienceIsMulti
+      ? <strong style={{ fontWeight: 700 }}>{text}</strong>
+      : text
+
+  // Open the composer on a message.
+  const startReply = (msg) => {
+    stopTypingNow()
+    setLocallyHighlightedReplies(new Set())
+    replyScrollPosRef.current = window.scrollY
+    setReplyToId(msg.id)
+    setIsReplyAll(msg.recipient_type !== 'volunteer')
+    setTargetMenuOpen(false)
+    setReplyOpen(true)
+    // Switching targets mid-draft keeps the text and the caret where they were.
+    if (replyOpen) requestAnimationFrame(() => replyRef.current?.focus())
+  }
+
+  const closeReply = () => {
+    setReplyOpen(false)
+    setReplyBody('')
+    setReplyToId(null)
+    setIsReplyAll(false)
+    setTargetMenuOpen(false)
+  }
 
   const expandThread = () => {
     const unreadReplyIds = replies.filter(r => !readMessageIds.has(r.id) && r.sender_id !== user?.id).map(r => r.id)
@@ -435,71 +685,37 @@ function ReplyThread({
               <span style={{ display: 'inline-flex', flexWrap: 'wrap', columnGap: '0.35rem', fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
                 <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(previewSource.created_at)}{previewRecipientText ? ',' : ''}</span>
                 {previewRecipientText && (
-                  <span style={{ whiteSpace: 'nowrap' }}>{previewRecipientText}</span>
+                  <span style={{ whiteSpace: 'nowrap' }}>{previewToPrefix}{previewRecipientName}</span>
                 )}
               </span>
             </div>
           {/* Line 2: reply count + snippet (only rendered if there is content) */}
           {(replyCount > 0 || bodySnippet) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
+            <div style={{ display: 'flex', alignItems: searchHits.length ? 'flex-start' : 'center', gap: '0.3rem', marginTop: '0.1rem' }}>
               {replyCount > 0 && (
-                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap', flexShrink: 0, marginTop: searchHits.length ? '0.18rem' : 0 }}>
                   {replyCount} {replyCount === 1 ? 'reply' : 'replies'} ·
                 </span>
               )}
-              <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {previewSnippet}
-              </span>
+              {searchHits.length > 0 ? (
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                  {searchHits.map((hit, i) => (
+                    <div
+                      key={i}
+                      style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      <strong style={{ fontWeight: 700 }}>{hit.match}</strong>{hit.rest}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: '0.92rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {previewSnippet}
+                </span>
+              )}
             </div>
           )}
         </div>
-
-        {/* Inline reply button — only for replyable threads.
-            Group senders have no regular reply on their own message, so their
-            collapsed entry opens Reply All instead of a self-reply. */}
-        {canReply && (
-          <button
-            onClick={e => {
-              e.stopPropagation()
-              replyScrollPosRef.current = window.scrollY
-              setLocallyHighlightedReplies(new Set())
-              setExpanded(true)
-              onMarkRead(message.id, replies.map(r => r.id))
-              clearNotificationForMessage(message.id)
-              setReplyToId(null)
-              setIsReplyAll(isGroupMessageSender)
-              setFollowUpId(null)
-              setReplyOpen(true)
-            }}
-            title={isGroupMessageSender ? "Reply All" : "Reply"}
-            style={{
-              flexShrink: 0,
-              alignSelf: 'center',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem',
-              padding: '0.2rem 0.55rem',
-              background: 'none',
-              border: '1px solid var(--border)',
-              borderRadius: '100px',
-              color: 'var(--muted)',
-              fontSize: '0.7rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: 'DM Sans, sans-serif',
-              transition: 'border-color 0.15s, color 0.15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
-          >
-            <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 14 4 9 9 4" />
-              <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-            </svg>
-            {isGroupMessageSender ? "Reply All" : "Reply"}
-          </button>
-        )}
-
       </div>
     )
   }
@@ -509,7 +725,7 @@ function ReplyThread({
       {/* ── Original message (click to collapse) ── */}
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
-          onClick={() => { setLocallyHighlightedReplies(new Set()); setExpanded(false); setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
+          onClick={() => { stopTypingNow(); setLocallyHighlightedReplies(new Set()); setExpanded(false); closeReply() }}
       >
         <MessageCard
           m={message}
@@ -517,11 +733,8 @@ function ReplyThread({
           user={user}
           setLightboxUrl={setLightboxUrl}
           senderLabel={senderLabel}
-          canReply={canReply && !isGroupMessageSender}
-          canReplyAll={isGroupMessageSender}
-          replyOpen={replyOpen}
-          onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(false); setFollowUpId(null); setReplyOpen(true) }}
-          onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setIsReplyAll(true); setFollowUpId(null); setReplyOpen(true) }}
+          canReply={canReply}
+          onReply={() => startReply(message)}
           isHighlighted={isHighlighted}
           recipientLabel={getRecipientLabel(message)}
           groupMemberNames={message.recipient_type === 'group' ? getGroupMemberNames(message) : null}
@@ -539,22 +752,24 @@ function ReplyThread({
           flexDirection: 'column',
           gap: '0.5rem',
         }}>
-          {replies.map((reply, idx) => {
-            const replyIsAdmin = reply.sender?.role === 'admin' || false
+          {orderedReplies.map((reply, idx) => {
             const isReplyHighlighted = locallyHighlightedReplies.has(reply.id)
-            const isMostRecent = idx === replies.length - 1
-            const isMostRecentReply = true
-            const isOwnReply = reply.sender_id === user?.id
-            // Group sender's own replies get a button matching that reply's
-            // audience: Reply All for group-targeted replies, follow-up Reply
-            // for replies sent to a specific person.
-            const ownReplyIsGroup = isOwnReply && reply.recipient_type !== 'volunteer'
-            const replyCanReply = isGroupMessageSender
-              ? (isOwnReply ? !ownReplyIsGroup : true)
-              : (canReply && isMostRecent && isMostRecentReply)
-            const replyCanReplyAll = isGroupMessageSender && isOwnReply && ownReplyIsGroup
+            const isMostRecent = reply.id === lastReplyId
+            // Threads with more than two people offer a Reply on every message;
+            // a plain two-person conversation only on its first and last.
+            const replyCanReply = isMultiPersonThread ? canReply : (canReply && isMostRecent)
+            const showDivider = showDirectLabel && idx === replyAlls.length
             return (
-              <div ref={isMostRecent ? mostRecentReplyRef : undefined} key={reply.id} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start', minWidth: 0, maxWidth: '100%' }}>
+              <Fragment key={reply.id}>
+                {showDivider && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.15rem 0' }}>
+                    <span style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                      Direct Messages
+                    </span>
+                    <span style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                  </div>
+                )}
+                <div ref={isMostRecent ? mostRecentReplyRef : undefined} style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem', alignItems: 'flex-start', minWidth: 0, maxWidth: '100%' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1, minWidth: 0, maxWidth: '100%' }}>
                   <MessageCard
                     m={reply}
@@ -563,17 +778,46 @@ function ReplyThread({
                     setLightboxUrl={setLightboxUrl}
                     isHighlighted={isReplyHighlighted}
                     canReply={replyCanReply}
-                    canReplyAll={replyCanReplyAll}
-                    replyOpen={replyOpen}
-                    onReply={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; if (isGroupMessageSender && isOwnReply) { setReplyToId(null); setIsReplyAll(false); setFollowUpId(reply.id) } else { setReplyToId(reply.id); setIsReplyAll(false); setFollowUpId(null) } setReplyOpen(true) }}
-                    onReplyAll={() => { setLocallyHighlightedReplies(new Set()); replyScrollPosRef.current = window.scrollY; setReplyToId(null); setFollowUpId(null); setIsReplyAll(true); setReplyOpen(true) }}
+                    onReply={() => startReply(reply)}
                     recipientLabel={getRecipientLabel(reply)}
                     groupMemberNames={reply.recipient_type === 'group' ? getGroupMemberNames(reply) : null}
                   />
                 </div>
               </div>
+              </Fragment>
             )
           })}
+        </div>
+      )}
+
+      {/* ── Typing indicator ── */}
+      {typingNames.length > 0 && (
+        <div style={{
+          marginTop: hasReplies ? '0.35rem' : '0.5rem',
+          marginLeft: hasReplies ? '1rem' : '0',
+          paddingLeft: hasReplies ? '0.875rem' : '0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.4rem',
+          fontSize: '0.75rem',
+          color: 'var(--muted)',
+          fontStyle: 'italic',
+        }}>
+          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '2px' }}>
+            <span className="typing-dot" style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--muted)', display: 'inline-block' }} />
+            <span className="typing-dot" style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--muted)', display: 'inline-block' }} />
+            <span className="typing-dot" style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--muted)', display: 'inline-block' }} />
+          </span>
+          <span>{typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing…</span>
+          <style>{`
+            .typing-dot { animation: typing-bounce 1.2s infinite ease-in-out; }
+            .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+            .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+            @keyframes typing-bounce {
+              0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+              30% { opacity: 1; transform: translateY(-3px); }
+            }
+          `}</style>
         </div>
       )}
 
@@ -598,12 +842,12 @@ function ReplyThread({
               ref={replyRef}
               autoFocus
               value={replyBody}
-              onChange={e => setReplyBody(e.target.value)}
+              onChange={e => handleReplyInputChange(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSendReply()
-                if (e.key === 'Escape') { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }
+                if (e.key === 'Escape') closeReply()
               }}
-              placeholder={isReplyAll ? (message.recipient_type === 'group' ? 'Replying to Group…' : 'Replying to Everyone…') : `Replying to ${replyTargetName}…`}
+              placeholder={`Replying to ${replyTargetName}…`}
               rows={2}
               style={{
                 ...S.input,
@@ -616,9 +860,104 @@ function ReplyThread({
                 padding: '0.6rem 0.75rem',
               }}
             />
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                {/* Who this draft goes to. Offers both audiences only when the
+                    message you replied to went to a crowd *and* someone else
+                    sent it — otherwise it is a label with nothing to switch. */}
+                <div ref={targetMenuRef} style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={replyActive && targetMenuOpen}
+                    onClick={() => { if (replyActive) setTargetMenuOpen(o => !o) }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      maxWidth: '15rem',
+                      padding: '0.35rem 0.6rem',
+                      background: '#fff',
+                      border: '1px solid var(--border)',
+                      borderRadius: '7px',
+                      color: replyActive ? 'var(--text)' : 'var(--muted)',
+                      fontSize: '0.78rem',
+                      fontWeight: 500,
+                      cursor: replyActive ? 'pointer' : 'default',
+                      fontFamily: 'DM Sans, sans-serif',
+                    }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      Replying to {boldTarget(replyTargetName, isReplyAll)}
+                    </span>
+                    {replyActive && (
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        aria-hidden="true"
+                        style={{ flexShrink: 0, transform: targetMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}
+                      >
+                        <polygon points="3.5,5.5 12.5,5.5 8,11.5" />
+                      </svg>
+                    )}
+                  </button>
+                  {replyActive && targetMenuOpen && (
+                    <div
+                      role="listbox"
+                      style={{
+                        position: 'absolute',
+                        bottom: 'calc(100% + 0.35rem)',
+                        left: 0,
+                        zIndex: 60,
+                        minWidth: '100%',
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '8px',
+                        boxShadow: '0 8px 24px rgba(2,65,107,0.12)',
+                        padding: '0.25rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.15rem',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {replyTargetOptions.map(opt => {
+                        const selected = opt.replyAll === isReplyAll
+                        return (
+                          <button
+                            key={String(opt.replyAll)}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => { setIsReplyAll(opt.replyAll); setTargetMenuOpen(false) }}
+                            style={{
+                              padding: '0.3rem 0.5rem',
+                              background: selected ? 'rgba(2,65,107,0.08)' : 'transparent',
+                              border: 'none',
+                              borderRadius: '6px',
+                              color: 'var(--text)',
+                              fontSize: '0.78rem',
+                              fontWeight: selected ? 700 : 500,
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              whiteSpace: 'nowrap',
+                              fontFamily: 'DM Sans, sans-serif',
+                            }}
+                          >
+                            Replying to {boldTarget(opt.label, opt.replyAll)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
                 <button
-                  onClick={() => { setReplyOpen(false); setReplyBody(''); setReplyToId(null); setIsReplyAll(false); setFollowUpId(null) }}
+                  onClick={closeReply}
                   style={{
                   padding: '0.35rem 0.75rem',
                   background: 'none',
@@ -685,19 +1024,24 @@ export function MessageTab({
   const [allUsers, setAllUsers]               = useState(allUsersProp)
   const [lightboxUrl, setLightboxUrl]         = useState(null)
   const [inboxFilter, setInboxFilter] = useState('all')
+  const [filterOpen, setFilterOpen] = useState(false)
+  const filterRef = useRef(null)
+  const [inboxSearch, setInboxSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchInputRef = useRef(null)
   const [markingAllRead, setMarkingAllRead] = useState(false)
 
   // Compose state
   const [msgView, setMsgView]                 = useState('inbox')
   const [msgBody, setMsgBody]                 = useState('')
-  const [msgRecipientType, setMsgRecipientType] = useState('admin')
+  const [msgRecipientType, setMsgRecipientType] = useState('user')
   const [msgSelectedShift, setMsgSelectedShift] = useState(null)
   const [msgSelectedRole, setMsgSelectedRole]   = useState(null)
   const [msgRecipientVolIds, setMsgRecipientVolIds] = useState([])
   const [sendingMsg, setSendingMsg]           = useState(false)
-  const [msgImageFile, setMsgImageFile]       = useState(null)
-  const [msgImagePreview, setMsgImagePreview] = useState(null)
-  const [uploadingImage, setUploadingImage]   = useState(false)
+  // Pending attachments: [{ id, file, name, type, previewUrl }]
+  const [msgFiles, setMsgFiles]               = useState([])
+  const [uploadingFiles, setUploadingFiles]   = useState(false)
   const [comboQuery, setComboQuery]           = useState('')
   const [comboOpen, setComboOpen]             = useState(false)
   const fileInputRef = useRef(null)
@@ -739,6 +1083,7 @@ export function MessageTab({
     if (user) fetchMessages()
     function handleMouseDown(e) {
       if (comboRef.current && !comboRef.current.contains(e.target)) setComboOpen(false)
+      if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false)
     }
     document.addEventListener('mousedown', handleMouseDown)
     return () => document.removeEventListener('mousedown', handleMouseDown)
@@ -805,6 +1150,28 @@ export function MessageTab({
     await loadBroadcastReadCounts(fetched)
 
   }, [user, supabase])
+
+  // ── Realtime: new messages + new read receipts ─────────────────────────────
+  // Debounced so bursts (e.g. a reply-all fan-out) collapse into one refetch,
+  // which already re-resolves the sender join and broadcast read counts.
+  // The 30s poll above stays as a fallback for dropped events/reconnects.
+  useEffect(() => {
+    if (!user) return
+    let timer = null
+    const scheduleRefetch = () => {
+      if (timer) return
+      timer = setTimeout(() => { timer = null; fetchMessages() }, 500)
+    }
+    const channel = supabase
+      .channel(`messages-live:${user.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, scheduleRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reads' }, scheduleRefetch)
+      .subscribe()
+    return () => {
+      if (timer) clearTimeout(timer)
+      supabase.removeChannel(channel)
+    }
+  }, [user, supabase, fetchMessages])
 
   const markThreadRead = useCallback(async (messageId, replyIds = []) => {
     const allIds = [messageId, ...replyIds]
@@ -901,15 +1268,13 @@ export function MessageTab({
         if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
         repliesMap[r.parent_message_id].push(r)
       })
-    // Sort each reply thread: the sender's reply-alls float above direct
-    // messages to/from the sender, chronological within each group.
-    const byId = new Map(validMsgs.map(m => [m.id, m]))
+    // Sort each reply thread: every reply-all floats above the direct
+    // messages, no matter who sent it, chronological within each group.
     Object.keys(repliesMap).forEach(k => {
-      const parentSenderId = byId.get(k)?.sender_id
-      const isBroadcast = (r) => parentSenderId && r.sender_id === parentSenderId && r.recipient_type !== 'volunteer'
+      const isReplyAll = (r) => r.recipient_type !== 'volunteer'
       repliesMap[k].sort((a, b) => {
-        const ag = isBroadcast(a) ? 0 : 1
-        const bg = isBroadcast(b) ? 0 : 1
+        const ag = isReplyAll(a) ? 0 : 1
+        const bg = isReplyAll(b) ? 0 : 1
         if (ag !== bg) return ag - bg
         return new Date(a.created_at) - new Date(b.created_at)
       })
@@ -1098,18 +1463,42 @@ export function MessageTab({
   // Providers can message the Provider role group.
   const rolesForCompose = isAdmin ? ROLES : isProvider ? ['Provider', ...myRoles.filter(r => r !== 'Provider')] : myRoles
 
-  // ── Image helpers ──────────────────────────────────────────────────────────
-  function handleImageSelect(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (MAX_FILE_SIZE && file.size > MAX_FILE_SIZE) { showToast('Image must be under 5 MB', 'error'); return }
-    setMsgImageFile(file)
-    setMsgImagePreview(URL.createObjectURL(file))
+  // ── File attachment helpers ────────────────────────────────────────────────
+  function handleFileSelect(e) {
+    const picked = Array.from(e.target.files || [])
+    // Reset so selecting the same file again still fires onChange.
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (!picked.length) return
+
+    const added = []
+    for (const file of picked) {
+      if (MAX_FILE_SIZE && file.size > MAX_FILE_SIZE) {
+        showToast(`${file.name} is too large — files must be under 5 MB`, 'error')
+        continue
+      }
+      const type = file.type || typeFromName(file.name)
+      added.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        file,
+        name: file.name,
+        type,
+        previewUrl: type.startsWith('image/') ? URL.createObjectURL(file) : null,
+      })
+    }
+    if (added.length) setMsgFiles(prev => [...prev, ...added])
   }
 
-  function clearImage() {
-    setMsgImageFile(null)
-    setMsgImagePreview(null)
+  function removeFile(id) {
+    setMsgFiles(prev => {
+      const gone = prev.find(f => f.id === id)
+      if (gone && gone.previewUrl) URL.revokeObjectURL(gone.previewUrl)
+      return prev.filter(f => f.id !== id)
+    })
+  }
+
+  function clearFiles() {
+    msgFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl) })
+    setMsgFiles([])
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -1152,34 +1541,51 @@ export function MessageTab({
     if (comboResults.length === 1) addRecipient(comboResults[0], { closeAfter })
   }
 
-  async function uploadImage(userId) {
-    if (!msgImageFile) return null
-    setUploadingImage(true)
-    const ext = msgImageFile.name.split('.').pop()
-    const path = `${userId}/${Date.now()}.${ext}`
-    const { error } = await supabase.storage
-      .from('message-images')
-      .upload(path, msgImageFile, { contentType: msgImageFile.type, upsert: false })
-    setUploadingImage(false)
-    if (error) { showToast('Image upload failed: ' + error.message, 'error'); return null }
-    const { data: { publicUrl } } = supabase.storage.from('message-images').getPublicUrl(path)
-    return publicUrl
+  // Uploads every pending attachment. Returns [{ url, name, type }] on
+  // success, or null if any single upload failed (a toast explains which).
+  async function uploadFiles(userId) {
+    if (!msgFiles.length) return []
+    setUploadingFiles(true)
+    try {
+      const out = []
+      for (let i = 0; i < msgFiles.length; i++) {
+        const f = msgFiles[i]
+        const safe = (f.name || 'file').replace(/[^\w.-]+/g, '_').slice(-60) || 'file'
+        const path = `${userId}/${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}_${safe}`
+        const { error } = await supabase.storage
+          .from('message-images')
+          .upload(path, f.file, { contentType: f.type || 'application/octet-stream', upsert: false })
+        if (error) {
+          showToast(`${f.name} failed to upload: ${error.message}`, 'error')
+          return null
+        }
+        const { data: { publicUrl } } = supabase.storage.from('message-images').getPublicUrl(path)
+        out.push({ url: publicUrl, name: f.name, type: f.type })
+      }
+      return out
+    } finally {
+      setUploadingFiles(false)
+    }
   }
 
   // ── Send new top-level message ─────────────────────────────────────────────
   async function handleSendMessage(e) {
     e.preventDefault()
-    if (!msgBody.trim() && !msgImageFile) return
+    if (!msgBody.trim() && !msgFiles.length) return
+    const individualIds = msgRecipientType === 'user'
+      ? [...new Set(msgRecipientVolIds.filter(id => id && id !== user?.id))]
+      : []
+    const isGroupCompose = msgRecipientType === 'user' && individualIds.length > 1
+    if (msgRecipientType === 'user' && individualIds.length === 0) {
+      showToast('Choose at least one person to send to.', 'error')
+      return
+    }
     setSendingMsg(true)
 
     try {
-      const imageUrl = await uploadImage(user.id)
-      if (msgImageFile && !imageUrl) { setSendingMsg(false); return }
+      const attachments = await uploadFiles(user.id)
+      if (msgFiles.length && !attachments) { setSendingMsg(false); return }
 
-      const individualIds = msgRecipientType === 'user'
-        ? [...new Set(msgRecipientVolIds.filter(id => id && id !== user?.id))]
-        : []
-      const isGroupCompose = msgRecipientType === 'user' && individualIds.length > 1
       const recipientType = isGroupCompose                        ? 'group'
                           : msgRecipientType === 'user'           ? 'volunteer'
                           : msgRecipientType === 'providers'      ? 'role'
@@ -1192,7 +1598,7 @@ export function MessageTab({
         body: JSON.stringify({
           recipient_type: recipientType,
           body: msgBody.trim(),
-          image_url: imageUrl || null,
+          image_url: serializeAttachments(attachments),
           recipient_shift:        msgRecipientType === 'shift' ? (msgSelectedShift?.shift_time || null) : null,
           recipient_day:          msgRecipientType === 'shift' ? (msgSelectedShift?.day || null) : null,
           recipient_role:         msgRecipientType === 'role'      ? (msgSelectedRole || null)
@@ -1210,8 +1616,8 @@ export function MessageTab({
       } else {
         showToast('Message sent!', 'success')
         setMsgBody('')
-        clearImage()
-        setMsgRecipientType('admin')
+        clearFiles()
+        setMsgRecipientType('user')
         setMsgSelectedShift(null)
         setMsgSelectedRole(null)
         setMsgRecipientVolIds([])
@@ -1229,6 +1635,70 @@ export function MessageTab({
       setSendingMsg(false)
     }
   }
+
+  // ── Inbox filter dropdown ──────────────────────────────────────────────────
+  const inboxFilterOptions = [
+    ['all', 'All'],
+    ['direct', 'Directly to me'],
+    ...(isAdmin ? [['hr', 'HR']] : []),
+    ['role', 'My Role'],
+    ['everyone', 'Everyone'],
+  ]
+  const activeFilterLabel = (inboxFilterOptions.find(([key]) => key === inboxFilter) ?? inboxFilterOptions[0])[1]
+
+  // Inbox text search — matches sender name, recipient, or message body across
+  // the whole thread (top-level + replies). Plain substring, re-run on every
+  // keystroke, applied after the category filter.
+  const inboxSearchQuery = inboxSearch.trim().toLowerCase()
+  function threadMatchesSearch(topMsg, replies, q) {
+    const msgs = [topMsg, ...(replies || [])]
+    return msgs.some(m => {
+      const senderName = (
+        m.sender?.full_name || allUsers.find(u => u.id === m.sender_id)?.full_name || ''
+      ).toLowerCase()
+      let recip
+      if (m.recipient_type === 'volunteer') {
+        recip = m.recipient_volunteer_id === user?.id
+          ? 'you'
+          : (allUsers.find(u => u.id === m.recipient_volunteer_id)?.full_name || 'individual')
+      } else if (m.recipient_type === 'group') {
+        const names = parseGroupMemberIds(m)
+          .map(id => allUsers.find(u => u.id === id)?.full_name)
+          .filter(Boolean)
+        recip = names.length ? `group ${names.join(' ')}` : 'group'
+      } else {
+        recip = recipientLabel(m) // Everyone, Admin, role, shift, missionaries…
+      }
+      const body = (m.body || '').toLowerCase()
+      return senderName.includes(q) || recip.toLowerCase().includes(q) || body.includes(q)
+    })
+  }
+  const searchedInboxThreads = inboxSearchQuery
+    ? filteredInboxThreads.filter(m =>
+        threadMatchesSearch(m, inboxRepliesMap[m.id], inboxSearchQuery)
+      )
+    : filteredInboxThreads
+
+  // Auto-deepen search: freeze how many threads the unsearched inbox shows at
+  // the moment a query starts, then keep pulling older pages until the search
+  // has that many results (or messages run out). Without this, search would
+  // only ever see the ~50 messages loaded so far.
+  const searchTargetRef = useRef(null)
+  useEffect(() => {
+    if (inboxSearchQuery) {
+      if (searchTargetRef.current === null) searchTargetRef.current = filteredInboxThreads.length
+    } else {
+      searchTargetRef.current = null
+    }
+  }, [inboxSearchQuery])
+
+  useEffect(() => {
+    if (!inboxSearchQuery || searchTargetRef.current === null) return
+    if (searchedInboxThreads.length >= searchTargetRef.current) return
+    if (!hasMoreMsgs || loadingMoreMsgs) return
+    const t = setTimeout(() => { loadMoreMessages() }, 150)
+    return () => clearTimeout(t)
+  }, [inboxSearchQuery, searchedInboxThreads.length, hasMoreMsgs, loadingMoreMsgs, msgCursor])
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -1284,51 +1754,215 @@ export function MessageTab({
             </button>
           </div>
 
-          <div
-              style={{
-                display: 'flex',
-                gap: '0.5rem',
-                flexWrap: 'wrap',
-                marginBottom: '1.25rem',
-              }}
-          >
-            {[
-              ['all', 'All'],
-              ['direct', 'Directly to me'],
-              ...(isAdmin ? [['hr', 'HR']] : []),
-              ['role', 'My Role'],
-              ['everyone', 'Everyone'],
-            ].map(([key, label]) => (
-                <button
-                    key={key}
-                    type="button"
-                    onClick={() => setInboxFilter(key)}
-                    style={{
-                      padding: '0.35rem 0.75rem',
-                      borderRadius: '100px',
-                      fontSize: '0.78rem',
-                      fontWeight: inboxFilter === key ? 700 : 500,
-                      cursor: 'pointer',
-                      fontFamily: 'DM Sans, sans-serif',
-                      background: inboxFilter === key ? '#0369a1' + '18' : 'transparent',
-                      color: inboxFilter === key ? '#0369a1' : 'var(--muted)',
-                      border: inboxFilter === key
-                          ? '1px solid #0369a144'
-                          : '1px solid var(--border)',
-                      transition: 'all 0.15s',
-                    }}
+          {/* Filter dropdown + message search */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+            <div
+              ref={filterRef}
+              style={{ position: 'relative', width: 'fit-content' }}
+            >
+              <button
+                type="button"
+                onClick={() => setFilterOpen(o => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={filterOpen}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.6rem',
+                  padding: '0.45rem 1rem',
+                  borderRadius: '8px',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                  background: '#fff',
+                  color: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {activeFilterLabel}
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  transform: filterOpen ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.15s',
+                }}>
+                  {/* Solid down caret with slightly rounded corners */}
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor"
+                       strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+                    <polygon points="3.5,5.5 12.5,5.5 8,11.5" />
+                  </svg>
+                </span>
+              </button>
+
+              {filterOpen && (
+                <div
+                  role="listbox"
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 0.35rem)',
+                    left: 0,
+                    minWidth: '100%',
+                    zIndex: 30,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    boxShadow: '0 8px 24px rgba(2,65,107,0.12)',
+                    padding: '0.25rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.15rem',
+                  }}
                 >
-                  {label}
-                </button>
-            ))}
+                  {inboxFilterOptions.map(([key, label]) => {
+                    const isActive = inboxFilter === key
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        onClick={() => { setInboxFilter(key); setFilterOpen(false) }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = isActive ? '#0369a1' + '18' : 'transparent' }}
+                        style={{
+                          padding: '0.45rem 0.9rem',
+                          borderRadius: '6px',
+                          fontSize: '0.85rem',
+                          fontWeight: isActive ? 700 : 500,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontFamily: 'DM Sans, sans-serif',
+                          background: isActive ? '#0369a1' + '18' : 'transparent',
+                          color: isActive ? '#0369a1' : 'var(--muted)',
+                          border: 'none',
+                          transition: 'background 0.15s',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Message search — collapsed circle button, expands into a gray pill bar */}
+            {!searchOpen ? (
+              <button
+                type="button"
+                title="Search messages"
+                aria-label="Search messages"
+                onClick={() => setSearchOpen(true)}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '50%',
+                  border: 'none',
+                  background: 'transparent',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 0,
+                  cursor: 'pointer',
+                  color: 'var(--muted)',
+                  transition: 'background 0.15s',
+                }}
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M21 21l-4.35-4.35" />
+                </svg>
+              </button>
+            ) : (
+              <div className="inbox-search-wrap" style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <span style={{
+                  position: 'absolute',
+                  left: '0.85rem',
+                  display: 'inline-flex',
+                  color: 'var(--muted)',
+                  pointerEvents: 'none',
+                  zIndex: 1,
+                }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M21 21l-4.35-4.35" />
+                  </svg>
+                </span>
+                <input
+                  ref={searchInputRef}
+                  className="inbox-search-input"
+                  autoFocus
+                  type="text"
+                  value={inboxSearch}
+                  onChange={e => setInboxSearch(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') setInboxSearch('') }}
+                  onBlur={() => { if (!inboxSearch.trim()) setSearchOpen(false) }}
+                  placeholder="Search..."
+                  style={{
+                    width: '16rem',
+                    maxWidth: '100%',
+                    height: '34px',
+                    padding: '0 2.9rem 0 2.35rem',
+                    background: 'var(--bg)',
+                    border: '1px solid transparent',
+                    borderRadius: '100px',
+                    color: 'var(--text)',
+                    fontSize: '0.85rem',
+                    fontFamily: 'DM Sans, sans-serif',
+                    outline: 'none',
+                  }}
+                />
+                {/* Close button — empties the query and collapses the bar */}
+                {inboxSearch.length > 0 && (
+                  <button
+                    type="button"
+                    title="Close search"
+                    aria-label="Close search"
+                    onMouseDown={e => e.preventDefault()} // avoid the blur-close race
+                    onClick={() => { setInboxSearch(''); setSearchOpen(false) }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(17,17,17,0.08)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                    style={{
+                      position: 'absolute',
+                      right: '0.5rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      border: 'none',
+                      background: 'transparent',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: 0,
+                      cursor: 'pointer',
+                      color: 'var(--muted)',
+                      transition: 'background 0.15s',
+                      zIndex: 1,
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-
-          {filteredInboxThreads.length === 0 ? (
+          {searchedInboxThreads.length === 0 ? (
             <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No messages</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {filteredInboxThreads.map(m => (
+              {searchedInboxThreads.map(m => (
                 <ReplyThread
                   key={m.id}
                   message={m}
@@ -1344,6 +1978,7 @@ export function MessageTab({
                   onReplySent={fetchMessages}
                   onMarkRead={markThreadRead}
                   startExpanded={openThreadId === m.id}
+                  searchQuery={inboxSearchQuery}
                 />
               ))}
             </div>
@@ -1379,7 +2014,7 @@ export function MessageTab({
                 const getToLabel = (msg) =>
                   msg.recipient_type === 'group' ? 'To: Group' :
                   msg.recipient_type === 'everyone' ? 'To: Everyone' :
-                  msg.recipient_type === 'admin'    ? 'To: HR' :
+                  msg.recipient_type === 'admin'    ? 'To: Admins' :
                   msg.recipient_type === 'shift'    ? `To: ${msg.recipient_day ? msg.recipient_day.charAt(0).toUpperCase() + msg.recipient_day.slice(1, 3) : ''} ${msg.recipient_shift || ''}`.trim() + ' Shift' :
                   msg.recipient_type === 'role'     ? `To: ${msg.recipient_role}` :
                   msg.recipient_type === 'volunteer'? `To: ${allUsers.find(u => u.id === msg.recipient_volunteer_id)?.full_name || m.sender?.full_name || 'Individual'}` :
@@ -1439,13 +2074,13 @@ export function MessageTab({
               <label style={S.label}>Send to</label>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 {[
-                  { value: 'admin',    label: 'HR' },
+                  { value: 'user', label: 'Individuals' },
                   ...(isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
                   ...(isProvider && !isAdmin ? [{ value: 'providers', label: 'All Providers' }] : []),
                   ...(!isProvider && !isAdmin ? [{ value: 'everyone', label: 'Everyone' }] : []),
+                  { value: 'admin',    label: 'HR' },
                   ...(myShiftCombos.length > 0 ? [{ value: 'shift', label: 'My Shift' }] : []),
                   ...(rolesForCompose.length > 0 ? [{ value: 'role', label: isAdmin ? 'Role' : 'My Role' }] : []),
-                  { value: 'user', label: 'Individuals' },
                 ].map(opt => (
                   <button
                     key={opt.value}
@@ -1592,7 +2227,7 @@ export function MessageTab({
                       )}
                     </>
                   ) : (
-                    <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative' }}>
                       <div
                         onClick={() => { setComboOpen(true); recipientInputRef.current?.focus?.() }}
                         style={{ ...S.input, display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', cursor: 'text', minHeight: '3rem' }}
@@ -1670,35 +2305,66 @@ export function MessageTab({
               />
             </div>
 
-            {/* Image attachment */}
+            {/* File attachments */}
             <div>
-              <label style={S.label}>Attach image (optional)</label>
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
-              {!msgImagePreview ? (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{ ...S.input, cursor: 'pointer', color: 'var(--muted)', textAlign: 'left' }}
-                >
-                  Choose image…
-                </button>
-              ) : (
-                <div style={{ position: 'relative', display: 'inline-block' }}>
-                  <img src={msgImagePreview} alt="Preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px', border: '1px solid var(--border)' }} />
-                  <button
-                    type="button"
-                    onClick={clearImage}
-                    style={{ position: 'absolute', top: '0.35rem', right: '0.35rem', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', color: '#fff', width: '24px', height: '24px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    ✕
-                  </button>
+              <label style={S.label}>ATTACH FILE</label>
+              <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} style={{ display: 'none' }} />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ ...S.input, cursor: 'pointer', color: 'var(--muted)', textAlign: 'left' }}
+              >
+                Add file...
+              </button>
+
+              {msgFiles.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {msgFiles.map(f => (
+                    <div
+                      key={f.id}
+                      style={{
+                        position: 'relative',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        padding: '0.5rem',
+                        border: '1px solid var(--border)',
+                        borderRadius: '8px',
+                        background: 'var(--bg)',
+                      }}
+                    >
+                      {f.previewUrl ? (
+                        <img src={f.previewUrl} alt="" style={{ width: '46px', height: '46px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)', flexShrink: 0 }} />
+                      ) : (
+                        <span style={{ width: '46px', height: '46px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--muted)' }}>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 3 14 8 19 8" />
+                          </svg>
+                        </span>
+                      )}
+                      <span style={{ fontSize: '0.87rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: '1.75rem' }}>
+                        {f.name}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${f.name}`}
+                        onClick={() => removeFile(f.id)}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)' }}
+                        style={{ position: 'absolute', top: '0.35rem', right: '0.35rem', width: '24px', height: '24px', borderRadius: '50%', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
 
             <button
               type="submit"
-              disabled={sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)}
+              disabled={sendingMsg || uploadingFiles || (!msgBody.trim() && msgFiles.length === 0) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)}
               style={{
                 padding: '0.85rem',
                 background: 'var(--accent)',
@@ -1706,12 +2372,12 @@ export function MessageTab({
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: 600,
-                cursor: sendingMsg || uploadingImage ? 'not-allowed' : 'pointer',
+                cursor: sendingMsg || uploadingFiles ? 'not-allowed' : 'pointer',
                 fontFamily: 'DM Sans, sans-serif',
-                opacity: (sendingMsg || uploadingImage || (!msgBody.trim() && !msgImageFile) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)) ? 0.5 : 1,
+                opacity: (sendingMsg || uploadingFiles || (!msgBody.trim() && msgFiles.length === 0) || (msgRecipientType === 'user' && msgRecipientVolIds.length === 0) || (msgRecipientType === 'shift' && !msgSelectedShift) || (msgRecipientType === 'role' && !msgSelectedRole)) ? 0.5 : 1,
               }}
             >
-              {uploadingImage ? 'Uploading image…' : sendingMsg ? 'Sending…' : 'Send Message'}
+              {uploadingFiles ? 'Uploading files…' : sendingMsg ? 'Sending…' : 'Send Message'}
             </button>
           </form>
         </div>

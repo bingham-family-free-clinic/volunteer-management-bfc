@@ -232,7 +232,7 @@ export async function POST(req) {
   const senderName = senderProfile?.full_name?.split(' ')[0] ?? 'Someone'
   const notifPayload = JSON.stringify({
     title: `Message from ${senderName}`,
-    body:  (body?.trim() || '📎 Image').slice(0, 120),
+    body:  (body?.trim() || (image_url ? '📎 Attachment' : '')).slice(0, 120),
     url:   `/volunteer?messageId=${message.id}`,
   })
 
