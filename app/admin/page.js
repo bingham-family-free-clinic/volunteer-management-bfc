@@ -1099,6 +1099,7 @@ export default function AdminPage() {
   // Narrow hours columns — only what the UI renders
   const HOURS_COLS = 'id,volunteer_id,work_date,hours,role,notes,status,submitted_at,reviewed_at,profiles(full_name,role)'
 
+  // You can't review your own request
   async function loadPendingHours() {
     setHoursLoading(true)
     const { data } = await supabase
@@ -1106,7 +1107,7 @@ export default function AdminPage() {
       .select(HOURS_COLS)
       .eq('status', 'pending')
       .order('submitted_at', { ascending: false })
-    setPendingHours((data || []).filter(h => h.profiles?.role !== 'admin'))
+    setPendingHours((data || []).filter(h => h.volunteer_id !== user?.id))
     setHoursLoading(false)
   }
 
@@ -1118,7 +1119,7 @@ export default function AdminPage() {
       .neq('status', 'pending')
       .order('submitted_at', { ascending: false })
       .limit(HOURS_PAGE)
-    const rows = (data || []).filter(h => h.profiles?.role !== 'admin')
+    const rows = (data || []).filter(h => h.volunteer_id !== user?.id)
     setReviewedHours(rows)
     setReviewedHoursHasMore(rows.length === HOURS_PAGE)
     setReviewedHoursCursor(rows.length > 0 ? rows[rows.length - 1].submitted_at : null)
@@ -1135,7 +1136,7 @@ export default function AdminPage() {
       .lt('submitted_at', reviewedHoursCursor)
       .order('submitted_at', { ascending: false })
       .limit(HOURS_PAGE)
-    const rows = (data || []).filter(h => h.profiles?.role !== 'admin')
+    const rows = (data || []).filter(h => h.volunteer_id !== user?.id)
     setReviewedHours(prev => [...prev, ...rows])
     setReviewedHoursHasMore(rows.length === HOURS_PAGE)
     setReviewedHoursCursor(rows.length > 0 ? rows[rows.length - 1].submitted_at : null)
@@ -1567,9 +1568,12 @@ export default function AdminPage() {
     const callout = callouts.find(c => c.id === req.callout_id)
     if (!callout) { showMessage('Callout not found', 'error'); setApprovingCoverId(null); return }
 
-    await supabase.from('callouts').update({ covered_by: req.volunteer_id }).eq('id', req.callout_id)
-    await supabase.from('shift_cover_requests').update({ status: 'approved', reviewed_at: new Date().toISOString() }).eq('id', req.id)
-    await supabase.from('shift_cover_requests').update({ status: 'denied', reviewed_at: new Date().toISOString() }).eq('callout_id', req.callout_id).neq('id', req.id)
+    const { error: coverErr } = await supabase.from('callouts').update({ covered_by: req.volunteer_id }).eq('id', req.callout_id)
+    if (coverErr) { showMessage(`Approval not saved: ${coverErr.message}`, 'error'); setApprovingCoverId(null); return }
+    const { error: reviewErr } = await supabase.from('shift_cover_requests').update({ status: 'approved', reviewed_at: new Date().toISOString() }).eq('id', req.id)
+    if (reviewErr) { showMessage(`Approval not saved: ${reviewErr.message}`, 'error'); setApprovingCoverId(null); return }
+    const { error: denyErr } = await supabase.from('shift_cover_requests').update({ status: 'denied', reviewed_at: new Date().toISOString() }).eq('callout_id', req.callout_id).neq('id', req.id)
+    if (denyErr) { showMessage(`Approval not saved: ${denyErr.message}`, 'error'); setApprovingCoverId(null); return }
 
     showMessage(`${req.profiles?.full_name} approved to cover shift!`, 'success')
     await audit('approved_cover', 'callout', req.callout_id, req.profiles?.full_name, `covering ${callout.callout_date} ${callout.shift_time}`)
@@ -1639,12 +1643,20 @@ export default function AdminPage() {
     setApprovingHoursId(sub.id)
     const clockInUTC  = fromMountainInputValue(`${sub.work_date}T09:00`)
     const clockOutUTC = new Date(new Date(clockInUTC).getTime() + sub.hours * 3600000).toISOString()
-    const { error: shiftErr } = await supabase.from('shifts').insert({ volunteer_id: sub.volunteer_id, clock_in: clockInUTC, clock_out: clockOutUTC, role: sub.role, affiliation: volunteers.find(v => v.id === sub.volunteer_id)?.affiliation || null })
+    const { data: insertedShift, error: shiftErr } = await supabase.from('shifts').insert({ volunteer_id: sub.volunteer_id, clock_in: clockInUTC, clock_out: clockOutUTC, role: sub.role, affiliation: volunteers.find(v => v.id === sub.volunteer_id)?.affiliation || null }).select('id').single()
     if (shiftErr) { showMessage(shiftErr.message, 'error'); setApprovingHoursId(null); return }
-    await supabase.from('hours_submissions').update({ status: 'approved', reviewed_at: new Date().toISOString() }).eq('id', sub.id)
+    const reviewedAt = new Date().toISOString()
+    const { error: statusErr } = await supabase.from('hours_submissions').update({ status: 'approved', reviewed_at: reviewedAt }).eq('id', sub.id)
+    if (statusErr) {
+      // Roll back the shift so a retry doesn't create a duplicate
+      if (insertedShift?.id) await supabase.from('shifts').delete().eq('id', insertedShift.id)
+      showMessage(`Approval not saved: ${statusErr.message}`, 'error')
+      setApprovingHoursId(null)
+      return
+    }
     showMessage('Hours approved and shift created!', 'success')
     await audit('approved_hours', 'hours', sub.id, sub.profiles?.full_name, `${sub.hours}h on ${sub.work_date} (${sub.role})`)
-    const reviewed = { ...sub, status: 'approved', reviewed_at: new Date().toISOString() }
+    const reviewed = { ...sub, status: 'approved', reviewed_at: reviewedAt }
     setPendingHours(prev => prev.filter(h => h.id !== sub.id))
     setReviewedHours(prev => [reviewed, ...prev])
     setApprovingHoursId(null)
@@ -1653,7 +1665,8 @@ export default function AdminPage() {
   async function rejectHours(id) {
     setApprovingHoursId(id)
     const sub = pendingHours.find(h => h.id === id)
-    await supabase.from('hours_submissions').update({ status: 'rejected', reviewed_at: new Date().toISOString() }).eq('id', id)
+    const { error } = await supabase.from('hours_submissions').update({ status: 'rejected', reviewed_at: new Date().toISOString() }).eq('id', id)
+    if (error) { showMessage(`Rejection not saved: ${error.message}`, 'error'); setApprovingHoursId(null); return }
     showMessage('Submission rejected.', 'success')
     await audit('rejected_hours', 'hours', id, sub?.profiles?.full_name, `${sub?.hours}h on ${sub?.work_date}`)
     const reviewed = { ...sub, status: 'rejected', reviewed_at: new Date().toISOString() }
