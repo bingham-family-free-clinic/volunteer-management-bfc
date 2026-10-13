@@ -1099,6 +1099,7 @@ export default function AdminPage() {
   // Narrow hours columns — only what the UI renders
   const HOURS_COLS = 'id,volunteer_id,work_date,hours,role,notes,status,submitted_at,reviewed_at,profiles(full_name,role)'
 
+  // You can't review your own request
   async function loadPendingHours() {
     setHoursLoading(true)
     const { data } = await supabase
@@ -1106,7 +1107,7 @@ export default function AdminPage() {
       .select(HOURS_COLS)
       .eq('status', 'pending')
       .order('submitted_at', { ascending: false })
-    setPendingHours((data || []).filter(h => h.profiles?.role !== 'admin'))
+    setPendingHours((data || []).filter(h => h.volunteer_id !== user?.id))
     setHoursLoading(false)
   }
 
@@ -1118,7 +1119,7 @@ export default function AdminPage() {
       .neq('status', 'pending')
       .order('submitted_at', { ascending: false })
       .limit(HOURS_PAGE)
-    const rows = (data || []).filter(h => h.profiles?.role !== 'admin')
+    const rows = (data || []).filter(h => h.volunteer_id !== user?.id)
     setReviewedHours(rows)
     setReviewedHoursHasMore(rows.length === HOURS_PAGE)
     setReviewedHoursCursor(rows.length > 0 ? rows[rows.length - 1].submitted_at : null)
@@ -1135,7 +1136,7 @@ export default function AdminPage() {
       .lt('submitted_at', reviewedHoursCursor)
       .order('submitted_at', { ascending: false })
       .limit(HOURS_PAGE)
-    const rows = (data || []).filter(h => h.profiles?.role !== 'admin')
+    const rows = (data || []).filter(h => h.volunteer_id !== user?.id)
     setReviewedHours(prev => [...prev, ...rows])
     setReviewedHoursHasMore(rows.length === HOURS_PAGE)
     setReviewedHoursCursor(rows.length > 0 ? rows[rows.length - 1].submitted_at : null)
