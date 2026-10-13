@@ -1265,7 +1265,24 @@ export function MessageTab({
   }
 
   // ── Thread grouping ────────────────────────────────────────────────────────
-  // Returns top-level messages with their replies keyed by parent id
+  // Returns top-level messages with their replies keyed by parent id.
+  // Replies are filtered to what the viewer may actually see: a direct (DM)
+  // reply is visible only to its sender and its single recipient, so thread
+  // starters and fellow participants never see each other's side DMs.
+  function canSeeReply(r, root) {
+    if (!user?.id) return false
+    if (r.sender_id === user.id) return true
+    if (r.recipient_type === 'volunteer') return r.recipient_volunteer_id === user.id
+    if (r.recipient_type === 'group') {
+      const audience = new Set(
+        [...parseGroupMemberIds(r), r.sender_id, root?.sender_id].filter(Boolean)
+      )
+      return audience.has(user.id)
+    }
+    if (!getInboxMessages || !profile) return true
+    return getInboxMessages([r], user, profile).length > 0
+  }
+
   function buildThreadMap(msgs) {
     const validMsgs = msgs.filter(m => m != null)
     const repliesMap = {}
@@ -1275,23 +1292,29 @@ export function MessageTab({
         if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
         repliesMap[r.parent_message_id].push(r)
       })
+    const topLevel = validMsgs.filter(m => !m.parent_message_id)
+    const topById = new Map(topLevel.map(m => [String(m.id), m]))
     // Sort each reply thread: every reply-all floats above the direct
     // messages, no matter who sent it, chronological within each group.
     Object.keys(repliesMap).forEach(k => {
+      // The thread root is needed for legacy group rows, whose stored member
+      // lists predate full membership (root senders weren't included).
+      const root = topById.get(String(k))
       const isReplyAll = (r) => r.recipient_type !== 'volunteer'
-      repliesMap[k].sort((a, b) => {
-        const ag = isReplyAll(a) ? 0 : 1
-        const bg = isReplyAll(b) ? 0 : 1
-        if (ag !== bg) return ag - bg
-        return new Date(a.created_at) - new Date(b.created_at)
-      })
+      repliesMap[k] = repliesMap[k]
+        .filter(r => canSeeReply(r, root))
+        .sort((a, b) => {
+          const ag = isReplyAll(a) ? 0 : 1
+          const bg = isReplyAll(b) ? 0 : 1
+          if (ag !== bg) return ag - bg
+          return new Date(a.created_at) - new Date(b.created_at)
+        })
     })
-    const topLevel = validMsgs.filter(m => !m.parent_message_id)
-      .sort((a, b) => {
-        const aLatest = Math.max(new Date(a.created_at), ...(repliesMap[a.id] || []).map(r => new Date(r.created_at)))
-        const bLatest = Math.max(new Date(b.created_at), ...(repliesMap[b.id] || []).map(r => new Date(r.created_at)))
-        return bLatest - aLatest
-      })
+    topLevel.sort((a, b) => {
+      const aLatest = Math.max(new Date(a.created_at), ...(repliesMap[a.id] || []).map(r => new Date(r.created_at)))
+      const bLatest = Math.max(new Date(b.created_at), ...(repliesMap[b.id] || []).map(r => new Date(r.created_at)))
+      return bLatest - aLatest
+    })
     return { topLevel, repliesMap }
   }
 
