@@ -579,6 +579,8 @@ function VolunteerPageInner() {
   const [activeShift, setActiveShift]   = useState(null)
   const [clockLoading, setClockLoading] = useState(false)
   const [lunchAssignment, setLunchAssignment] = useState(null)
+  // null = not yet checked, true/false = known eligibility
+  const [clockEligible, setClockEligible] = useState(null)
 
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
   const [schedule, setSchedule] = useState([])
@@ -925,6 +927,9 @@ function VolunteerPageInner() {
     */
 
     await fetchScheduleTab(user.id)
+    // Preload clock-in eligibility so the clock tab can explain a block
+    // immediately (handleClockIn still re-verifies on every attempt).
+    setClockEligible(await checkClockEligible(user.id, profileData?.role === 'admin'))
   }
 
   // ── Per-tab lazy fetchers ─────────────────────────────────────────────────
@@ -1050,6 +1055,7 @@ function VolunteerPageInner() {
   // ── Tab switch handler ────────────────────────────────────────────────────
   async function handleTabChange(newTab) {
     setTab(newTab)
+    if (newTab === 'clock' && !activeShift) setClockEligible(await checkClockEligible(user?.id, profile?.role === 'admin'))
     if (newTab === 'schedule')    await fetchScheduleTab()
     if (newTab === 'callout')     await fetchCalloutTab()
     if (newTab === 'account')     await fetchAccountTab()
@@ -1068,8 +1074,34 @@ function VolunteerPageInner() {
     return { day, shift }
   }
 
+  // Clock-in requires a fully onboarded volunteer: they must either sit on
+  // the waitlist or hold a scheduled shift. Returns true/false when the
+  // checks run, null when they couldn't (e.g. permissions) — callers must
+  // treat anything but true as "do not clock in". Admins bypass the gate.
+  async function checkClockEligible(uid, isAdmin) {
+    if (isAdmin) return true
+    const [{ data: wl, error: wlErr }, { data: sched, error: schedErr }] = await Promise.all([
+      supabase.from('waitlist').select('id').eq('volunteer_id', uid).limit(1),
+      supabase.from('schedule').select('id').eq('volunteer_id', uid).limit(1),
+    ])
+    if (wlErr || schedErr) {
+      console.error('clock eligibility check failed:', wlErr || schedErr)
+      return null
+    }
+    return (wl?.length > 0) || (sched?.length > 0)
+  }
+
   async function handleClockIn() {
     setClockLoading(true)
+    const eligible = await checkClockEligible(user.id, profile?.role === 'admin')
+    setClockEligible(eligible)
+    if (eligible !== true) {
+      showToast(eligible === false
+        ? 'You can clock in once you are on the waitlist or have a scheduled shift.'
+        : 'Could not verify clock-in eligibility. Please try again.', 'error')
+      setClockLoading(false)
+      return
+    }
     let resolvedRole = null
     const { day, shift } = getCurrentShiftWindow()
     if (day && shift) {
@@ -1511,6 +1543,13 @@ function VolunteerPageInner() {
         {tab === 'clock' && (
           <div style={S.card}>
             <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Clock In / Out</h2>
+            {!activeShift && clockEligible === false && (
+              <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: '8px' }}>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.5 }}>
+                  Clock-in unlocks once you are on the waitlist or have a scheduled shift. If you were just added, switch tabs and come back.
+                </p>
+              </div>
+            )}
             {activeShift ? (
               <button onClick={handleClockOut} disabled={clockLoading} style={{ width: '100%', padding: '1rem', background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '1rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                 {clockLoading ? 'Processing...' : 'Clock Out'}
