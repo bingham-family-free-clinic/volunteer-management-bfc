@@ -699,10 +699,16 @@ function WelcomePacketManager({ supabase, msg, outlineBtn, solidBtn, secLabel, c
       .upload(path, file, { upsert: true, contentType: 'application/pdf' })
     if (error) { msg(error.message, 'error'); setUploading(false); return }
 
-    await supabase
+    // The file is uploaded, but nothing references it until this link is stored.
+    // An update that matches no row (e.g. no onboarding template yet) saves
+    // nothing, so the row count is checked before claiming success.
+    const { data: saved, error: linkErr } = await supabase
       .from('email_templates')
       .update({ welcome_packet_path: path })
       .eq('stage', 'onboarding')
+      .select('id')
+    if (linkErr) { msg(`Welcome packet uploaded, but the link was not saved: ${linkErr.message}`, 'error'); setUploading(false); return }
+    if (!saved?.length) { msg('Welcome packet uploaded, but there is no onboarding email template yet — the link was not saved.', 'error'); setUploading(false); return }
 
     setPacketPath(path)
     msg('Welcome packet updated')
@@ -1438,6 +1444,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [onboardForm,  setOnboardForm]  = useState(EMPTY_FORM)
   const [onboardStep,  setOnboardStep]  = useState(1)
   const [savingStep,   setSavingStep]   = useState(false)
+  const [stepSaveFailed, setStepSaveFailed] = useState(false)
 
   // Admin notes — free text captured during onboarding, carried over to the
   // volunteer's profile once created (visible/editable on the Volunteers tab).
@@ -1758,8 +1765,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   async function saveOnboardProgress(applicantId, patch) {
     setSavingStep(true)
-    await supabase.from('volunteer_applications').update(patch).eq('id', applicantId)
+    const { error } = await supabase.from('volunteer_applications').update(patch).eq('id', applicantId)
     setSavingStep(false)
+    if (error) { msg(`Step was not saved: ${error.message}`, 'error'); setStepSaveFailed(true); return false }
+    setStepSaveFailed(false)
+    return true
   }
 
   // ─── Admin notes (application/needs/wants) ────────────────────────────────
@@ -2629,9 +2639,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   function SavedBadge() {
-    return savingStep
-      ? <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>saving…</span>
-      : <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600 }}>✓ saved</span>
+    if (savingStep) return <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>saving…</span>
+    if (stepSaveFailed) return <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 600 }}>⚠ not saved — try again</span>
+    return <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600 }}>✓ saved</span>
   }
 
   function FileRow({ item, applicantId }) {
@@ -3454,7 +3464,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
                 {onboardForm.affiliation && <AffiliationExtras onboardForm={onboardForm} setOnboardForm={setOnboardForm} labelStyle={labelStyle} inputStyle={inputStyle} secLabel={secLabel} />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() }); setOnboardStep(2) }} disabled={!s1} style={solidBtn(C.blue, !s1)}>Save &amp; Next</button>
+                  <button onClick={async () => { if (await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() })) setOnboardStep(2) }} disabled={!s1} style={solidBtn(C.blue, !s1)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
@@ -3480,7 +3490,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                   <button onClick={() => setOnboardStep(1)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null }); setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
+                  <button onClick={async () => { if (await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null })) setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
