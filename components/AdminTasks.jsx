@@ -7,10 +7,10 @@ import { TASK_TEAMS as TEAMS } from '../lib/constants'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const STATUS_META = {
-  open:     { label: 'Open',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
-  blocked:  { label: 'Blocked',  color: '#f97316', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
+  open:     { label: 'Open',     color: '#02416b', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  blocked:  { label: 'Blocked',  color: '#02416b', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
   closed:   { label: 'Done',     color: '#02416b', bg: 'rgba(2,65,107,0.12)',    border: 'rgba(2,65,107,0.3)'     },
-  inactive: { label: 'Inactive', color: '#6b7280', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
+  inactive: { label: 'Inactive', color: '#02416b', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
 }
 
 const S = {
@@ -58,9 +58,9 @@ function formatDue(dateStr, status) {
   // Completed tasks are never overdue or urgent — show the plain date only.
   if (status === 'closed') return { label, color: 'var(--muted)' }
   const diff = daysUntilDue(dateStr)
-  if (diff < 0)  return { label, color: '#ef4444' }
-  if (diff < 3)  return { label, color: '#f97316' }
-  if (diff < 7)  return { label, color: '#eab308' }
+  if (diff < 0)  return { label, color: '#02416b' }
+  if (diff < 3)  return { label, color: '#02416b' }
+  if (diff < 7)  return { label, color: '#02416b' }
   return { label, color: 'var(--muted)' }
 }
 
@@ -563,9 +563,9 @@ export default function AdminTasks({ currentUserId }) {
       {/* Stats bar */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
         {[
-          { label: 'Open', value: allOpen,    color: '#60a5fa' },
-          { label: 'Blocked', value: allBlocked, color: '#f97316' },
-          { label: 'Overdue', value: allOverdue, color: '#ef4444' },
+          { label: 'Open', value: allOpen,    color: '#02416b' },
+          { label: 'Blocked', value: allBlocked, color: '#02416b' },
+          { label: 'Overdue', value: allOverdue, color: '#02416b' },
         ].map(stat => (
           <div key={stat.label} style={{ ...S.card, padding: '0.85rem 1rem', textAlign: 'center' }}>
             <p style={{ fontSize: '1.5rem', fontWeight: 700, fontFamily: 'DM Mono, monospace', color: stat.color }}>{stat.value}</p>
