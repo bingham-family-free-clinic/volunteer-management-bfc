@@ -77,6 +77,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   const [savingNotes, setSavingNotes] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
   const [updatingAssignee, setUpdatingAssignee] = useState(false)
+  const [updatingDue, setUpdatingDue] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal] = useState(task.name)
   const [savingName, setSavingName] = useState(false)
@@ -145,6 +146,14 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
     if (error) showToast(error.message, 'error')
     else { onUpdate(task.id, { name: nameVal.trim() }); setEditingName(false) }
     setSavingName(false)
+  }
+
+  async function changeDueDate(newDate) {
+    setUpdatingDue(true)
+    const { error } = await supabase.from('tasks').update({ due_date: newDate || null }).eq('id', task.id)
+    if (error) showToast(error.message, 'error')
+    else onUpdate(task.id, { due_date: newDate || null })
+    setUpdatingDue(false)
   }
 
   async function changeAssignee(newId) {
@@ -218,11 +227,6 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                 {task.name}
               </span>
             )}
-            {isMine && !editingName && (
-              <span style={{ fontSize: '0.65rem', background: 'rgba(2,65,107,0.15)', color: '#02416b', borderRadius: '4px', padding: '0.1rem 0.4rem', fontWeight: 700, letterSpacing: '0.05em' }}>
-                MINE
-              </span>
-            )}
             {teamBadge && !editingName && (
               <span style={{
                 fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.04em',
@@ -269,7 +273,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
             }}
             style={{
                 fontSize: '0.75rem',
-                color: STATUS_META[task.status]?.color || 'var(--muted)',
+                color: '#000',
                 background: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
@@ -284,23 +288,24 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
             <option value="inactive">Inactive</option>
             </select>
 
-            {/* Due date */}
-            {due && (
-              <span style={{ fontSize: '0.75rem', color: due.color, fontFamily: 'DM Mono, monospace' }}>
-                {due.label}
-              </span>
-            )}
-
-            {/* Status badge */}
-            <span style={{
-              fontSize: '0.68rem', fontWeight: 600,
-              color: sm.color, background: sm.bg,
-              border: `1px solid ${sm.border}`,
-              borderRadius: '4px', padding: '0.1rem 0.4rem',
-              letterSpacing: '0.04em',
-            }}>
-              {sm.label.toUpperCase()}
-            </span>
+            {/* Due date (editable) */}
+            <input
+              type="date"
+              value={task.due_date || ''}
+              onChange={e => changeDueDate(e.target.value)}
+              disabled={updatingDue}
+              title="Change due date"
+              style={{
+                fontSize: '0.75rem',
+                color: due ? due.color : 'var(--muted)',
+                fontFamily: 'DM Mono, monospace',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+                outline: 'none',
+              }}
+            />
 
             {/* Notes toggle */}
             <button
@@ -311,9 +316,6 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                 fontFamily: 'DM Sans, sans-serif', padding: 0, display: 'flex', alignItems: 'center', gap: '0.25rem',
               }}
             >
-              <svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 00-2 2v16l4-2 4 2 4-2V4a2 2 0 00-2-2z"/>
-              </svg>
               {task.notes ? 'Notes' : 'Add note'}
               <span style={{ transform: notesOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▾</span>
             </button>
