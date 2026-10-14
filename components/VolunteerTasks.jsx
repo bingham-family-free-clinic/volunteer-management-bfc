@@ -6,10 +6,10 @@ import { getMountainNow } from '../lib/timeUtils'
 import { TASK_TEAMS } from '../lib/constants'
 
 const STATUS_META = {
-  open:     { label: 'Open',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
-  blocked:  { label: 'Blocked',  color: '#f97316', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
-  closed:   { label: 'Done',     color: '#2563eb', bg: 'rgba(37,99,235,0.12)',   border: 'rgba(37,99,235,0.3)'    },
-  inactive: { label: 'Inactive', color: '#6b7280', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
+  open:     { label: 'Open',     color: '#02416b', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  blocked:  { label: 'Blocked',  color: '#02416b', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
+  closed:   { label: 'Done',     color: '#02416b', bg: 'rgba(2,65,107,0.12)',    border: 'rgba(2,65,107,0.3)'     },
+  inactive: { label: 'Inactive', color: '#02416b', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
 }
 
 const S = {
@@ -304,7 +304,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                 title="Change due date"
                 style={{
                   fontSize: '0.75rem',
-                  color: due ? due.color : 'var(--muted)',
+                  color: '#000',
                   fontFamily: 'DM Mono, monospace',
                   fontStyle: due ? 'normal' : 'italic',
                   background: 'transparent',
