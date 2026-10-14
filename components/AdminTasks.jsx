@@ -51,10 +51,12 @@ function daysUntilDue(dateStr) {
   return (dueLocal - todayLocal) / 86400000
 }
 
-function formatDue(dateStr) {
+function formatDue(dateStr, status) {
   if (!dateStr) return null
   const [y, m, d] = dateStr.split('-').map(Number)
   const label = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  // Completed tasks are never overdue or urgent — show the plain date only.
+  if (status === 'closed') return { label, color: 'var(--muted)', tag: null }
   const diff = daysUntilDue(dateStr)
   if (diff < 0)  return { label, color: '#ef4444', tag: 'OVERDUE' }
   if (diff < 3)  return { label, color: '#f97316', tag: null }
@@ -72,7 +74,7 @@ function AdminTaskRow({ task, allMembers, onUpdate, onDelete, showToast }) {
   const [nameVal, setNameVal]         = useState(task.name)
   const [savingName, setSavingName]   = useState(false)
 
-  const due = formatDue(task.due_date)
+  const due = formatDue(task.due_date, task.status)
   const sm = STATUS_META[task.status] || STATUS_META.open
   // A task's team is a default role: everyone with that default role is on the team.
   const teamMembers = allMembers.filter(m => m.default_role === task.team)
@@ -404,7 +406,7 @@ export default function AdminTasks({ currentUserId }) {
     if (filterDue) {
       if (!task.due_date) return filterDue === '' // no due date only shows when no filter
       const diff = daysUntilDue(task.due_date)
-      if (filterDue === 'overdue' && diff >= 0) return false
+      if (filterDue === 'overdue' && (diff >= 0 || task.status === 'closed')) return false
       if (filterDue === 'week'    && (diff < 0 || diff > 7)) return false
       if (filterDue === 'month'   && (diff < 0 || diff > 30)) return false
     }

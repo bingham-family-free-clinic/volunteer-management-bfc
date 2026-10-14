@@ -56,10 +56,12 @@ function daysUntilDue(dateStr) {
   return (dueLocal - todayLocal) / 86400000
 }
 
-function formatDue(dateStr) {
+function formatDue(dateStr, status) {
   if (!dateStr) return null
   const [y, m, d] = dateStr.split('-').map(Number)
   const label = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  // Completed tasks are never overdue or urgent — show the plain date only.
+  if (status === 'closed') return { label, color: 'var(--muted)' }
   const diff = daysUntilDue(dateStr)
   if (diff < 0)  return { label, color: '#ef4444' }
   if (diff < 3)  return { label, color: '#f97316' }
@@ -114,7 +116,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   }, [editingNotes])
 
   const isMine = task.assignee_id === currentUserId
-  const due = formatDue(task.due_date)
+  const due = formatDue(task.due_date, task.status)
   const sm = STATUS_META[task.status] || STATUS_META.open
   const assignee = teamMembers.find(m => m.id === task.assignee_id)
 
