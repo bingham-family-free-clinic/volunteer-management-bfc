@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE, TASK_TEAMS } from '../../lib/constants'
+import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import DataDashboard from '../../components/DataDashboard'
@@ -770,8 +770,10 @@ export default function AdminPage() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Tasks page is limited to the task teams, which are just default roles.
-  const hasTasksTab = TASK_TEAMS.includes(profile?.default_role)
+  // The admin Tasks page (all teams' tasks) is only for the Director and
+  // Administrative Assistants. Everyone else on a task team uses the Tasks tab
+  // on the volunteer page, which shows just their own team's tasks.
+  const hasTasksTab = ['Director', 'Administrative Assistant'].includes(profile?.default_role)
   const tasksTabItem = hasTasksTab ? [['tasks', 'Tasks']] : []
 
   const canOverrideRoleLimits = ['Director', 'Administrative Assistant', 'Executive Assistant']
@@ -822,13 +824,12 @@ export default function AdminPage() {
     ? [
         ['providers', 'Providers'], ['volunteers', 'Volunteers'],
         ['create', 'Add Volunteer'], ['shifts', 'Shifts'],  ['hours', 'Hours'],
-        ...tasksTabItem,
       ]
     : isOfficeManager
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['training', 'Weekly Training'], ...tasksTabItem,
+        ['training', 'Weekly Training'],
       ]
     : isOSSM
     ? [
@@ -839,7 +840,6 @@ export default function AdminPage() {
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ...tasksTabItem,
       ]
     : [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
