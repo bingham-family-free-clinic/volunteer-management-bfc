@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } from 'react'
 import { supabase } from '../../lib/supabase'
-import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE } from '../../lib/constants'
+import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE, TASK_TEAMS } from '../../lib/constants'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import { MessageCard } from '../../components/MessageCard'
@@ -853,7 +853,7 @@ function VolunteerPageInner() {
 
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('id, full_name, role, default_role, affiliation, team, license_exp, bls_exp, dea_exp, tb_exp')
+      .select('id, full_name, role, default_role, affiliation, license_exp, bls_exp, dea_exp, tb_exp')
       .eq('id', user.id)
       .single()
     setProfile(profileData)
@@ -1295,7 +1295,7 @@ function VolunteerPageInner() {
     ['schedule', 'Schedule'],
     ['callout', 'Call-Out'],
     ['messages', 'Messages'],
-    ...(profile?.team ? [['tasks', 'Tasks']] : []),
+    ...(TASK_TEAMS.includes(profile?.default_role) ? [['tasks', 'Tasks']] : []),
     ['account', 'Account'],
     ...(trainingAvailable ? [['training', 'Training']] : []),
     ...(surveyOpen ? [['feedback', 'Feedback']] : []),
@@ -1863,8 +1863,8 @@ function VolunteerPageInner() {
           />
         )}
 
-        {tab === 'tasks' && (
-          <VolunteerTasks userId={user.id} team={profile?.team} />
+        {tab === 'tasks' && TASK_TEAMS.includes(profile?.default_role) && (
+          <VolunteerTasks userId={user.id} defaultRole={profile?.default_role} />
         )}
 
         {/* ── TRAINING TAB ─────────────────────────────────────────────────── */}

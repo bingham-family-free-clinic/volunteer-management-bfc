@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
+import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE, TASK_TEAMS } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import DataDashboard from '../../components/DataDashboard'
@@ -26,11 +26,6 @@ const SHIFTS_PAGE    = 25
 const HOURS_PAGE     = 20
 const AUDIT_PAGE     = 30
 const CALLOUTS_LIMIT = 60
-const TEAMS = [
-  'Office Manager', 'Information Systems', 'Administrative Assistant',
-  'Media', 'Volunteer Credentialing', 'Provider Credentialing',
-  'Executive Assistant', 'OSSM',
-]
 
 // ── Desktop header groupings ──────────────────────────────────────────────────
 // Which tab keys live under each top-level desktop menu, in display order.
@@ -106,7 +101,7 @@ function getLabVolunteerIds(volunteers, schedule) {
 const PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,end_date,avatar_url'
 
 // Slim profile — list views only need identity + filter fields
-const PROFILE_LIST_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,end_date,team,avatar_url,admin_notes'
+const PROFILE_LIST_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,license_exp,bls_exp,dea_exp,ftca_exp,tb_exp,end_date,avatar_url,admin_notes'
 
 const PROVIDER_CRED_FIELDS = [
   { key: 'license_exp', label: 'License' },
@@ -775,8 +770,9 @@ export default function AdminPage() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  const isTaskAdmin = ['Director', 'Administrative Assistant', 'Executive Assistant']
-    .includes(profile?.default_role)
+  // Tasks page is limited to the task teams, which are just default roles.
+  const hasTasksTab = TASK_TEAMS.includes(profile?.default_role)
+  const tasksTabItem = hasTasksTab ? [['tasks', 'Tasks']] : []
 
   const canOverrideRoleLimits = ['Director', 'Administrative Assistant', 'Executive Assistant']
     .includes(profile?.default_role)
@@ -826,12 +822,13 @@ export default function AdminPage() {
     ? [
         ['providers', 'Providers'], ['volunteers', 'Volunteers'],
         ['create', 'Add Volunteer'], ['shifts', 'Shifts'],  ['hours', 'Hours'],
+        ...tasksTabItem,
       ]
     : isOfficeManager
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['training', 'Weekly Training'],
+        ['training', 'Weekly Training'], ...tasksTabItem,
       ]
     : isOSSM
     ? [
@@ -842,11 +839,12 @@ export default function AdminPage() {
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
+        ...tasksTabItem,
       ]
     : [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'],
-        ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
+        ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...tasksTabItem,
       ]
 
   // Insert Messages as the 3rd tab (just like the volunteer page)
@@ -1513,7 +1511,6 @@ export default function AdminPage() {
       license_exp: v.license_exp||'', bls_exp: v.bls_exp||'',
       dea_exp: v.dea_exp||'', ftca_exp: v.ftca_exp||'', tb_exp: v.tb_exp||'',
       end_date: v.end_date || '', status_reason: v.status_reason || '',
-      team: v.team || '',
     })
     setNotesDraft(v.admin_notes || '')
     setStatusForm({ status: v.status || 'active', status_reason: v.status_reason || '' })
@@ -2029,7 +2026,6 @@ export default function AdminPage() {
       status_reason: editForm.end_date
         ? (editForm.status_reason || null)
         : null,
-      team: editForm.team || null,
     }
 
     const { error } = await supabase
@@ -3089,16 +3085,8 @@ export default function AdminPage() {
         {/*
         {tab === 'lunch'     && <LunchScheduler supabase={supabase} profile={profile} />}
         */}
-        {tab === 'tasks' && (
-          <AdminTasks
-            currentUserId={profile.id}
-            volunteers={volunteers}
-            onVolunteerTeamUpdate={(volId, newTeam) =>
-              setVolunteers(prev =>
-                prev.map(v => v.id === volId ? { ...v, team: newTeam } : v)
-              )
-            }
-          />
+        {tab === 'tasks' && hasTasksTab && (
+          <AdminTasks currentUserId={profile.id} />
         )}
 
         {/* Mobile sidebar — holds the tabs (as pills would show on desktop), plus
