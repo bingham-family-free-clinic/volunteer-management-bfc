@@ -336,6 +336,8 @@ Located at `app/admin/page.js`. Uses a `loadedTabs` ref to prevent re-fetching o
 
 **Volunteers tab** — Filterable roster, provider credential summary banner, volunteer detail with avatar, edit, deactivate/reactivate, lazy-loaded shifts/schedule/hours.
 
+**IN DEVELOPMENT Training tab**
+
 **Providers tab** — Provider recurring/one-time schedules, callouts, credential dates.
 
 **Pipeline tab** — Full recruitment workflow (see [Recruitment Pipeline](#recruitment-pipeline)).
