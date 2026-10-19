@@ -200,7 +200,7 @@ const PREP_SKILL_LABELS = {
   scheduling:     'Scheduling/Front Desk',
   office:         'Microsoft Office/Google Workspace',
   scribing:       'Medical Scribing',
-  lab:            'Laboratory Skills',
+  lab:            'Medical Laboratory Skills',
 }
 
 // Category kinds: 'certs' | 'skills' (pts table + cap), 'hours' | 'shifts' |
