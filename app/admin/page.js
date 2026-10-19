@@ -16,6 +16,7 @@ import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import { MessageTab } from '../../components/MessageTab'
+import Newsletter from '../../components/Newsletter'
 
 export const dynamic = 'force-dynamic'
 
@@ -866,6 +867,12 @@ export default function AdminPage() {
   if (canSeeLanguageCoverage) {
     const volIdx = tabItems.findIndex(([key]) => key === 'volunteers')
     tabItems.splice(volIdx === -1 ? tabItems.length : volIdx + 1, 0, ['languages', 'Languages'])
+  }
+
+  // Newsletter email list: same roles that can see the Volunteers tab.
+  {
+    const volIdx = tabItems.findIndex(([key]) => key === 'volunteers')
+    if (volIdx !== -1) tabItems.splice(volIdx + 1, 0, ['newsletter', 'Newsletter'])
   }
 
   // ── Desktop header groupings — derived from tabItems, so they automatically
@@ -3083,6 +3090,7 @@ export default function AdminPage() {
         {tab === 'providers' && <Providers supabase={supabase} />}
         {tab === 'data'      && <DataDashboard supabase={supabase} />}
         {tab === 'training'  && <WeeklyTraining supabase={supabase} profile={profile} />}
+        {tab === 'newsletter' && tabItems.some(([key]) => key === 'newsletter') && <Newsletter supabase={supabase} profile={profile} />}
         {tab === 'languages' && canSeeLanguageCoverage && (
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
         )}
