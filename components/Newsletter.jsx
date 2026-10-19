@@ -153,15 +153,6 @@ export default function Newsletter({ supabase, profile }) {
       </div>
 
       <div style={card}>
-        <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Add Emails</h2>
-        <label style={labelStyle}>Email(s) — separate multiple with commas or new lines</label>
-        <textarea value={newEmail} onChange={e => setNewEmail(e.target.value)} rows={2} placeholder="name@example.com" style={{ ...inputStyle, resize: 'vertical' }} />
-        <div style={{ marginTop: '1rem' }}>
-          <button onClick={addEmails} disabled={adding || !newEmail.trim()} style={primaryBtn(adding || !newEmail.trim())}>{adding ? 'Adding...' : 'Add to List'}</button>
-        </div>
-      </div>
-
-      <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <h2 style={{ fontWeight: 600 }}>Copy List{!loading && <span style={{ marginLeft: '0.5rem', color: 'var(--muted)', fontWeight: 400, fontSize: '0.85rem' }}>— {list.length} emails</span>}</h2>
           <button onClick={copyAll} disabled={loading || list.length === 0} style={primaryBtn(loading || list.length === 0)}>{copied ? 'Copied!' : 'Copy All'}</button>
@@ -170,7 +161,14 @@ export default function Newsletter({ supabase, profile }) {
           : loading ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading...</p>
           : <textarea readOnly value={copyText} rows={5} onFocus={e => e.target.select()} style={{ ...inputStyle, fontFamily: 'DM Mono, monospace', fontSize: '0.8rem', resize: 'vertical' }} />}
       </div>
-
+      <div style={card}>
+        <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Add Emails</h2>
+        <label style={labelStyle}>Email(s) — separate multiple with commas or new lines</label>
+        <textarea value={newEmail} onChange={e => setNewEmail(e.target.value)} rows={2} placeholder="name@example.com" style={{ ...inputStyle, resize: 'vertical' }} />
+        <div style={{ marginTop: '1rem' }}>
+          <button onClick={addEmails} disabled={adding || !newEmail.trim()} style={primaryBtn(adding || !newEmail.trim())}>{adding ? 'Adding...' : 'Add to List'}</button>
+        </div>
+      </div>
       <div style={card}>
         <h2 style={{ fontWeight: 600, marginBottom: '1.25rem' }}>Manage List</h2>
         {loading ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Loading...</p>
