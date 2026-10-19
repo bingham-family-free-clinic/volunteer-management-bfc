@@ -175,6 +175,7 @@ const PREP_CERT_MATCHERS = {
   ACLS: /\bacls\b|advanced cardiac|advanced cardiovascular/,
   BLS:  /\bbls\b|basic life support/,
   CPR:  /\bcpr\b/,
+  CPT:  /\bcpt\b|certified phlebotomy|phlebotomy tech/,
 }
 
 const PREP_SKILL_MATCHERS = {
@@ -248,7 +249,7 @@ const PREP_ROLES = [
     key: 'lab', role: 'Lab', short: 'Lab', aliases: ['lab', 'laboratory'],
     categories: [
       { kind: 'skills', label: 'Skills', cap: 28, pts: { phlebotomy: 28, lab: 19 } },
-      { kind: 'certs', label: 'Certifications', cap: 29, pts: { MA: 17, RN: 17, LPN: 17, AEMT: 17, CNA: 12, EMT: 12 } },
+      { kind: 'certs', label: 'Certifications', cap: 29, pts: { MA: 17, RN: 17, LPN: 17, AEMT: 17, CNA: 12, EMT: 12, CPT:20 } },
       { kind: 'hours', label: 'Patient care hours', cap: 13 },
       { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'language', label: 'Language proficiency', cap: 10 },
