@@ -4,7 +4,7 @@ Commercial or other use requires written permission.
 
 # BFC Volunteer Portal
 
-A full-stack volunteer management platform for **Bingham Family Free Clinic**, built with Next.js 15 and Supabase. The app covers the full lifecycle of clinic volunteer operations — recruitment and onboarding, interview scheduling, shift scheduling, attendance, callouts, shift coverage, weekly training, internal messaging, provider credentialing, missionary (OSSM) oversight, and administrative reporting.
+A full-stack volunteer management platform for **Bingham Family Free Clinic**, built with Next.js 15 and Supabase. The app covers the full lifecycle of clinic volunteer operations - recruitment and onboarding, interview scheduling, shift scheduling, attendance, callouts, shift coverage, weekly training, internal messaging, provider credentialing, missionary (OSSM) oversight, and administrative reporting.
 
 ---
 
@@ -31,6 +31,7 @@ A full-stack volunteer management platform for **Bingham Family Free Clinic**, b
 - [Interview Self-Scheduling](#interview-self-scheduling)
 - [Messaging System](#messaging-system)
 - [Push Notifications & PWA](#push-notifications--pwa)
+- [Guest Hours](#guest-hours)
 - [API Routes](#api-routes)
 - [Backend Architecture](#backend-architecture)
 - [Conventions & Patterns](#conventions--patterns)
@@ -43,7 +44,9 @@ A full-stack volunteer management platform for **Bingham Family Free Clinic**, b
 
 The BFC Volunteer Portal replaces manual spreadsheets and group-chat coordination for a free community health clinic. Volunteers clock in/out, submit callouts, request shift coverage, complete weekly training, and communicate with the team. Admins manage schedules, run the recruitment pipeline, review hours submissions, track provider credential expiration, publish weekly training content, and maintain an audit log. Clinical Supervisors get a focused view of their shifts with live attendance and language coverage. OSSM staff monitor missionary volunteers. Providers manage clinical availability through a dedicated portal.
 
-All authenticated pages are client-rendered (`'use client'`) and talk directly to Supabase from the browser, except for a small set of Next.js API routes that require service-role access or server-side push delivery.
+One-time volunteers without an account can submit hours through the public guest hours form, which flows into the same reporting pipeline used for clinic hours.
+
+All authenticated pages are client-rendered ('use client') and talk directly to Supabase from the browser, except for a small set of Next.js API routes that require service-role access or server-side push delivery.
 
 ## Quick Start
 
@@ -62,7 +65,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Server-only variables (`SUPABASE_SERVICE_ROLE_KEY`, VAPID keys, `CRON_SECRET`) are required for API routes, push notifications, and cron jobs. Push and cron features will not work without them.
+Server-only variables (SUPABASE_SERVICE_ROLE_KEY, VAPID keys) are required for API routes, push notifications, and server-side message delivery. Push features will not work without them.
 
 ```bash
 npm run dev    # Start development server (default http://localhost:3000)
@@ -70,9 +73,9 @@ npm run build  # Production build
 npm start      # Run production build locally
 ```
 
-**Deployment:** The app is configured for [Vercel](https://vercel.com). Cron schedules live in `vercel.json`. Set all environment variables in the Vercel project settings.
+**Deployment:** The app is configured for [Vercel](https://vercel.com). Set all environment variables in the Vercel project settings.
 
-> **Note:** Database schema, migrations, Row Level Security policies, and Supabase Edge Functions are **not** in this repository. They must already exist in the linked Supabase project. See [Supabase Dependencies](#supabase-dependencies).
+> **Note:** Database schema, migrations, Row Level Security policies, and Supabase Edge Functions are **not** in this repository. They exist in an internal repository. For access, please contact info@binghamfamilyclinic.org.
 
 ---
 
@@ -82,11 +85,10 @@ npm start      # Run production build locally
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Client + server | Supabase client initialization |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Client + server | Supabase client; JWT verification in API routes |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server only | `/api/send-message`, `/api/send-push`, `/api/cron/shift-reminder` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server only | `/api/send-message`, `/api/send-push`, `/api/guest-hours` |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Client + server | Push subscription; `web-push` on server |
 | `VAPID_PRIVATE_KEY` | Server only | Push delivery |
 | `VAPID_EMAIL` | Server only | VAPID contact email for `web-push` |
-| `CRON_SECRET` | Server only | Authorizes Vercel cron calls to `/api/cron/shift-reminder` |
 | `VERCEL_ENV` | Server (automatic on Vercel) | Switches app icon between production (`logo3.png`) and non-production (`logo4.png`) |
 
 There is no `.env.example` file in the repository. Obtain values from the project maintainer or your Supabase/Vercel dashboard.
@@ -96,22 +98,18 @@ There is no `.env.example` file in the repository. Obtain values from the projec
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Browser (React / Next.js App Router pages)                     │
-│  /  /volunteer  /admin  /clinical-supervisor  /ossm  /provider  │
-│  /schedule/[token]  /reset-password  /offline                   │
-└────────────┬───────────────────────────────┬────────────────────┘
-             │ Supabase JS (anon key + JWT)   │ fetch() to API routes
-             ▼                                ▼
-┌────────────────────────┐         ┌──────────────────────────────┐
-│  Supabase              │         │  Next.js API Routes          │
-│  · Postgres + RLS      │         │  · /api/send-message         │
-│  · Auth                │         │  · /api/send-push            │
-│  · Storage             │         │  · /api/cron/shift-reminder  │
-│  · Edge Functions      │         └──────────────────────────────┘
-└────────────────────────┘
-             ▲
-             │ Vercel Cron (weekdays, shift reminders)
+Browser (React / Next.js App Router pages)
+  /  /volunteer  /admin  /clinical-supervisor  /ossm  /provider
+  /guest-hours  /schedule/[token]  /reset-password  /offline
+   |
+   | Supabase JS (anon key + JWT)  -> fetch() to API routes
+   v
+Supabase (Postgres + RLS, Auth, Storage, Edge Functions)
+   ^
+Next.js API Routes:
+   /api/send-message
+   /api/send-push
+   /api/guest-hours
 ```
 
 **Auth flow:** Login at `/` uses Supabase email/password auth. Sessions persist in `localStorage` under the key `bingham-app` (see `lib/supabase.js`). After login, users with `default_role = 'Provider'` go to `/provider`; all others go to `/volunteer`. Additional views (`/admin`, `/clinical-supervisor`, `/ossm`) are reached via "Switch View" buttons or direct navigation.
@@ -132,7 +130,6 @@ There is no `.env.example` file in the repository. Obtain values from the projec
 | Push Notifications | Web Push API (`web-push` v3) + service worker |
 | Styling | CSS custom properties in `app/globals.css` + inline component styles (Tailwind is configured but not used in components) |
 | Fonts | DM Sans, DM Mono (Google Fonts) |
-| Cron | Vercel Cron → `/api/cron/shift-reminder` |
 | Package Manager | npm |
 
 ---
@@ -141,60 +138,66 @@ There is no `.env.example` file in the repository. Obtain values from the projec
 
 ```
 /
-├── app/
-│   ├── page.js                      # Login / landing (includes forgot-password flow)
-│   ├── volunteer/page.js            # Volunteer default view
-│   ├── admin/page.js                # Admin dashboard (role-gated tabs)
-│   ├── clinical-supervisor/page.js  # Clinical Supervisor view
-│   ├── ossm/page.js                 # OSSM missionary oversight view
-│   ├── provider/page.js             # Provider portal
-│   ├── schedule/[token]/page.js     # Public interview self-scheduling (tokenized)
-│   ├── reset-password/page.js       # Password recovery completion
-│   ├── offline/page.js              # Offline fallback (service worker)
-│   ├── api/
-│   │   ├── send-message/route.js    # Authenticated message send + push fan-out
-│   │   ├── send-push/route.js       # Server-side push to specific user IDs
-│   │   └── cron/shift-reminder/route.js
-│   ├── globals.css
-│   └── layout.js                    # Root layout, PWA meta, service worker registration
-├── components/
-│   ├── AdminTasks.jsx               # Internal team task board (admin)
-│   ├── BiannualSurvey.jsx           # Volunteer feedback survey
-│   ├── ClinicOpenings.jsx           # Open slot display (admin scheduling)
-│   ├── DataDashboard.jsx            # Charts / aggregate stats (admin Data tab)
-│   ├── LanguageCoverage.js          # Language coverage panel (admin)
-│   ├── Live.js                      # Shared live-shift panel (admin + CS)
-│   ├── MessageCard.js               # Shared message bubble component
-│   ├── MessageTab.jsx               # Full messaging UI (volunteer + provider)
-│   ├── Pipeline.js                  # Volunteer recruitment pipeline (admin)
-│   ├── ProviderScheduleView.jsx     # Shared provider schedule (admin + CS)
-│   ├── Providers.jsx                # Admin provider management
-│   ├── SubmitHoursPanel.jsx         # Off-system hours submission form
-│   ├── VolunteerTasks.jsx           # Team task list (volunteer)
-│   ├── Waitlist.js                  # Scheduling waitlist (admin)
-│   ├── WeeklyTraining.jsx           # Admin weekly training editor
-│   └── WeeklyTrainingBanner.jsx     # Volunteer weekly training reader
-├── lib/
-│   ├── supabase.js                  # Supabase client singleton
-│   ├── constants.js                 # DAYS, SHIFTS, ROLES, SCHOOLS, MAJORS, labels
-│   ├── timeUtils.js                 # Mountain Time helpers
-│   ├── messageUtils.js              # Inbox filter logic
-│   ├── pushNotifications.js         # Subscribe / unsubscribe helpers
-│   ├── scheduleUtils.js             # Provider schedule synthesis
-│   ├── trainingUtils.js             # Weekly training week-key helpers
-│   └── interview-schedule.js        # Interview slot formatting (sync with Edge Function)
-├── public/
-│   ├── logo2.png                    # Clinical Supervisor header logo
-│   ├── logo4.png                    # Non-production app icon
-│   ├── sw.js/route.js               # Dynamic service worker (intended route: /sw.js)
-│   ├── manifest.js                  # PWA manifest export
-│   ├── parking_pass.html            # Onboarding parking pass template
-│   └── confidentiality_agreement.html
-├── vercel.json                      # Cron schedule for shift reminders
-├── next.config.js
-├── tailwind.config.js
-└── package.json
+|-- app/
+|   |-- page.js                      # Login / landing (includes forgot-password flow)
+|   |-- volunteer/page.js            # Volunteer default view
+|   |-- admin/page.js                # Admin dashboard (role-gated tabs)
+|   |-- clinical-supervisor/page.js  # Clinical Supervisor view
+|   |-- ossm/page.js                 # OSSM missionary oversight view
+|   |-- provider/page.js             # Provider portal
+|   |-- guest-hours/page.js          # Public guest volunteer hours form
+|   |-- schedule/[token]/page.js     # Public interview self-scheduling (tokenized)
+|   |-- reset-password/page.js       # Password recovery completion
+|   |-- offline/page.js              # Offline fallback (service worker)
+|   |-- api/
+|   |   |-- send-message/route.js    # Authenticated message send + push fan-out
+|   |   |-- send-push/route.js       # Server-side push to specific user IDs
+|   |   |-- guest-hours/route.js     # Public guest hours submission + org lookup
+|   |-- sw.js/route.js               # Dynamic service worker (serves /sw.js)
+|   |-- globals.css
+|   `-- layout.js                    # Root layout, PWA meta, service worker registration
+|-- components/
+|   |-- AdminTasks.jsx               # Internal team task board (admin)
+|   |-- BiannualSurvey.jsx           # Volunteer feedback survey
+|   |-- ClinicOpenings.jsx           # Open slot display (admin scheduling)
+|   |-- DataDashboard.jsx            # Charts / aggregate stats (admin Data tab)
+|   |-- LanguageCoverage.js          # Language coverage panel (admin)
+|   |-- Live.js                      # Shared live-shift panel (admin + CS)
+|   |-- MessageCard.js               # Shared message bubble component
+|   |-- MessageTab.jsx               # Full messaging UI (volunteer + provider + admin)
+|   |-- Pipeline.js                  # Volunteer recruitment pipeline (admin)
+|   |-- ProviderScheduleView.jsx     # Shared provider schedule (admin + CS)
+|   |-- Providers.jsx                # Admin provider management
+|   |-- SubmitHoursPanel.jsx         # Off-system hours submission + history
+|   |-- VolunteerTasks.jsx           # Team task list (volunteer)
+|   |-- Waitlist.js                  # Scheduling waitlist (admin)
+|   |-- WeeklyTraining.jsx           # Admin weekly training editor
+|   `-- WeeklyTrainingBanner.jsx     # Volunteer weekly training reader
+|-- lib/
+|   |-- supabase.js                  # Supabase client singleton
+|   |-- constants.js                 # DAYS, SHIFTS, ROLES, SCHOOLS, MAJORS, labels
+|   |-- timeUtils.js                 # Mountain Time helpers
+|   |-- messageUtils.js              # Inbox filter logic, thread helpers, attachments
+|   |-- pushNotifications.js         # Subscribe / unsubscribe helpers
+|   |-- scheduleUtils.js             # Provider schedule synthesis
+|   |-- trainingUtils.js             # Weekly training week-key helpers
+|   |-- interview-schedule.js        # Interview slot formatting (sync with Edge Function)
+|   `-- ConfirmDialog.js             # Shared confirm dialog provider + hook
+|-- public/
+|   |-- logo2.png                    # Clinical Supervisor header logo
+|   |-- logo3.png                    # Production app icon
+|   |-- logo4.png                    # Non-production app icon
+|   |-- newrelic-production.js       # New Relic error tracking (production)
+|   |-- newrelic-staging.js          # New Relic error tracking (non-production)
+|   |-- manifest.js                  # PWA manifest export
+|   |-- parking_pass.html            # Onboarding parking pass template
+|   `-- confidentiality_agreement.html
+|-- vercel.json
+|-- next.config.js
+|-- tailwind.config.js
+`-- package.json
 ```
+
 ---
 
 ## Routing & Access Control
@@ -209,6 +212,7 @@ There is no `.env.example` file in the repository. Obtain values from the projec
 | `/admin` | Admin dashboard | `profiles.role = 'admin'` **and** `hasAdminAccess()` |
 | `/clinical-supervisor` | CS dashboard | `default_role = 'Clinical Supervisor'` **or** `role = 'admin'` |
 | `/ossm` | Missionary oversight | Authenticated session only (no role check in page init) |
+| `/guest-hours` | Public guest volunteer hours form | Public |
 | `/schedule/[token]` | Applicant interview booking | Valid scheduling token (Edge Function) |
 | `/reset-password` | Complete password reset | Supabase `PASSWORD_RECOVERY` event |
 | `/offline` | Offline page | Public (cached by service worker) |
@@ -217,9 +221,9 @@ There is no `.env.example` file in the repository. Obtain values from the projec
 
 | Field | Values | Effect |
 |---|---|---|
-| `profiles.role` | `'admin'`, `'volunteer'`, … | `'admin'` unlocks `/admin` |
+| `profiles.role` | `'admin'`, `'volunteer'`, ... | `'admin'` unlocks `/admin` |
 | `profiles.default_role` | See `ROLES` in `lib/constants.js` | Determines position, training content, tab visibility, and switch-view destinations |
-| `profiles.affiliation` | `missionary`, `student`, `intern`, `volunteer`, `provider` | Conditional UI (intern hours report, missionary messaging, etc.) |
+| `profiles.affiliation` | `missionary`, `student`, `intern`, `volunteer`, `provider` | Conditional UI (intern hours report, missionary messaging, provider credentials, etc.) |
 | `profiles.team` | Team name string | Shows volunteer Tasks tab when set |
 
 ### Switch View (from `/volunteer`)
@@ -256,7 +260,7 @@ Additional admin capabilities tied to `default_role`:
 - **Role slot cap override:** Director, Administrative Assistant, Executive Assistant can exceed `ROLE_SUGGESTIONS` limits.
 - **Lab Director data scope:** Volunteers with `default_role` in `{Lab, Lab Director}` or anyone scheduled for a `Lab` shift.
 
-Admin access also requires `hasAdminAccess()`: `affiliation = 'provider'` **or** `default_role` in `{Lab Director, Director, Information Systems, Provider, Administrative Assistant, Executive Assistant, OSSM, Office Manager, Human Resources, Credentialing}`. This is a safeguard to assure that individuals if individuals are admin, that they are assigned the correct default_role.
+Admin access also requires `hasAdminAccess()`: `affiliation = 'provider'` **or** `default_role` in `{Lab Director, Director, Information Systems, Provider, Administrative Assistant, Executive Assistant, OSSM, Office Manager, Human Resources, Credentialing}`. This is a safeguard so individuals who are admin are assigned the correct default role.
 
 ---
 
@@ -264,7 +268,7 @@ Admin access also requires `hasAdminAccess()`: `affiliation = 'provider'` **or**
 
 ### Volunteer View
 
-Located at `app/volunteer/page.js`. Tabs load lazily — data for a tab is fetched the first time it is visited, tracked via a `fetchedTabs` ref.
+Located at `app/volunteer/page.js`. Tabs load lazily - data for a tab is fetched the first time it is visited, tracked via a `fetchedTabs` ref.
 
 **Primary tabs:** Clock, Schedule, Call-Out, Messages, Account.
 
@@ -272,10 +276,9 @@ Located at `app/volunteer/page.js`. Tabs load lazily — data for a tab is fetch
 
 | Tab | Shown when |
 |---|---|
-| Report Hours | `affiliation = 'intern'` |
 | Tasks | `profile.team` is set |
 | Training | Unacknowledged weekly training exists for the volunteer's roles |
-| Feedback | Biannual survey week (first full Mon–Sun of April or October) and not yet submitted |
+| Feedback | Biannual survey week (first full Mon-Sun of April or November) and not yet submitted |
 
 **Clock tab** *(loaded on init)*
 
@@ -295,15 +298,12 @@ Located at `app/volunteer/page.js`. Tabs load lazily — data for a tab is fetch
 
 **Messages tab** (`MessageTab.jsx`)
 
+- Threaded conversations with per-message replies and Reply All
+- Group chats (2+ recipients); typing indicators per thread
 - Inbox, Sent, Compose; paginated (10 at a time)
 - Recipient types: Admin, Everyone, My Shift, My Role, Individual
-- Optional image attachment (JPEG/PNG/WebP/GIF, max 5 MB) → Supabase Storage
+- Optional file attachment (any type, up to 5 MB total) -> Supabase Storage
 - Unread badge; broadcast view counts
-
-**Report Hours tab** *(intern only)*
-
-- Logs hours as a shift record
-- Sends structured weekly progress report to all users with `default_role = 'Director'`
 
 **Tasks tab** *(when `team` is set)*
 
@@ -316,11 +316,11 @@ Located at `app/volunteer/page.js`. Tabs load lazily — data for a tab is fetch
 
 **Feedback tab**
 
-- Biannual survey, visible for two weeks of the year.
+- Biannual survey, visible during the survey week.
 
 **Account tab**
 
-- Total hours, shift history, provider credential cards (provider affiliation), push notification toggle, password change
+- Total hours, shift history, provider credential cards (provider affiliation), push notification toggle, password change.
 
 ---
 
@@ -328,35 +328,33 @@ Located at `app/volunteer/page.js`. Tabs load lazily — data for a tab is fetch
 
 Located at `app/admin/page.js`. Uses a `loadedTabs` ref to prevent re-fetching on tab revisit. Heavy lists are paginated.
 
-**Live tab** — Expected-but-not-clocked-in (via `Live.js`), active shifts, today's callouts.
+**Live tab** - Expected-but-not-clocked-in (via `Live.js`), active shifts, today's callouts.
 
-**Scheduling tab** — Day × shift grid (Mon–Fri, 10–2 / 2–6), role assignments with date/pattern/note, `ROLE_SUGGESTIONS` cap warnings, date preview with callout/cover status, Waitlist, Clinic Openings.
+**Scheduling tab** - Day x shift grid (Mon-Fri, 10-2 / 2-6), role assignments with date/pattern/note, `ROLE_SUGGESTIONS` cap warnings, date preview with callout/cover status, Waitlist, Clinic Openings.
 
-**Lunch tab** — Assign lunch breaks (12:30–1:00 or 1:00–1:30) per weekday shift.
+**Volunteers tab** - Filterable roster, provider credential summary banner, volunteer detail with avatar, edit, deactivate/reactivate, lazy-loaded shifts/schedule/hours.
 
-**Volunteers tab** — Filterable roster, provider credential summary banner, volunteer detail with avatar, edit, deactivate/reactivate, lazy-loaded shifts/schedule/hours.
+**Messages tab** - Full messaging UI (`MessageTab.jsx`) for admins, including unread badge and HR-gated message visibility.
 
-**Providers tab** — Provider recurring/one-time schedules, callouts, credential dates.
+**Pipeline tab** - Full recruitment workflow (see [Recruitment Pipeline](#recruitment-pipeline)).
 
-**Pipeline tab** — Full recruitment workflow (see [Recruitment Pipeline](#recruitment-pipeline)).
+**Shifts tab** - Paginated shift log (25/page), filter, inline edit/delete, manual entry.
 
-**Shifts tab** — Paginated shift log (25/page), filter, inline edit/delete, manual entry.
+**Call-Outs tab** - Approve/deny callouts; assign/deny cover requests; covered/closed history.
 
-**Call-Outs tab** — Approve/deny callouts; assign/deny cover requests; covered/closed history.
+**Hours tab** - Pending submissions (approval creates shift record); lazy-loaded reviewed history (20/page).
 
-**Hours tab** — Pending submissions (approval creates shift record); lazy-loaded reviewed history (20/page).
+**Recent Activity tab** - Audit log (last 2 weeks, 30/page, filterable). Admin mutations call `audit()` -> `audit_logs`.
 
-**Recent Activity tab** — Audit log (last 2 weeks, 30/page, filterable). Admin mutations call `audit()` → `audit_logs`.
+**Add Volunteer tab** - Creates Supabase Auth account + `profiles` row with affiliation-conditional fields.
 
-**Add Volunteer tab** — Creates Supabase Auth account + `profiles` row with affiliation-conditional fields.
+**Data tab** - Hours totals, no-shows, repeat lates, per-volunteer reports, attendance bar chart. Powered by `attendance_records` (records before `2026-03-29` excluded from analytics).
 
-**Data tab** — Hours totals, no-shows, repeat lates, per-volunteer reports, attendance bar chart. Powered by `attendance_records` (records before `2026-03-29` excluded from analytics).
+**Weekly Training tab** - Create/edit training content by week.
 
-**Weekly Training tab** — Create/edit training content by week.
+**Tasks tab** *(Director, Administrative Assistant, Executive Assistant)* - Internal team task board via `AdminTasks.jsx`.
 
-**Tasks tab** *(Director, Administrative Assistant, Executive Assistant)* — Internal team task board via `AdminTasks.jsx`.
-
-**Languages tab** *(Office Manager, Director, Administrative Assistant)* — Language coverage via `LanguageCoverage.js`.
+**Languages tab** *(Office Manager, Director, Administrative Assistant)* - Language coverage via `LanguageCoverage.js`.
 
 ---
 
@@ -364,15 +362,13 @@ Located at `app/admin/page.js`. Uses a `loadedTabs` ref to prevent re-fetching o
 
 Located at `app/clinical-supervisor/page.js`. Scoped to shifts the CS user is personally scheduled for. Individual must have default_role = 'Clinical Supervisor'.
 
-**Live tab** — Expected-not-clocked-in (`Live.js`), active shifts, today's callouts, birthday highlight.
+**Live tab** - Expected-not-clocked-in (`Live.js`), active shifts, today's callouts, birthday highlight.
 
-**Schedule tab** — Personal scheduled shifts with expandable volunteer rows (phone, languages, affiliation, clock-in badge).
+**Schedule tab** - Personal scheduled shifts with expandable volunteer rows (phone, languages, affiliation, clock-in badge).
 
-**Language Coverage tab** — Per-shift language bubbles; green when a speaker is clocked in; modal with speaker list.
+**Language Coverage tab** - Per-shift language bubbles; green when a speaker is clocked in; modal with speaker list.
 
-**Providers tab** — Read-only collective provider schedule (`ProviderScheduleView.jsx`).
-
-> The Lunch tab UI exists in code but is **commented out** in the current codebase.
+**Providers tab** - Read-only collective provider schedule (`ProviderScheduleView.jsx`).
 
 ---
 
@@ -380,9 +376,9 @@ Located at `app/clinical-supervisor/page.js`. Scoped to shifts the CS user is pe
 
 Located at `app/ossm/page.js`. Dedicated portal for OSSM staff to monitor **missionary** volunteers (`affiliation = 'missionary'`, `status = 'active'`). OSSM staff themselves are excluded from the missionary list.
 
-**Live tab** — Today's schedule, callouts, and active shifts across all missionaries; expected-not-clocked-in banner; tap a missionary to open their detail.
+**Live tab** - Today's schedule, callouts, and active shifts across all missionaries; expected-not-clocked-in banner; tap a missionary to open their detail.
 
-**Missionaries tab** — Searchable directory with per-missionary detail: profile info, recurring schedule, attendance records, monthly hours breakdown, last 30 days of shifts.
+**Missionaries tab** - Searchable directory with per-missionary detail: profile info, recurring schedule, attendance records, monthly hours breakdown, last 30 days of shifts.
 
 Accessible via "OSSM View" switch button when `default_role = 'OSSM'`, or by navigating directly to `/ossm`.
 
@@ -392,24 +388,24 @@ Accessible via "OSSM View" switch button when `default_role = 'OSSM'`, or by nav
 
 Located at `app/provider/page.js`.
 
-**My Shifts** *(loaded on init)* — Upcoming one-time and recurring shifts; remove own one-time shifts.
+**My Shifts** *(loaded on init)* - Upcoming one-time and recurring shifts; remove own one-time shifts.
 
-**Schedule tab** — Clinical openings grid; add/remove one-time shifts; submit provider callouts.
+**Schedule tab** - Week-by-week schedule grid; add/remove one-time shifts; submit provider callouts.
 
-**Messages tab** — Full messaging UI (`MessageTab.jsx`).
+**Messages tab** - Full messaging UI (`MessageTab.jsx`).
 
-**Account tab** — Profile, password change, off-system hours, push toggle, shift history.
+**Account tab** - Profile, password change, off-system hours, push toggle, shift history.
 
 ---
 
 ## Shifts & Scheduling
 
-The clinic runs recurring **weekday shifts only**, Monday–Friday:
+The clinic runs recurring **weekday shifts only**, Monday-Friday:
 
 | Shift ID | Window |
 |---|---|
-| `10-2` | 10:00 AM – 2:00 PM MT |
-| `2-6` | 2:00 PM – 6:00 PM MT |
+| `10-2` | 10:00 AM - 2:00 PM MT |
+| `2-6` | 2:00 PM - 6:00 PM MT |
 
 A `schedule` row is a recurring assignment: `(volunteer_id, day_of_week, shift_time, role)` plus optional `start_date`, `end_date`, and `week_pattern` (`every` / `odd` / `even`). The `odd`/`even` pattern refers to the week-of-month occurrence for that weekday (e.g., 2nd Monday = even).
 
@@ -419,10 +415,10 @@ A `schedule` row is a recurring assignment: `(volunteer_id, day_of_week, shift_t
 
 When a volunteer can't make a shift they submit a **callout**. An admin approves or denies it.
 
-- **Approved + no `covered_by`** → shift is open for coverage
+- **Approved + no `covered_by`** -> shift is open for coverage
 - Volunteers submit **cover requests** (`shift_cover_requests`) on open shifts
 - Admin approves one cover request; others for that callout are auto-denied
-- **Approved + `covered_by` set** → shift is covered
+- **Approved + `covered_by` set** -> shift is covered
 
 ---
 
@@ -430,9 +426,9 @@ When a volunteer can't make a shift they submit a **callout**. An admin approves
 
 Providers have `default_role = 'Provider'`.
 
-- **One-time shifts** — `provider_shifts` (provider self-schedules or admin adds)
-- **Recurring shifts** — `provider_recurring_schedule` (admin-managed)
-- **Callouts** — `provider_callouts` (removes provider from slot without deleting schedule row)
+- **One-time shifts** - `provider_shifts` (provider self-schedules or admin adds)
+- **Recurring shifts** - `provider_recurring_schedule` (admin-managed)
+- **Callouts** - `provider_callouts` (removes provider from slot without deleting schedule row)
 - Provider can remove own one-time shifts; recurring rows are admin-managed
 - Collective schedule visible to admin and clinical supervisors via `ProviderScheduleView.jsx` / `lib/scheduleUtils.js`
 
@@ -440,7 +436,7 @@ Providers have `default_role = 'Provider'`.
 
 ## Provider Credentials
 
-Five expiration fields per provider: License, BLS, DEA, FTCA, TB. Each can hold:
+Four expiration fields per provider: License, BLS, DEA, TB. Each can hold:
 
 - ISO date string (`YYYY-MM-DD`)
 - `"N/A"` (DEA only)
@@ -468,19 +464,18 @@ The Pipeline component (`components/Pipeline.js`) manages volunteer recruitment 
 
 ### Stage workflow
 
-**Applied → Interview** — Review application; "Move to Interview" sends interview invitation email.
+**Applied -> Interview** - Review application; "Move to Interview" sends interview invitation email.
 
-**Interview → Onboarding** — Interview date required; "Accept — Move to Onboarding" prompts affiliation selection and sends welcome email (with welcome packet attachment if configured).
+**Interview -> Onboarding** - Interview date required; "Accept - Move to Onboarding" prompts affiliation selection and sends welcome email (with welcome packet attachment if configured).
 
-**Onboarding → Completed** — Five-step wizard with incremental saves:
+**Onboarding -> Completed** - Five-step wizard with incremental saves:
 
 | Step | Collects |
 |---|---|
-| 1 — Affiliation | missionary / student / intern / volunteer / provider + affiliation-specific fields |
-| 2 — Birthday | Date of birth |
-| 3 — Position | Default role from clinic role list |
-| 4 — Availability | Preferred shift grid + willing-to-fill roles |
-| 5 — Checklist | Document verification and file uploads |
+| 1 - Affiliation | missionary / student / intern / volunteer / provider + affiliation-specific fields |
+| 3 - Position | Default role from clinic role list |
+| 4 - Availability | Preferred shift grid + willing-to-fill roles |
+| 5 - Checklist | Document verification and file uploads |
 
 **Onboarding checklist items**
 
@@ -496,9 +491,9 @@ The Pipeline component (`components/Pipeline.js`) manages volunteer recruitment 
 
 Non-missionary applicants need background check, ID, and immunization files before profile creation. Missionaries have relaxed mandatory doc requirements.
 
-**Profile creation** — Invokes `create-volunteer` Edge Function for Auth account, inserts `profiles`, uploads avatar, adds to waitlist, marks application `completed`. Default temporary password: `BFC2025!`.
+**Profile creation** - Invokes `create-volunteer` Edge Function for Auth account, inserts `profiles`, uploads avatar, adds to waitlist, marks application `completed`.
 
-**Rejection** — Available at any active stage; sends rejection template unless moved silently.
+**Rejection** - Available at any active stage; sends rejection template unless moved silently.
 
 ### Recently Added tab
 
@@ -506,7 +501,7 @@ Review completed applicants, download onboarding files as ZIP, **Offload** to ar
 
 ### Email Templates tab
 
-Editable templates: Interview Invitation, Onboarding Welcome, Onboarding — Missionary, Rejection Notice. Includes Welcome Packet Manager (PDF in `onboarding-assets`).
+Editable templates: Interview Invitation, Onboarding Welcome, Onboarding - Missionary, Rejection Notice. Includes Welcome Packet Manager (PDF in `onboarding-assets`).
 
 Stage transitions trigger emails via `send-stage-email` Edge Function (except silent rejections).
 
@@ -527,10 +522,10 @@ Slot rules are defined in `lib/interview-schedule.js` (must stay in sync with th
 |---|---|
 | Timezone | `America/Denver` |
 | Slot duration | 30 minutes |
-| Business hours | 10:00–18:00 local |
+| Business hours | 10:00-18:00 local |
 | Booking window | 14 days ahead |
 | Minimum lead time | 120 minutes |
-| Available days | Monday–Friday |
+| Available days | Monday-Friday |
 
 Database tables: `interview_appointments`, `interview_blocked_times`.
 
@@ -538,20 +533,25 @@ Database tables: `interview_appointments`, `interview_blocked_times`.
 
 ## Messaging System
 
-Messages are sent via `POST /api/send-message` with a valid Supabase JWT in the `Authorization` header. The route inserts into `messages`, resolves recipients server-side, and fans out push notifications.
+Messages are sent via `POST /api/send-message` with a valid Supabase JWT in the `Authorization` header. The route inserts into `messages`, resolves recipients server-side (including group member lists), and fans out push notifications.
+
+Threads group related messages (a root message plus its replies) and render as a single conversation in the inbox. Replies support **Reply** (the specific message) and **Reply All** (the full thread audience). Typing indicators are broadcast over Supabase realtime and scoped to the current thread/reply target.
 
 | `recipient_type` | Audience |
 |---|---|
 | `admin` | Users with `role = 'admin'` |
 | `everyone` | All active users |
 | `volunteer` | Single user (`recipient_volunteer_id`) |
+| `group` | Group chat members (`recipient_volunteer_id` JSON array of member ids) |
 | `shift` | Volunteers scheduled for a specific `day` + `shift_time` |
 | `role` | Volunteers with a given `default_role` |
 | `affiliation_missionary` | Volunteers with `affiliation = 'missionary'` |
 
-`getInboxMessages()` in `lib/messageUtils.js` filters inbox visibility client-side (excludes own sent messages and affiliation-gated messages the user doesn't qualify for).
+Group chats are created by composing to multiple individual recipients; the compose UI converts the selection into a `group` recipient.
 
-Image attachments upload to the `message-images` storage bucket (max 5 MB).
+`getInboxMessages()` in `lib/messageUtils.js` filters inbox visibility client-side - excluding the user's own sent messages, affiliation-gated messages they don't qualify for, and HR-only messages addressed to the admin role.
+
+Image and file attachments upload to the Supabase Storage bucket; the first image is stored as a plain URL and additional files as a JSON array in `image_url`. Maximum attachment size is 5 MB.
 
 ---
 
@@ -561,14 +561,25 @@ The app registers as a Progressive Web App with Apple web-app meta tags in `app/
 
 **Client helpers** (`lib/pushNotifications.js`):
 
-- `subscribeToPush(supabase, userId)` — requests permission, registers subscription, stores endpoint in `push_subscriptions`
-- `unsubscribeFromPush(supabase, userId)` — removes subscription from browser and database
+- `subscribeToPush(supabase, userId)` - requests permission, registers subscription, stores endpoint in `push_subscriptions`
+- `unsubscribeFromPush(supabase, userId)` - removes subscription from browser and database
 
-**Service worker** — Registered at `/sw.js` from `layout.js`. Handler source: `public/sw.js/route.js` (handles offline fallback to `/offline`, push events, notification clicks).
+**Service worker** - Registered at `/sw.js` from `layout.js`. Handler source: `app/sw.js/route.js` (handles offline fallback to `/offline`, push events, notification clicks).
 
-**Server delivery** — `web-push` npm package via `/api/send-message` (on new messages) and `/api/cron/shift-reminder`.
+**Server delivery** - `web-push` npm package via `/api/send-message` (on new messages).
 
-**Shift reminders** — Vercel cron fires at **16:00 and 20:00 UTC** on weekdays (`vercel.json`), which maps to **10 AM and 2 PM Mountain Time** during MDT. Reminds scheduled volunteers who haven't clocked in for the upcoming slot.
+**Shift reminders** - Removed. The former shift-start reminder cron was intentionally decommissioned; the Live/Admin views compute expected-but-not-clocked-in state client-side instead.
+
+---
+
+## Guest Hours
+
+`/guest-hours` is a public (no sign-in) form that lets one-time volunteers without an account log hours worked.
+
+- **Organizations** - Selected from active `guest_organizations` (e.g., Noorda, UVU PA, UVU Nursing).
+- **Submission** - Collects name, affiliation/organization, work date, arrival time, and exit time. Duration is derived and previewed.
+- **Validation** - Server-side (source of truth, Mountain Time): no future dates, backdating limited to 30 days, minimum 15-minute shift, maximum 12 hours, exit time cannot be in the future for same-day submissions, and a per-IP rate limit (10 submissions/hour) with a honeypot field.
+- **Finalization** - Guest submissions are auto-final (no admin approval). Hours are merged into admin analytics at read time; they do not mirror into the `shifts` table.
 
 ---
 
@@ -576,28 +587,33 @@ The app registers as a Progressive Web App with Apple web-app meta tags in `app/
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/send-message` | POST | Supabase JWT | Insert message, resolve recipients, send push |
-| `/api/send-push` | POST | None in code | Send push to specified `userIds` *(appears intended for internal/server use)* |
-| `/api/cron/shift-reminder` | GET | `Bearer ${CRON_SECRET}` | Weekday shift reminder cron job |
+| `/api/send-message` | POST | Supabase JWT | Insert message, resolve recipients (including groups), send push |
+| `/api/send-push` | POST | None in code | Send push to specified `userIds` *(internal/server use)* |
+| `/api/guest-hours` | GET | None | Public list of active guest organizations + today's Mountain date |
+| `/api/guest-hours` | POST | None | Public guest hours submission with validation |
 
 ---
 
 ## Backend Architecture
 
-All backend architecture is contained in a private repository. Acccess may be granted upon request.
+All backend architecture is contained in a private repository. Access may be granted upon request.
+
+This repository contains the Next.js API routes and client-side data access layer. The Supabase backend (Postgres schema + RLS policies, Auth, Storage, Edge Functions) lives in the linked private Supabase project.
 
 ---
 
 ## Conventions & Patterns
 
-**Lazy tab loading** — Volunteer and admin pages fetch tab data on first visit only, using ref-based dedup guards (`fetchedTabs`, `loadedTabs`).
+**Lazy tab loading** - Volunteer and admin pages fetch tab data on first visit only, using ref-based dedup guards (`fetchedTabs`, `loadedTabs`).
 
-**Audit logging** — Admin mutations in `app/admin/page.js` and pipeline actions call `audit()` which inserts into `audit_logs` with action labels/colors from `lib/constants.js`.
+**Audit logging** - Admin mutations in `app/admin/page.js` and pipeline actions call `audit()` which inserts into `audit_logs` with action labels/colors from `lib/constants.js`.
 
-**Pagination** — Shifts (25), hours (20), audit (30), messages (10), callouts (60 limit).
+**Pagination** - Shifts (25), hours (20), audit (30), messages (10), callouts (60), covers (100).
 
-**Mobile layout** — Pages detect mobile via user agent and viewport width (~428px), rendering bottom nav or sidebar patterns accordingly.
+**Mobile layout** - Pages detect mobile via user agent and viewport width (~428px), rendering bottom nav or sidebar patterns accordingly.
+
+**Confirm dialog** - Shared confirmation flow via `useConfirm()` from `lib/ConfirmDialog.js` for destructive actions.
 
 ---
 
-*Last updated to reflect the codebase as of July 31, 2026.*
+*Last updated to reflect the codebase as of October 16, 2026.*
