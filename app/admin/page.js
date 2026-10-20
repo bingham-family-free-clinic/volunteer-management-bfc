@@ -795,6 +795,9 @@ export default function AdminPage() {
   // of which tabItems branch they fall into below.
   const canSeeLanguageCoverage = isOfficeManager || isDirector || isAdminAssistant
 
+  // Newsletter email list is scoped to exactly these two roles.
+  const canSeeNewsletter = isDirector || isAdminAssistant
+
   // Lab Director's data scope — everyone else gets null (no restriction).
   const labVolunteerIds = isLabDirector ? getLabVolunteerIds(volunteers, schedule) : null
   const visibleVolunteers   = labVolunteerIds ? volunteers.filter(v => labVolunteerIds.has(v.id))      : volunteers
@@ -869,8 +872,8 @@ export default function AdminPage() {
     tabItems.splice(volIdx === -1 ? tabItems.length : volIdx + 1, 0, ['languages', 'Languages'])
   }
 
-  // Newsletter email list: same roles that can see the Volunteers tab.
-  {
+  // Newsletter email list: only the Director and Administrative Assistant.
+  if (canSeeNewsletter) {
     const volIdx = tabItems.findIndex(([key]) => key === 'volunteers')
     if (volIdx !== -1) tabItems.splice(volIdx + 1, 0, ['newsletter', 'Newsletter'])
   }
@@ -3090,7 +3093,7 @@ export default function AdminPage() {
         {tab === 'providers' && <Providers supabase={supabase} />}
         {tab === 'data'      && <DataDashboard supabase={supabase} />}
         {tab === 'training'  && <WeeklyTraining supabase={supabase} profile={profile} />}
-        {tab === 'newsletter' && tabItems.some(([key]) => key === 'newsletter') && <Newsletter supabase={supabase} profile={profile} />}
+        {tab === 'newsletter' && canSeeNewsletter && <Newsletter supabase={supabase} profile={profile} />}
         {tab === 'languages' && canSeeLanguageCoverage && (
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
         )}
