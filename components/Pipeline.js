@@ -2250,131 +2250,163 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setUploadingApplicantPhoto(false)
   }
 
-  // ─── Offload ──────────────────────────────────────────────────────────────
-  // Downloads each file locally, then deletes it from Supabase Storage —
-  // only for files that actually finished downloading, so a failed download
-  // never causes data loss. DB references to deleted files are cleared too,
-  // so nothing in the app points at a file that no longer exists.
+  async function makeApplicantZip(applicant) {
+    const { data: cl, error } = await supabase
+        .from('onboarding_checklists')
+        .select('*')
+        .eq('applicant_id', applicant.id)
+        .maybeSingle()
+    const fileUrls = []
+
+    if (error) {
+      throw new Error(`Could not find applicant onboarding checklist: ${error.message}`)
+    }
+
+    if (applicant.resume_url) {
+      const {
+        data: rData,
+        error: rErr
+      } = await supabase.storage.from('resumes').createSignedUrl(applicant.resume_url, 300)
+      if (!rErr && rData?.signedUrl) {
+        const ext = applicant.resume_url.split('.').pop()
+        fileUrls.push({
+          label: 'Resume',
+          url: rData.signedUrl,
+          filename: `resume.${ext}`,
+          bucket: 'resumes',
+          path: applicant.resume_url
+        })
+      } else {
+        throw new Error(`Supabase URL signing for resume failed (${rErr?.message || "No URL provided"}), try again later or contact IS`)
+      }
+    }
+
+    for (const item of FILE_CHECKLIST_ITEMS) {
+      const storagePath = cl?.[item.urlKey]
+      if (!storagePath) continue
+      const { data, error } = await supabase.storage.from(item.bucket).createSignedUrl(storagePath, 300)
+      if (!error && data?.signedUrl) {
+        fileUrls.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}`, bucket: item.bucket, path: storagePath, urlKey: item.urlKey, itemKey: item.key })
+      } else {
+        throw new Error(`Could not access ${item.label}: ${error?.message || 'No signed URL returned'}`)
+      }
+    }
+
+    if (fileUrls.length === 0) {
+      return {
+        zip: null,
+        urls: []
+      }
+    }
+
+    const zip = new JSZip()
+
+    const newFolder = zip.folder(applicant.full_name.replace(/\s+/g, '_'))
+    for (const entry of fileUrls) {
+      const res = await fetch(entry.url)
+
+      if (!res.ok) throw new Error(`Could not fetch ${entry.label}`)
+
+      newFolder.file(entry.filename, await res.blob())
+    }
+
+    const newZip = await zip.generateAsync({ type : "blob"})
+
+    return {
+      zip: newZip,
+      urls: fileUrls
+    }
+  }
+
+
+  async function uploadToOneDrive(applicant, applicantZip) {
+    if (!applicantZip || applicantZip.size === 0) {
+      throw new Error('Cannot upload an empty ZIP')
+    }
+
+    const { data, error } = await supabase.functions.invoke(
+        'offload-create-upload-session',
+        {
+          body: { applicantId: applicant.id }
+        }
+    )
+
+    if (error) {
+      throw new Error(`Could not create upload session: ${error.message}`)
+    }
+
+    if (!data?.uploadUrl) {
+      throw new Error('No upload URL returned')
+    }
+
+    const totalSize = applicantZip.size
+    const chunkSize = 5 * 1024 * 1024 // microsoft requires chunk sizes to be multiples of 320 KiB
+                                              // Chunking is probably overkill since simple uploads work for up
+                                              // to 250 MiB, but this makes it more bulletproof
+
+    for (let start = 0; start < totalSize; start += chunkSize) {
+      const end = Math.min(start + chunkSize, totalSize) - 1
+
+      const response = await fetch(data.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/${totalSize}`
+        },
+        body: applicantZip.slice(start, end + 1)
+      })
+
+      if (!response.ok) {
+        throw new Error(`OneDrive upload failed (HTTP ${response.status})`)
+      }
+
+      const result = await response.json()
+
+      if (end < totalSize - 1) {
+        if (response.status !== 202) {
+          throw new Error('Unexpected response during OneDrive upload')
+        }
+
+        continue
+      }
+
+      if (![200, 201].includes(response.status)) {
+        throw new Error('Microsoft did not confirm upload completion')
+      }
+
+      if (
+          !result.id ||
+          result.size !== totalSize ||
+          result.name !== data.filename
+      ) {
+        throw new Error('Uploaded archive metadata did not match')
+      }
+
+      return {
+        itemId: result.id,
+        filename: result.name,
+        size: result.size
+      }
+    }
+
+    throw new Error('Upload did not complete')
+  }
+
 
   async function handleOffload(applicant) {
     setOffloadingId(applicant.id)
+
     try {
-      const cl = recentChecklist[applicant.id] || {}
-      const fileEntries = []
+      const applicantZip = await makeApplicantZip(applicant)
 
-      if (applicant.resume_url) {
-        const { data: rData, error: rErr } = await supabase.storage.from('resumes').createSignedUrl(applicant.resume_url, 300)
-        if (!rErr && rData?.signedUrl) {
-          const ext = applicant.resume_url.split('.').pop()
-          fileEntries.push({ label: 'Resume', url: rData.signedUrl, filename: `resume.${ext}`, bucket: 'resumes', path: applicant.resume_url })
-        } else if (rErr) {
-          console.warn('Could not sign resume URL:', rErr.message)
-        }
+      if (applicantZip.zip) {
+        await uploadToOneDrive(applicant, applicantZip.zip)
       }
 
-      const unavailable = []
-      for (const item of FILE_CHECKLIST_ITEMS) {
-        const storagePath = cl[item.urlKey]
-        if (!storagePath) continue
-        const { data, error } = await supabase.storage.from(item.bucket).createSignedUrl(storagePath, 300)
-        if (!error && data?.signedUrl) {
-          fileEntries.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}`, bucket: item.bucket, path: storagePath, urlKey: item.urlKey, itemKey: item.key })
-        } else {
-          unavailable.push(item.label)
-          console.warn(`Could not sign URL for ${item.label} (bucket: ${item.bucket}):`, error?.message)
-        }
-      }
-      if (unavailable.length > 0) {
-        msg(`Skipped (couldn't access in Storage): ${unavailable.join(', ')} — check console`, 'error')
-      }
-
-      // Only files that are confirmed downloaded end up here — this is what
-      // actually gets deleted from Supabase Storage afterward.
-      const downloaded = []
-
-      if (fileEntries.length === 0) {
-        msg('No files to download — marking as offloaded', 'success')
-      } else {
-
-        if (JSZip) {
-          const zip    = new JSZip()
-
-          const folder = zip.folder(applicant.full_name.replace(/\s+/g, '_'))
-          for (const entry of fileEntries) {
-            try {
-              const res = await fetch(entry.url)
-              if (!res.ok) throw new Error(`HTTP ${res.status}`)
-              folder.file(entry.filename, await res.blob())
-              downloaded.push(entry)
-            } catch (e) {
-              console.warn(`Could not fetch ${entry.label}:`, e)
-            }
-          }
-          if (downloaded.length > 0) {
-            const zipBlob = await zip.generateAsync({ type: 'blob' })
-            const link = document.createElement('a')
-            link.href = URL.createObjectURL(zipBlob)
-            link.download = `${applicant.full_name.replace(/\s+/g, '_')}_files.zip`
-            link.click()
-            URL.revokeObjectURL(link.href)
-          }
-        } else {
-          // No JSZip available — fall back to individual downloads. We can't
-          // verify these actually saved (browser download, not a fetch), so
-          // we assume success, same as the app's prior behavior.
-          for (const entry of fileEntries) {
-            const link = document.createElement('a')
-            link.href = entry.url; link.download = entry.filename; link.target = '_blank'
-            document.body.appendChild(link); link.click(); document.body.removeChild(link)
-            await new Promise(r => setTimeout(r, 400))
-            downloaded.push(entry)
-          }
-        }
-      }
-
-      // Delete only the files that were actually downloaded, grouped by
-      // bucket since storage.remove() takes a list of paths per bucket.
-      const failedDeletes = []
-      const byBucket = downloaded.reduce((acc, e) => {
-        (acc[e.bucket] ||= []).push(e)
-        return acc
-      }, {})
-      for (const [bucket, entries] of Object.entries(byBucket)) {
-        const { error: delErr } = await supabase.storage.from(bucket).remove(entries.map(e => e.path))
-        if (delErr) { failedDeletes.push(...entries.map(e => e.label)); console.warn(`Could not delete from ${bucket}:`, delErr) }
-      }
-
-      // Clear DB references to whatever was actually deleted, so nothing in
-      // the app still points at a file that no longer exists in Storage.
-      const successfullyDeleted = downloaded.filter(e => !failedDeletes.includes(e.label))
-      const resumeDeleted = successfullyDeleted.some(e => e.bucket === 'resumes')
-      const checklistClears = successfullyDeleted.filter(e => e.urlKey)
-
-      if (resumeDeleted) {
-        await supabase.from('volunteer_applications').update({ resume_url: null }).eq('id', applicant.id)
-      }
-      if (checklistClears.length > 0) {
-        const clearPatch = {}
-        for (const e of checklistClears) { clearPatch[e.urlKey] = null }
-        await supabase.from('onboarding_checklists').update(clearPatch).eq('applicant_id', applicant.id)
-      }
-
-      await supabase.from('volunteer_applications')
-        .update({ stage: 'offloaded', offloaded_at: new Date().toISOString() }).eq('id', applicant.id)
-
-      if (failedDeletes.length > 0) {
-        msg(`${applicant.full_name} offloaded, but ${failedDeletes.length} file(s) could not be removed from storage — check console`, 'error')
-      } else {
-        msg(`${applicant.full_name} offloaded — files downloaded and removed from Supabase`)
-      }
-      await audit('offloaded_volunteer', 'volunteer', applicant.id, applicant.full_name,
-        `files downloaded, ${successfullyDeleted.length} removed from storage${failedDeletes.length ? `, ${failedDeletes.length} failed to delete` : ''}`)
-      setCompleted(prev => prev.filter(a => a.id !== applicant.id))
-      setRecentChecklist(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
-    } catch (e) {
-      msg(e.message || 'Offload failed', 'error')
+    } catch (error) {
+      msg(`Offload failed: "${error.message}"`, 'error')
+    } finally {
+      setOffloadingId(null)
     }
-    setOffloadingId(null)
   }
 
   // ─── Create volunteer profile ──────────────────────────────────────────────
