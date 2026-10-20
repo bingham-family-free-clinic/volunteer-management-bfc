@@ -175,7 +175,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
     <div style={{
       background: isMine ? 'rgba(2,65,107,0.06)' : 'var(--bg)',
       border: `1px solid ${isMine ? 'rgba(2,65,107,0.25)' : 'var(--border)'}`,
-      borderRadius: 0,
+      borderRadius: '8px',
       overflow: 'hidden',
       opacity: (task.status === 'closed' || task.status === 'inactive') ? 0.65 : 1,
     }}>
@@ -214,10 +214,10 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   autoFocus
                   style={{ ...S.input, fontSize: '0.9rem', padding: '0.25rem 0.5rem', flex: 1, minWidth: '150px' }}
                 />
-                <button onClick={saveName} disabled={savingName} style={{ padding: '0.2rem 0.55rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 0, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                <button onClick={saveName} disabled={savingName} style={{ padding: '0.2rem 0.55rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                   {savingName ? '…' : '✓'}
                 </button>
-                <button onClick={() => { setEditingName(false); setNameVal(task.name) }} style={{ padding: '0.2rem 0.55rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 0, fontSize: '0.75rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>✕</button>
+                <button onClick={() => { setEditingName(false); setNameVal(task.name) }} style={{ padding: '0.2rem 0.55rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '0.75rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>✕</button>
               </>
             ) : (
               <span
@@ -378,13 +378,13 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   <button
                     onClick={saveNotes}
                     disabled={savingNotes}
-                    style={{ padding: '0.4rem 1rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 0, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
+                    style={{ padding: '0.4rem 1rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
                   >
                     {savingNotes ? 'Saving…' : 'Save'}
                   </button>
                   <button
                     onClick={() => setEditingNotes(false)}
-                    style={{ padding: '0.4rem 1rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 0, fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
+                    style={{ padding: '0.4rem 1rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
                   >
                     Cancel
                   </button>
@@ -458,13 +458,13 @@ function NewTaskForm({ currentUserId, team, teamMembers, onCreated, showToast, o
           <button
             onClick={submit}
             disabled={saving || !name.trim() || !dueDate}
-            style={{ flex: 1, padding: '0.7rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 0, fontWeight: 600, cursor: saving || !name.trim() || !dueDate ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: !name.trim() || !dueDate ? 0.5 : 1 }}
+            style={{ flex: 1, padding: '0.7rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: saving || !name.trim() || !dueDate ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: !name.trim() || !dueDate ? 0.5 : 1 }}
           >
             {saving ? 'Creating…' : 'Create Task'}
           </button>
           <button
             onClick={onClose}
-            style={{ padding: '0.7rem 1.25rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 0, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
+            style={{ padding: '0.7rem 1.25rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '8px', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
           >
             Cancel
           </button>
@@ -570,7 +570,7 @@ export default function VolunteerTasks({ userId, defaultRole }) {
             padding: '0.45rem 1rem', background: showNewForm ? 'var(--surface)' : 'var(--accent)',
             color: showNewForm ? 'var(--muted)' : '#fff',
             border: showNewForm ? '1px solid var(--border)' : 'none',
-            borderRadius: 0, fontSize: '0.85rem', fontWeight: 600,
+            borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600,
             cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
           }}
         >
