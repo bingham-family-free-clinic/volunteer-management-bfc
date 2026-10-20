@@ -175,7 +175,6 @@ const PREP_CERT_MATCHERS = {
   ACLS: /\bacls\b|advanced cardiac|advanced cardiovascular/,
   BLS:  /\bbls\b|basic life support/,
   CPR:  /\bcpr\b/,
-  CPT:  /\bcpt\b|certified phlebotomy|phlebotomy tech/,
 }
 
 const PREP_SKILL_MATCHERS = {
@@ -201,7 +200,7 @@ const PREP_SKILL_LABELS = {
   scheduling:     'Scheduling/Front Desk',
   office:         'Microsoft Office/Google Workspace',
   scribing:       'Medical Scribing',
-  lab:            'Medical Laboratory Skills',
+  lab:            'Laboratory Skills',
 }
 
 // Category kinds: 'certs' | 'skills' (pts table + cap), 'hours' | 'shifts' |
@@ -249,7 +248,7 @@ const PREP_ROLES = [
     key: 'lab', role: 'Lab', short: 'Lab', aliases: ['lab', 'laboratory'],
     categories: [
       { kind: 'skills', label: 'Skills', cap: 28, pts: { phlebotomy: 28, lab: 19 } },
-      { kind: 'certs', label: 'Certifications', cap: 29, pts: { MA: 17, RN: 17, LPN: 17, AEMT: 17, CNA: 12, EMT: 12, CPT:20 } },
+      { kind: 'certs', label: 'Certifications', cap: 29, pts: { MA: 17, RN: 17, LPN: 17, AEMT: 17, CNA: 12, EMT: 12 } },
       { kind: 'hours', label: 'Patient care hours', cap: 13 },
       { kind: 'shifts', label: 'Shift availability', cap: PREP_SHIFT_MAX },
       { kind: 'language', label: 'Language proficiency', cap: 10 },
@@ -700,16 +699,10 @@ function WelcomePacketManager({ supabase, msg, outlineBtn, solidBtn, secLabel, c
       .upload(path, file, { upsert: true, contentType: 'application/pdf' })
     if (error) { msg(error.message, 'error'); setUploading(false); return }
 
-    // The file is uploaded, but nothing references it until this link is stored.
-    // An update that matches no row (e.g. no onboarding template yet) saves
-    // nothing, so the row count is checked before claiming success.
-    const { data: saved, error: linkErr } = await supabase
+    await supabase
       .from('email_templates')
       .update({ welcome_packet_path: path })
       .eq('stage', 'onboarding')
-      .select('id')
-    if (linkErr) { msg(`Welcome packet uploaded, but the link was not saved: ${linkErr.message}`, 'error'); setUploading(false); return }
-    if (!saved?.length) { msg('Welcome packet uploaded, but there is no onboarding email template yet — the link was not saved.', 'error'); setUploading(false); return }
 
     setPacketPath(path)
     msg('Welcome packet updated')
@@ -1397,7 +1390,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [affiliationModal, setAffiliationModal] = useState(null)   // { applicant } | null
   const [affiliationPick,  setAffiliationPick]  = useState('')      // value chosen in modal
   const [rejectModal,      setRejectModal]      = useState(null)   // { applicant } | null — choose notify-email vs silent reject
-  const [creatingProfile, setCreatingProfile] = useState(false)
 
   // Training stage — availability & roles-trained-in are collected here
   // (post-onboarding) instead of during the onboarding wizard. Keyed by
@@ -1445,7 +1437,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [onboardForm,  setOnboardForm]  = useState(EMPTY_FORM)
   const [onboardStep,  setOnboardStep]  = useState(1)
   const [savingStep,   setSavingStep]   = useState(false)
-  const [stepSaveFailed, setStepSaveFailed] = useState(false)
 
   // Admin notes — free text captured during onboarding, carried over to the
   // volunteer's profile once created (visible/editable on the Volunteers tab).
@@ -1766,11 +1757,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   async function saveOnboardProgress(applicantId, patch) {
     setSavingStep(true)
-    const { error } = await supabase.from('volunteer_applications').update(patch).eq('id', applicantId)
+    await supabase.from('volunteer_applications').update(patch).eq('id', applicantId)
     setSavingStep(false)
-    if (error) { msg(`Step was not saved: ${error.message}`, 'error'); setStepSaveFailed(true); return false }
-    setStepSaveFailed(false)
-    return true
   }
 
   // ─── Admin notes (application/needs/wants) ────────────────────────────────
@@ -1785,8 +1773,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSavingNotes(false)
   }
 
-  async function sendStageEmail(applicant, stage) {
-    if (!EMAIL_STAGES.includes(stage)) return
+  async function sendStageEmail(applicant, stage, opts = {}) {
+    if (!EMAIL_STAGES.includes(stage)) return false
 
     // For onboarding emails (both regular and missionary), generate a signed URL for the welcome packet
     let attachmentUrl = null
@@ -1826,14 +1814,17 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       })
       if (error) {
         console.error('Email send error:', error)
-        msg(`Stage moved, but email failed: ${error.message}`, 'error')
+        if (!opts.quiet) msg(`Stage moved, but email failed: ${error.message}`, 'error')
+        return false
       } else {
         const stageLabel = stage === 'onboarding_missionary' ? 'Onboarding (Missionary)' : STAGE_LABELS[stage] ?? stage
-        msg(`Moved to ${stageLabel} — email sent to ${applicant.email}`)
+        if (!opts.quiet) msg(`Moved to ${stageLabel} — email sent to ${applicant.email}`)
+        return true
       }
     } catch (e) {
       console.error('Email send exception:', e)
-      msg(`Stage moved, but email failed: ${e.message}`, 'error')
+      if (!opts.quiet) msg(`Stage moved, but email failed: ${e.message}`, 'error')
+      return false
     }
   }
 
@@ -1873,51 +1864,61 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     await moveToStage(applicant, 'rejected', { silent })
   }
 
-  // ── NEW: opens the affiliation modal before moving to onboarding ──────────
+  // ── Opens the affiliation modal before creating the volunteer profile ─────
   function openAffiliationModal(applicant) {
     // Pre-fill with any previously saved affiliation on the applicant row
     setAffiliationPick(applicant.onboard_affiliation || '')
     setAffiliationModal({ applicant })
   }
 
-  async function confirmMoveToOnboarding() {
+  // Interview "Create Volunteer Profile" confirm: creates the account with
+  // just the picked affiliation (no position/docs checks), moves the
+  // applicant to onboarding, and sends the onboarding email for that
+  // affiliation. Full validation happens later at the Move To Training gate.
+  async function confirmCreateAtInterview() {
     if (!affiliationModal) return
     const { applicant } = affiliationModal
     const affiliation   = affiliationPick
+    if (applicant.volunteer_id) { msg(`${applicant.full_name} already has a volunteer profile.`, 'error'); return }
 
     setMovingStage(true)
 
-    // Persist the affiliation on the applicant row immediately
-    if (affiliation) {
-      await supabase.from('volunteer_applications')
-        .update({ onboard_affiliation: affiliation })
-        .eq('id', applicant.id)
-    }
+    const uid = await createAccountAndProfile(applicant, affiliation, onboardForm)
+    if (!uid) { setMovingStage(false); return }
 
-    // Move stage
+    // Move stage (persisting the picked affiliation for the onboarding steps)
     const { error } = await supabase.from('volunteer_applications')
-      .update({ stage: 'onboarding', stage_updated_at: new Date().toISOString() })
+      .update({ stage: 'onboarding', volunteer_id: uid, onboard_affiliation: affiliation || null, stage_updated_at: new Date().toISOString() })
       .eq('id', applicant.id)
 
     if (error) {
       msg(error.message, 'error')
       setMovingStage(false)
-      setAffiliationModal(null)
       return
     }
 
-    await audit('pipeline_onboarding', 'applicant', applicant.id, applicant.full_name,
-      `affiliation: ${affiliation || 'unknown'}`)
+    await audit('created_volunteer', 'volunteer', uid, applicant.full_name,
+      `from interview → profile created, moved to onboarding, affiliation: ${affiliation || 'unknown'}`)
+    if (onVolunteerCreated) onVolunteerCreated()
     await loadApplicants()
     setSelected(prev => prev?.id === applicant.id
-      ? { ...prev, stage: 'onboarding', onboard_affiliation: affiliation }
+      ? { ...prev, stage: 'onboarding', volunteer_id: uid, onboard_affiliation: affiliation }
       : prev
     )
+    // Keep the wizard form in sync so onboarding step 1 starts pre-filled
+    // with the picked affiliation instead of demanding it again.
+    setOnboardForm(prev => ({ ...prev, affiliation: affiliation || '' }))
+    await loadChecklist(applicant.id)
 
     // Fire the correct email template based on affiliation
     const emailStage = affiliation === 'missionary' ? 'onboarding_missionary' : 'onboarding'
-    await sendStageEmail({ ...applicant, onboard_affiliation: affiliation }, emailStage)
-
+    const emailOk = await sendStageEmail({ ...applicant, onboard_affiliation: affiliation }, emailStage, { quiet: true })
+    msg(
+      emailOk
+        ? `Profile created for ${applicant.full_name} — moved to onboarding, email sent (temp password BFC2025!)`
+        : `Profile created for ${applicant.full_name} — moved to onboarding, but the welcome email failed to send (temp password BFC2025!)`,
+      emailOk ? 'success' : 'error'
+    )
     setMovingStage(false)
     setAffiliationModal(null)
   }
@@ -2379,89 +2380,119 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   // ─── Create volunteer profile ──────────────────────────────────────────────
+  // Account creation is intentionally guard-free: affiliation, position, and
+  // required docs are enforced later — by the onboarding steps and the gated
+  // "Move To Training" action — instead of blocking creation.
 
-  async function handleCreateProfile() {
-    if (!selected) return
-    const affil = onboardForm.affiliation
-    if (!affil)                    { msg('Select an affiliation', 'error'); setOnboardStep(1); return }
-    if (!onboardForm.default_role) { msg('Select a default position', 'error'); setOnboardStep(2); return }
-
-    const _missingDocs = getMissingRequiredDocs()
-    if (_missingDocs.length > 0) {
-      msg(`Missing required docs: ${_missingDocs.join(', ')}`, 'error')
-      setOnboardStep(3)
-      return
-    }
-
-    setCreatingProfile(true)
-
+  // Shared account-creation core for the interview and onboarding entry
+  // points. Creates the auth user + profiles row. Returns the new profile id,
+  // or null (with an error toast) when anything failed. `form` supplies the
+  // staff-entered extras/position and may be empty.
+  async function createAccountAndProfile(applicant, affil, form) {
     const { data: fnData, error: fnErr } = await supabase.functions.invoke('create-volunteer', {
-      body: { email: selected.email, password: 'BFC2025!' },
+      body: { email: applicant.email, password: 'BFC2025!' },
     })
-    if (fnErr) { msg(fnErr.message, 'error'); setCreatingProfile(false); return }
-    if (fnData?.error) { msg(fnData.error, 'error'); setCreatingProfile(false); return }
-    const authData = fnData
+    if (fnErr) { msg(fnErr.message, 'error'); return null }
+    if (fnData?.error) { msg(fnData.error, 'error'); return null }
 
-    const uid        = authData.user.id
+    const { error: profileErr } = await supabase.from('profiles').insert(
+      buildProfileInsert(fnData.user.id, applicant, affil, form)
+    )
+    if (profileErr) { msg(profileErr.message, 'error'); return null }
+    return fnData.user.id
+  }
+
+  // Full profiles-row mapping used at creation. The training-gate sync reuses
+  // this and keeps only the onboarding-owned columns (see SYNC_COLUMNS):
+  // identity/contact columns are set once here, and the avatar only exists
+  // at creation time.
+  function buildProfileInsert(uid, applicant, affil, form) {
     const isProvider = affil === 'provider'
-    const affiliData = onboardForm
-
     // profiles has no dedicated columns for educational_background, the raw
     // `skills` text field, or reference contacts — fold them into
     // admin_notes so this info isn't silently dropped when the applicant
     // becomes a volunteer profile.
     const extraInfo = [
-      selected.educational_background ? `Educational Background: ${selected.educational_background}` : null,
-      selected.skills ? `Additional Skills: ${selected.skills}` : null,
-      formatReference(selected.ref1_name, selected.ref1_contact) ? `Reference 1: ${formatReference(selected.ref1_name, selected.ref1_contact)}` : null,
-      formatReference(selected.ref2_name, selected.ref2_contact) ? `Reference 2: ${formatReference(selected.ref2_name, selected.ref2_contact)}` : null,
+      applicant.educational_background ? `Educational Background: ${applicant.educational_background}` : null,
+      applicant.skills ? `Additional Skills: ${applicant.skills}` : null,
+      formatReference(applicant.ref1_name, applicant.ref1_contact) ? `Reference 1: ${formatReference(applicant.ref1_name, applicant.ref1_contact)}` : null,
+      formatReference(applicant.ref2_name, applicant.ref2_contact) ? `Reference 2: ${formatReference(applicant.ref2_name, applicant.ref2_contact)}` : null,
     ].filter(Boolean).join('\n')
 
-    const { error: profileErr } = await supabase.from('profiles').insert({
-      id: uid, full_name: selected.full_name, email: selected.email,
-      phone: selected.phone || null, role: 'volunteer', affiliation: affil || null,
-      languages: joinWithOther(selected.languages_spoken, selected.languages_other) || selected.languages || null,
-      default_role: affiliData.default_role || null,
+    return {
+      id: uid, full_name: applicant.full_name, email: applicant.email,
+      phone: applicant.phone || null, role: 'volunteer', affiliation: affil || null,
+      languages: joinWithOther(applicant.languages_spoken, applicant.languages_other) || applicant.languages || null,
+      default_role: form.default_role || null,
       status: 'active',
       avatar_url: applicantAvatarPath || null,
-      sma_name:    affil === 'missionary' ? (affiliData.sma_name    || null) : null,
-      sma_contact: affil === 'missionary' ? (affiliData.sma_contact || null) : null,
-      school:      affil === 'student'    ? (affiliData.school      || null) : null,
-      major:       affil === 'student'    ? (affiliData.major       || null) : null,
-      intern_school:     affil === 'intern' ? (affiliData.intern_school     || null) : null,
-      intern_department: affil === 'intern' ? (affiliData.intern_department || null) : null,
-      advisor_name:      affil === 'intern' ? (affiliData.advisor_name      || null) : null,
-      advisor_contact:   affil === 'intern' ? (affiliData.advisor_contact   || null) : null,
-      credentials: isProvider ? (affiliData.credentials || null) : (joinWithOther(selected.certifications, selected.certifications_other) || selected.credentials || null),
-      license_exp: isProvider ? (affiliData.license_exp || null) : null,
-      bls_exp:     isProvider ? (affiliData.bls_exp     || null) : null,
-      dea_exp:     isProvider ? (affiliData.dea_exp     || null) : null,
-      ftca_exp:    isProvider ? (affiliData.ftca_exp    || null) : null,
-      tb_exp:      isProvider ? (affiliData.tb_exp      || null) : null,
-      admin_notes: [notesDraft || selected.notes || null, extraInfo || null].filter(Boolean).join('\n\n') || null,
-    })
-    if (profileErr) { msg(profileErr.message, 'error'); setCreatingProfile(false); return }
+      sma_name:    affil === 'missionary' ? (form.sma_name    || null) : null,
+      sma_contact: affil === 'missionary' ? (form.sma_contact || null) : null,
+      school:      affil === 'student'    ? (form.school      || null) : null,
+      major:       affil === 'student'    ? (form.major       || null) : null,
+      intern_school:     affil === 'intern' ? (form.intern_school     || null) : null,
+      intern_department: affil === 'intern' ? (form.intern_department || null) : null,
+      advisor_name:      affil === 'intern' ? (form.advisor_name      || null) : null,
+      advisor_contact:   affil === 'intern' ? (form.advisor_contact   || null) : null,
+      credentials: isProvider ? (form.credentials || null) : (joinWithOther(applicant.certifications, applicant.certifications_other) || applicant.credentials || null),
+      license_exp: isProvider ? (form.license_exp || null) : null,
+      bls_exp:     isProvider ? (form.bls_exp     || null) : null,
+      dea_exp:     isProvider ? (form.dea_exp     || null) : null,
+      ftca_exp:    isProvider ? (form.ftca_exp    || null) : null,
+      tb_exp:      isProvider ? (form.tb_exp      || null) : null,
+      admin_notes: [notesDraft || applicant.notes || null, extraInfo || null].filter(Boolean).join('\n\n') || null,
+    }
+  }
+
+  // Columns owned by the onboarding flow, copied onto the profile when an
+  // applicant finishes onboarding.
+  const SYNC_COLUMNS = [
+    'affiliation', 'default_role',
+    'sma_name', 'sma_contact', 'school', 'major',
+    'intern_school', 'intern_department', 'advisor_name', 'advisor_contact',
+    'credentials', 'license_exp', 'bls_exp', 'dea_exp', 'ftca_exp', 'tb_exp',
+    'admin_notes',
+  ]
+
+  // Final onboarding gate: moves the selected applicant to training. Requires
+  // the complete file (affiliation + position + required docs — the same
+  // allStepsValid check as the UI). Creates the profile first when the
+  // applicant doesn't have one yet, syncs the finalized info onto it, then
+  // moves the application to training.
+  async function finalizeOnboardingMoveToTraining() {
+    const applicant = selected
+    if (!applicant) return
+    if (!allStepsValid) {
+      const missing = !step1Valid() ? 'affiliation details' : !step2Valid ? 'default position' : `required documents (${missingRequiredDocs.join(', ')})`
+      msg(`Cannot move to training yet — missing ${missing}.`, 'error')
+      if (!step1Valid()) setOnboardStep(1)
+      else if (!step2Valid) setOnboardStep(2)
+      else setOnboardStep(3)
+      return
+    }
+    setMovingStage(true)
+    let uid = applicant.volunteer_id
+    if (!uid) {
+      uid = await createAccountAndProfile(applicant, onboardForm.affiliation, onboardForm)
+      if (!uid) { setMovingStage(false); return }
+      if (onVolunteerCreated) onVolunteerCreated()
+    }
+    const full = buildProfileInsert(uid, applicant, onboardForm.affiliation, onboardForm)
+    const syncPatch = Object.fromEntries(Object.entries(full).filter(([k]) => SYNC_COLUMNS.includes(k)))
+    const { error: syncErr } = await supabase.from('profiles').update(syncPatch).eq('id', uid)
+    if (syncErr) { msg(`Profile sync failed: ${syncErr.message}`, 'error'); setMovingStage(false); return }
 
     const { error: appErr } = await supabase.from('volunteer_applications')
       .update({ stage: 'training', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
-      .eq('id', selected.id)
-    if (appErr) msg(`Profile created but application stage update failed: ${appErr.message}`, 'error')
+      .eq('id', applicant.id)
+    if (appErr) { msg(`Failed to move to training: ${appErr.message}`, 'error'); setMovingStage(false); return }
 
-    await audit('created_volunteer', 'volunteer', uid, selected.full_name, 'from pipeline → moved to training')
-    if (!appErr) msg(`Profile created for ${selected.full_name} — moved to training`)
+    await audit('pipeline_training', 'volunteer', uid, applicant.full_name, 'onboarding complete — moved to training')
+    msg(`${applicant.full_name} moved to training`)
     if (onVolunteerCreated) onVolunteerCreated()
-
-    setSelected(null)
-    setOnboardStep(1)
-    setOnboardForm(EMPTY_FORM)
-    setChecklist(EMPTY_CHECKLIST)
-    setApplicantPhotoUrl(null)
-    setApplicantAvatarPath(null)
-    setNotesDraft('')
-
+    setSelected(prev => prev?.id === applicant.id ? { ...prev, stage: 'training', volunteer_id: uid } : prev)
     await loadAll()
-    setActiveTab('recent')
-    setCreatingProfile(false)
+    setMovingStage(false)
   }
 
   // ─── Select applicant ─────────────────────────────────────────────────────
@@ -2640,9 +2671,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   function SavedBadge() {
-    if (savingStep) return <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>saving…</span>
-    if (stepSaveFailed) return <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 600 }}>⚠ not saved — try again</span>
-    return <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600 }}>✓ saved</span>
+    return savingStep
+      ? <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>saving…</span>
+      : <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600 }}>✓ saved</span>
   }
 
   function FileRow({ item, applicantId }) {
@@ -2729,10 +2760,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
             <div>
               <p style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.25rem' }}>
-                Move to Onboarding
+                Create Volunteer Profile
               </p>
               <p style={{ fontSize: '0.82rem', color: 'var(--muted)', lineHeight: 1.5 }}>
-                Select <strong>{applicant.full_name}</strong>'s affiliation before confirming. This determines which onboarding email they receive.
+                Select <strong>{applicant.full_name}</strong>'s affiliation before confirming. This determines which onboarding email they receive. Position and documents are completed later in onboarding.
               </p>
             </div>
             {!movingStage && (
@@ -2802,11 +2833,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               </button>
             )}
             <button
-              onClick={confirmMoveToOnboarding}
+              onClick={confirmCreateAtInterview}
               disabled={!canConfirm || movingStage}
               style={solidBtn(C.blue, !canConfirm || movingStage)}
             >
-              {movingStage ? 'Moving...' : 'Confirm & Send Email'}
+              {movingStage ? 'Creating...' : 'Create Profile & Send Email'}
             </button>
           </div>
         </div>
@@ -3425,7 +3456,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <button onClick={() => openAffiliationModal(applicant)} disabled={movingStage || !applicant.interview_scheduled_at} style={outlineBtn(applicant.interview_scheduled_at ? C.blue : C.muted)}>
-                Accept — Move to Onboarding
+                Create Volunteer Profile
               </button>
               <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>Reject Application</button>
             </div>
@@ -3465,7 +3496,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
                 {onboardForm.affiliation && <AffiliationExtras onboardForm={onboardForm} setOnboardForm={setOnboardForm} labelStyle={labelStyle} inputStyle={inputStyle} secLabel={secLabel} />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button onClick={async () => { if (await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() })) setOnboardStep(2) }} disabled={!s1} style={solidBtn(C.blue, !s1)}>Save &amp; Next</button>
+                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() }); setOnboardStep(2) }} disabled={!s1} style={solidBtn(C.blue, !s1)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
@@ -3491,7 +3522,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                   <button onClick={() => setOnboardStep(1)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { if (await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null })) setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
+                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null }); setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
@@ -3531,26 +3562,28 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
                 {onboardForm.affiliation && missingRequiredDocs.length > 0 && (
                   <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', background: C.danger + '08', border: `1px solid ${C.danger}44`, fontSize: '0.83rem', color: C.danger, fontWeight: 500, lineHeight: 1.6 }}>
-                    <span style={{ fontWeight: 700 }}>Cannot create profile yet.</span>{' '}
+                    <span style={{ fontWeight: 700 }}>Cannot move to training yet.</span>{' '}
                     Missing: <span style={{ fontWeight: 700 }}>{missingRequiredDocs.join(', ')}</span>.
                   </div>
                 )}
 
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   <button onClick={() => setOnboardStep(2)} style={ghostBtn()}>Back</button>
-                  <button onClick={handleCreateProfile} disabled={creatingProfile || !allStepsValid} style={solidBtn(C.primary, creatingProfile || !allStepsValid)}>
-                    {creatingProfile ? 'Creating...' : 'Create Volunteer Profile'}
+                  <button onClick={finalizeOnboardingMoveToTraining} disabled={movingStage || !allStepsValid} style={solidBtn(C.primary, movingStage || !allStepsValid)}>
+                    {movingStage ? 'Moving...' : 'Move To Training'}
                   </button>
                 </div>
 
-                {allStepsValid && !creatingProfile && (
+                {allStepsValid && !movingStage && (
                   <div style={{ padding: '0.85rem 1rem', borderRadius: '8px', background: C.blue + '06', border: `1px solid ${C.blue}25` }}>
                     <p style={{ ...secLabel, marginBottom: '0.6rem' }}>Profile Summary</p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                       {profileSummary().map(item => <div key={item.label} style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.78rem', color: 'var(--muted)' }}><span style={{ color: 'var(--text)', fontWeight: 500 }}>{item.label}: </span>{item.value}</div>)}
-                      <div style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: C.blue + '10', border: `1px solid ${C.blue}35`, fontSize: '0.78rem' }}><span style={{ color: 'var(--muted)', fontWeight: 500 }}>Password: </span><span style={{ fontFamily: 'DM Mono, monospace', color: C.blue, fontWeight: 600 }}>BFC2025!</span></div>
+                      {!applicant.volunteer_id && (
+                        <div style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: C.blue + '10', border: `1px solid ${C.blue}35`, fontSize: '0.78rem' }}><span style={{ color: 'var(--muted)', fontWeight: 500 }}>Password: </span><span style={{ fontFamily: 'DM Mono, monospace', color: C.blue, fontWeight: 600 }}>BFC2025!</span></div>
+                      )}
                     </div>
-                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Will be moved to Training on creation, where availability and trained roles are set before joining the waitlist.</p>
+                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Moving to Training will sync this info to their volunteer profile, where availability and trained roles are set before joining the waitlist.</p>
                   </div>
                 )}
 
