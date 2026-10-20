@@ -3,19 +3,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { getMountainNow } from '../lib/timeUtils'
+import { TASK_TEAMS } from '../lib/constants'
 
 const STATUS_META = {
-  open:     { label: 'Open',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
-  blocked:  { label: 'Blocked',  color: '#f97316', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
-  closed:   { label: 'Done',     color: '#2563eb', bg: 'rgba(37,99,235,0.12)',   border: 'rgba(37,99,235,0.3)'    },
-  inactive: { label: 'Inactive', color: '#6b7280', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
+  open:     { label: 'Open',     color: '#02416b', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  blocked:  { label: 'Blocked',  color: '#02416b', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
+  closed:   { label: 'Done',     color: '#02416b', bg: 'rgba(2,65,107,0.12)',    border: 'rgba(2,65,107,0.3)'     },
+  inactive: { label: 'Inactive', color: '#02416b', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
 }
 
 const S = {
   card: {
     background: 'var(--surface)',
     border: '1px solid var(--border)',
-    borderRadius: '12px',
+    borderRadius: 0,
     padding: '1.25rem',
   },
   input: {
@@ -23,7 +24,7 @@ const S = {
     padding: '0.65rem 0.9rem',
     background: 'var(--bg)',
     border: '1px solid var(--border)',
-    borderRadius: '8px',
+    borderRadius: 0,
     color: 'var(--text)',
     fontSize: '0.9rem',
     outline: 'none',
@@ -55,10 +56,12 @@ function daysUntilDue(dateStr) {
   return (dueLocal - todayLocal) / 86400000
 }
 
-function formatDue(dateStr) {
+function formatDue(dateStr, status) {
   if (!dateStr) return null
   const [y, m, d] = dateStr.split('-').map(Number)
   const label = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  // Completed tasks are never overdue or urgent — show the plain date only.
+  if (status === 'closed') return { label, color: 'var(--muted)' }
   const diff = daysUntilDue(dateStr)
   if (diff < 0)  return { label, color: '#ef4444' }
   if (diff < 3)  return { label, color: '#f97316' }
@@ -67,16 +70,6 @@ function formatDue(dateStr) {
 }
 
 // ── Task Row ─────────────────────────────────────────────────────────────────
-// Distinct muted colors for team badges (cycles if >6 teams)
-const TEAM_BADGE_COLORS = [
-  { color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', border: 'rgba(124,58,237,0.3)' },
-  { color: '#0891b2', bg: 'rgba(8,145,178,0.12)',  border: 'rgba(8,145,178,0.3)'  },
-  { color: '#b45309', bg: 'rgba(180,83,9,0.12)',   border: 'rgba(180,83,9,0.3)'   },
-  { color: '#047857', bg: 'rgba(4,120,87,0.12)',   border: 'rgba(4,120,87,0.3)'   },
-  { color: '#be185d', bg: 'rgba(190,24,93,0.12)',  border: 'rgba(190,24,93,0.3)'  },
-  { color: '#1d4ed8', bg: 'rgba(29,78,216,0.12)',  border: 'rgba(29,78,216,0.3)'  },
-]
-
 function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBadge }) {
   const [notesOpen, setNotesOpen] = useState(false)
   const [editingNotes, setEditingNotes] = useState(false)
@@ -84,10 +77,12 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   const [savingNotes, setSavingNotes] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
   const [updatingAssignee, setUpdatingAssignee] = useState(false)
+  const [updatingDue, setUpdatingDue] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal] = useState(task.name)
   const [savingName, setSavingName] = useState(false)
   const notesRef = useRef(null)
+  const dateInputRef = useRef(null)
   const notesScrollPosRef = useRef(null)
   const [supportsFieldSizing] = useState(() =>
     typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')
@@ -123,7 +118,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   }, [editingNotes])
 
   const isMine = task.assignee_id === currentUserId
-  const due = formatDue(task.due_date)
+  const due = formatDue(task.due_date, task.status)
   const sm = STATUS_META[task.status] || STATUS_META.open
   const assignee = teamMembers.find(m => m.id === task.assignee_id)
 
@@ -154,6 +149,20 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
     setSavingName(false)
   }
 
+  function openDatePicker() {
+    const el = dateInputRef.current
+    if (!el) return
+    try { el.showPicker() } catch { el.focus(); el.click() }
+  }
+
+  async function changeDueDate(newDate) {
+    setUpdatingDue(true)
+    const { error } = await supabase.from('tasks').update({ due_date: newDate || null }).eq('id', task.id)
+    if (error) showToast(error.message, 'error')
+    else onUpdate(task.id, { due_date: newDate || null })
+    setUpdatingDue(false)
+  }
+
   async function changeAssignee(newId) {
     setUpdatingAssignee(true)
     const { error } = await supabase.from('tasks').update({ assignee_id: newId || null }).eq('id', task.id)
@@ -166,7 +175,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
     <div style={{
       background: isMine ? 'rgba(2,65,107,0.06)' : 'var(--bg)',
       border: `1px solid ${isMine ? 'rgba(2,65,107,0.25)' : 'var(--border)'}`,
-      borderRadius: '10px',
+      borderRadius: 0,
       overflow: 'hidden',
       opacity: (task.status === 'closed' || task.status === 'inactive') ? 0.65 : 1,
     }}>
@@ -205,10 +214,10 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   autoFocus
                   style={{ ...S.input, fontSize: '0.9rem', padding: '0.25rem 0.5rem', flex: 1, minWidth: '150px' }}
                 />
-                <button onClick={saveName} disabled={savingName} style={{ padding: '0.2rem 0.55rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '5px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                <button onClick={saveName} disabled={savingName} style={{ padding: '0.2rem 0.55rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 0, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                   {savingName ? '…' : '✓'}
                 </button>
-                <button onClick={() => { setEditingName(false); setNameVal(task.name) }} style={{ padding: '0.2rem 0.55rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '5px', fontSize: '0.75rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>✕</button>
+                <button onClick={() => { setEditingName(false); setNameVal(task.name) }} style={{ padding: '0.2rem 0.55rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 0, fontSize: '0.75rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>✕</button>
               </>
             ) : (
               <span
@@ -225,17 +234,12 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                 {task.name}
               </span>
             )}
-            {isMine && !editingName && (
-              <span style={{ fontSize: '0.65rem', background: 'rgba(2,65,107,0.15)', color: '#02416b', borderRadius: '4px', padding: '0.1rem 0.4rem', fontWeight: 700, letterSpacing: '0.05em' }}>
-                MINE
-              </span>
-            )}
             {teamBadge && !editingName && (
               <span style={{
                 fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.04em',
                 color: teamBadge.color, background: teamBadge.bg,
                 border: `1px solid ${teamBadge.border}`,
-                borderRadius: '4px', padding: '0.1rem 0.4rem',
+                borderRadius: 0, padding: '0.1rem 0.4rem',
               }}>
                 {task.team.toUpperCase()}
               </span>
@@ -276,7 +280,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
             }}
             style={{
                 fontSize: '0.75rem',
-                color: STATUS_META[task.status]?.color || 'var(--muted)',
+                color: '#000',
                 background: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
@@ -291,36 +295,52 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
             <option value="inactive">Inactive</option>
             </select>
 
-            {/* Due date */}
-            {due && (
-              <span style={{ fontSize: '0.75rem', color: due.color, fontFamily: 'DM Mono, monospace' }}>
-                {due.label}
-              </span>
-            )}
-
-            {/* Status badge */}
-            <span style={{
-              fontSize: '0.68rem', fontWeight: 600,
-              color: sm.color, background: sm.bg,
-              border: `1px solid ${sm.border}`,
-              borderRadius: '4px', padding: '0.1rem 0.4rem',
-              letterSpacing: '0.04em',
-            }}>
-              {sm.label.toUpperCase()}
+            {/* Due date (editable) — click to open a calendar */}
+            <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={openDatePicker}
+                disabled={updatingDue}
+                title="Change due date"
+                style={{
+                  fontSize: '0.75rem',
+                  color: '#000',
+                  fontFamily: 'DM Mono, monospace',
+                  fontStyle: due ? 'normal' : 'italic',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  textDecoration: 'underline dotted',
+                  textUnderlineOffset: '3px',
+                }}
+              >
+                {due ? due.label : 'Set due date'}
+              </button>
+              <input
+                ref={dateInputRef}
+                type="date"
+                value={task.due_date || ''}
+                onChange={e => { if (e.target.value) changeDueDate(e.target.value) }}
+                tabIndex={-1}
+                aria-hidden="true"
+                style={{
+                  position: 'absolute', left: 0, bottom: 0,
+                  width: '100%', height: '100%',
+                  opacity: 0, pointerEvents: 'none', border: 'none', padding: 0,
+                }}
+              />
             </span>
 
             {/* Notes toggle */}
             <button
               onClick={() => { setNotesOpen(o => !o); if (!notesOpen) setEditingNotes(false) }}
               style={{
-                fontSize: '0.72rem', color: task.notes ? '#60a5fa' : 'var(--muted)',
+                fontSize: '0.72rem', color: '#000',
                 background: 'none', border: 'none', cursor: 'pointer',
                 fontFamily: 'DM Sans, sans-serif', padding: 0, display: 'flex', alignItems: 'center', gap: '0.25rem',
               }}
             >
-              <svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 00-2 2v16l4-2 4 2 4-2V4a2 2 0 00-2-2z"/>
-              </svg>
               {task.notes ? 'Notes' : 'Add note'}
               <span style={{ transform: notesOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▾</span>
             </button>
@@ -358,13 +378,13 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                   <button
                     onClick={saveNotes}
                     disabled={savingNotes}
-                    style={{ padding: '0.4rem 1rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
+                    style={{ padding: '0.4rem 1rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 0, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
                   >
                     {savingNotes ? 'Saving…' : 'Save'}
                   </button>
                   <button
                     onClick={() => setEditingNotes(false)}
-                    style={{ padding: '0.4rem 1rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '6px', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
+                    style={{ padding: '0.4rem 1rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 0, fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
                   >
                     Cancel
                   </button>
@@ -380,18 +400,13 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
 
 // ── New Task Form ─────────────────────────────────────────────────────────────
 function NewTaskForm({ currentUserId, team, teamMembers, onCreated, showToast, onClose }) {
-  const teams = Array.isArray(team) ? team : [team]
   const [name, setName]           = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [dueDate, setDueDate]     = useState('')
-  const [selectedTeam, setSelectedTeam] = useState(teams[0])
   const [saving, setSaving]       = useState(false)
 
-  // Filter assignees to members who belong to the selected team
-  const assignableMembers = teamMembers.filter(m => {
-    const memberTeams = Array.isArray(m.team) ? m.team : (m.team ? [m.team] : [])
-    return memberTeams.includes(selectedTeam)
-  })
+  // Anyone whose default role matches the team can be assigned
+  const assignableMembers = teamMembers
 
   async function submit() {
     if (!name.trim() || !dueDate) return
@@ -401,7 +416,7 @@ function NewTaskForm({ currentUserId, team, teamMembers, onCreated, showToast, o
       assignee_id: assigneeId || null,
       status: 'open',
       due_date: dueDate || null,
-      team: selectedTeam,
+      team,
       created_by: currentUserId,
     }).select('*, assignee:profiles!tasks_assignee_id_fkey(id, full_name)').single()
     if (error) { showToast(error.message, 'error'); setSaving(false); return }
@@ -414,19 +429,6 @@ function NewTaskForm({ currentUserId, team, teamMembers, onCreated, showToast, o
     <div style={{ ...S.card, border: '1px solid var(--accent)', marginBottom: '1rem' }}>
       <h3 style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: '1rem' }}>New Task</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        {/* Team picker — only shown for multi-team users */}
-        {teams.length > 1 && (
-          <div>
-            <label style={S.label}>Team *</label>
-            <select
-              value={selectedTeam}
-              onChange={e => { setSelectedTeam(e.target.value); setAssigneeId('') }}
-              style={S.input}
-            >
-              {teams.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-        )}
         <div>
           <label style={S.label}>Task name *</label>
           <input
@@ -456,13 +458,13 @@ function NewTaskForm({ currentUserId, team, teamMembers, onCreated, showToast, o
           <button
             onClick={submit}
             disabled={saving || !name.trim() || !dueDate}
-            style={{ flex: 1, padding: '0.7rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: saving || !name.trim() || !dueDate ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: !name.trim() || !dueDate ? 0.5 : 1 }}
+            style={{ flex: 1, padding: '0.7rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 0, fontWeight: 600, cursor: saving || !name.trim() || !dueDate ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: !name.trim() || !dueDate ? 0.5 : 1 }}
           >
             {saving ? 'Creating…' : 'Create Task'}
           </button>
           <button
             onClick={onClose}
-            style={{ padding: '0.7rem 1.25rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '8px', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
+            style={{ padding: '0.7rem 1.25rem', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 0, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
           >
             Cancel
           </button>
@@ -473,7 +475,9 @@ function NewTaskForm({ currentUserId, team, teamMembers, onCreated, showToast, o
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function VolunteerTasks({ userId, team }) {
+// `defaultRole` is the volunteer's profiles.default_role, which IS their task team.
+export default function VolunteerTasks({ userId, defaultRole }) {
+  const team = defaultRole
   const [tasks, setTasks]             = useState([])
   const [teamMembers, setTeamMembers] = useState([])
   const [loading, setLoading]         = useState(true)
@@ -489,24 +493,22 @@ export default function VolunteerTasks({ userId, team }) {
   }
 
   useEffect(() => {
-    if (!team) return
+    if (!team || !TASK_TEAMS.includes(team)) return
     loadData()
   }, [team])
 
   async function loadData() {
     setLoading(true)
-    const teamFilter = Array.isArray(team) ? team : [team]
-
     const [{ data: tasksData }, { data: membersData }] = await Promise.all([
       supabase
         .from('tasks')
         .select('*, assignee:profiles!tasks_assignee_id_fkey(id, full_name)')
-        .in('team', teamFilter)                    // ← text column, use .in()
+        .eq('team', team)
         .order('due_date', { ascending: true, nullsFirst: false }),
       supabase
         .from('profiles')
-        .select('id, full_name, team')
-        .or(teamFilter.map(t => `team.cs.{${t}}`).join(','))
+        .select('id, full_name, default_role')
+        .eq('default_role', team)
         .order('full_name'),
     ])
     setTasks(tasksData || [])
@@ -539,18 +541,10 @@ export default function VolunteerTasks({ userId, team }) {
     return a.due_date.localeCompare(b.due_date)
   })
 
-  const isMultiTeam = Array.isArray(team) && team.length > 1
-  const teamList = isMultiTeam ? team : (team ? [team] : [])
-
-  // Build a stable color map: team name → badge style
-  const teamBadgeMap = Object.fromEntries(
-    teamList.map((t, i) => [t, TEAM_BADGE_COLORS[i % TEAM_BADGE_COLORS.length]])
-  )
-
-  if (!team?.length) {
+  if (!TASK_TEAMS.includes(team)) {
     return (
       <div style={{ ...S.card, textAlign: 'center', padding: '2.5rem' }}>
-        <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>You are not currently assigned to a team.</p>
+        <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>The Tasks page is only available to task teams.</p>
       </div>
     )
   }
@@ -561,7 +555,7 @@ export default function VolunteerTasks({ userId, team }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontWeight: 600, fontSize: '1rem' }}>
-            {Array.isArray(team) ? team.join(' & ') : team} Tasks
+            {team} Tasks
           </h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.1rem' }}>
             {open.length} open
@@ -576,7 +570,7 @@ export default function VolunteerTasks({ userId, team }) {
             padding: '0.45rem 1rem', background: showNewForm ? 'var(--surface)' : 'var(--accent)',
             color: showNewForm ? 'var(--muted)' : '#fff',
             border: showNewForm ? '1px solid var(--border)' : 'none',
-            borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600,
+            borderRadius: 0, fontSize: '0.85rem', fontWeight: 600,
             cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
           }}
         >
@@ -607,53 +601,20 @@ export default function VolunteerTasks({ userId, team }) {
             </div>
           )}
 
-          {/* Open tasks — grouped by team when multi-team */}
-          {isMultiTeam ? (
-            teamList.map(t => {
-              const teamOpen = sortedOpen.filter(task => task.team === t)
-              if (teamOpen.length === 0) return null
-              const badge = teamBadgeMap[t]
-              return (
-                <div key={t}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem', marginTop: '0.25rem' }}>
-                    <span style={{
-                      fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em',
-                      color: badge.color, background: badge.bg, border: `1px solid ${badge.border}`,
-                      borderRadius: '5px', padding: '0.15rem 0.55rem',
-                    }}>{t.toUpperCase()}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{teamOpen.length} open</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {teamOpen.map(task => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        currentUserId={userId}
-                        teamMembers={teamMembers}
-                        onUpdate={handleUpdate}
-                        showToast={showToast}
-                        teamBadge={null}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )
-            })
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {sortedOpen.map(task => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  currentUserId={userId}
-                  teamMembers={teamMembers}
-                  onUpdate={handleUpdate}
-                  showToast={showToast}
-                  teamBadge={null}
-                />
-              ))}
-            </div>
-          )}
+          {/* Open tasks */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {sortedOpen.map(task => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                currentUserId={userId}
+                teamMembers={teamMembers}
+                onUpdate={handleUpdate}
+                showToast={showToast}
+                teamBadge={null}
+              />
+            ))}
+          </div>
 
           {/* Blocked tasks toggle */}
           {blocked.length > 0 && (
@@ -680,7 +641,7 @@ export default function VolunteerTasks({ userId, team }) {
                       teamMembers={teamMembers}
                       onUpdate={handleUpdate}
                       showToast={showToast}
-                      teamBadge={isMultiTeam ? teamBadgeMap[task.team] : null}
+                      teamBadge={null}
                     />
                   ))}
                 </div>
@@ -713,7 +674,7 @@ export default function VolunteerTasks({ userId, team }) {
                       teamMembers={teamMembers}
                       onUpdate={handleUpdate}
                       showToast={showToast}
-                      teamBadge={isMultiTeam ? teamBadgeMap[task.team] : null}
+                      teamBadge={null}
                     />
                   ))}
                 </div>
@@ -746,7 +707,7 @@ export default function VolunteerTasks({ userId, team }) {
                       teamMembers={teamMembers}
                       onUpdate={handleUpdate}
                       showToast={showToast}
-                      teamBadge={isMultiTeam ? teamBadgeMap[task.team] : null}
+                      teamBadge={null}
                     />
                   ))}
                 </div>
