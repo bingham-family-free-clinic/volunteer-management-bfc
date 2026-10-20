@@ -2332,7 +2332,16 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     )
 
     if (error) {
-      throw new Error(`Could not create upload session: ${error.message}`)
+      let details = error.message
+
+      if (error.context instanceof Response) {
+        const status = error.context.status
+        const body = await error.context.json().catch(() => null)
+
+        details = `HTTP ${status}: ${body?.error || body?.message || error.message}`
+      }
+
+      throw new Error(`Could not create upload session: ${details}`)
     }
 
     if (!data?.uploadUrl) {
