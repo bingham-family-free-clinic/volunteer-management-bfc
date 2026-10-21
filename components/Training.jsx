@@ -14,7 +14,7 @@ export default function TrainingTab({supabase}) {
           .select(`
               person_id,
               role,
-              qualification
+              qualification,
               profiles!inner(full_name)`);
     setVolunteers(data);
   }
