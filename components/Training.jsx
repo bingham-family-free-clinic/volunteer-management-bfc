@@ -41,16 +41,15 @@ export default function TrainingTab({supabase}) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {!loading && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-          {
-            volunteerPositions.map(row => (
-              <div style={card}>
-                <span>{row.full_name}</span>
-                <span>{row.role}</span>
-                <span>{row.qualification}</span>
-              </div>
-            ))
-          }
+          { volunteerPositions && (volunteerPositions.map(row => (
+            <div style={card}>
+              <span>{row.full_name}</span>
+              <span>{row.role}</span>
+              <span>{row.qualification}</span>
+            </div>
+          ))
         </div>
+        )}
       )}
       {/* Date picker */}
       {/*
