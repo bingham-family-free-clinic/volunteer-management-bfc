@@ -7,16 +7,26 @@ import { supabase } from '../lib/supabase'
 export default function TrainingTab({supabase}) {
   const [volunteers, setVolunteers] = useState([])
   const [loading, setLoading] = useState(false)
+  const [toast, setToast] = useState(null)
+
+  function showToast(text, type) {
+    setToast({ text, type })
+    setTimeout(() => setToast(null), 3500)
+  }
 
   async function pullVolunteersFromSupabase(){
-    const { data } = supabase
+    const { data, error } = await supabase
           .from('person_role_qualifications')
           .select(`
               person_id,
               role,
               qualification,
-              profiles!inner(full_name)`);
-    setVolunteers(data);
+              profiles!inner(full_name)`)
+    if(error){
+      showToast(error.message, 'error')
+    } else {
+      setVolunteers(data);
+    }
   }
 
   useEffect(() => {
@@ -221,13 +231,13 @@ export default function TrainingTab({supabase}) {
       )}*/
         }
       {/* Toast */}
-      {/*
+    {
       {toast && (
         <div style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: toast.type === 'success' ? 'var(--accent)' : '#dc2626', color: '#fff', padding: '0.75rem 1.5rem', borderRadius: '100px', fontWeight: 500, fontSize: '0.9rem', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', zIndex: 200 }}>
           {toast.text}
         </div>
       )}
-       */}
+    }
     </div>)
 
 }
