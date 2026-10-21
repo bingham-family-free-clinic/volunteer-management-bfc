@@ -48,8 +48,8 @@ export default function TrainingTab({supabase}) {
               <span>{row.qualification}</span>
             </div>
           ))
+         )}
         </div>
-        )}
       )}
       {/* Date picker */}
       {/*
