@@ -16,7 +16,7 @@ import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import { MessageTab } from '../../components/MessageTab'
-import TrainingTab from '../../components/Training.jsx'
+import TrainingTab from '../../components/TrainingTab.jsx'
 
 export const dynamic = 'force-dynamic'
 

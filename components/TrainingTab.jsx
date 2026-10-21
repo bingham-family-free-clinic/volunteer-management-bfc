@@ -23,6 +23,8 @@ export default function TrainingTab({supabase}) {
       setVolunteerPositions(posData)
       if(!posData.length){
         showToast('No volunteerPositions', 'info')
+      } else {
+        showToast('Loading volunteers', 'info')
       }
     }
   }
@@ -35,6 +37,7 @@ export default function TrainingTab({supabase}) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <p> Volunteer Positions </p>
       {!loading && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
           { volunteerPositions && (volunteerPositions.map(row => (
