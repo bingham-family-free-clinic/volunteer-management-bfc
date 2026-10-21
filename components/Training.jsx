@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ROLE_QUALIFICATION_STATUS } from '../../lib/constants'
-import { supabase } from '../../lib/supabase'
+import { ROLE_QUALIFICATION_STATUS } from '../lib/constants'
+import { supabase } from '../lib/supabase'
 
 export default function TrainingTab({supabase}) {
   const [volunteers, setVolunteers] = useState([])
