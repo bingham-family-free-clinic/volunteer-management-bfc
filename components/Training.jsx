@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { ROLE_QUALIFICATION_STATUS } from '../lib/constants'
-import { supabase } from '../lib/supabase'
 
 export default function TrainingTab({supabase}) {
   const [volunteerPositions, setVolunteerPositions] = useState([])
