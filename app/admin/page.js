@@ -16,6 +16,7 @@ import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import { MessageTab } from '../../components/MessageTab'
+import TrainingTab from '../../components/Training.jsx'
 
 export const dynamic = 'force-dynamic'
 
@@ -856,6 +857,8 @@ export default function AdminPage() {
   } else if (tabItems.length >= 2) {
     tabItems.splice(2, 0, ['messages', 'Messages'])
   }
+
+  tabItems.push(['volunteerTraining', 'Volunteer Training'])
 
   const messagesTabEntry = tabItems.find(([key]) => key === 'messages')
   const messagesBadge = messagesTabEntry ? unreadCount : 0
@@ -3085,6 +3088,9 @@ export default function AdminPage() {
         {tab === 'training'  && <WeeklyTraining supabase={supabase} profile={profile} />}
         {tab === 'languages' && canSeeLanguageCoverage && (
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
+        )}
+        {tab == 'volunteerTraining' && (
+            <TrainingTab supabase={supabase}>
         )}
         {/*
         {tab === 'lunch'     && <LunchScheduler supabase={supabase} profile={profile} />}
