@@ -14,15 +14,15 @@ export default function TrainingTab({supabase}) {
   }
 
   async function pullVolunteerPositionsFromSupabase(){
-    const { roleData, error } = await supabase
+    const { posData, error } = await supabase
           .from('profiles')
           .select()
     if(error){
       showToast(error.message, 'error')
     } else {
-      setVolunteerPositions(roleData)
-      if(!volunteerPositions.length){
-        showToast('No volunteerPositions', 'error')
+      setVolunteerPositions(posData)
+      if(!posData.length){
+        showToast('No volunteerPositions', 'info')
       }
     }
   }
