@@ -5,7 +5,7 @@ import { ROLE_QUALIFICATION_STATUS } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 
 export default function TrainingTab({supabase}) {
-  const [volunteers, setVolunteers] = useState([])
+  const [volunteerPositions, setVolunteerPositions] = useState([])
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState(null)
 
@@ -14,7 +14,7 @@ export default function TrainingTab({supabase}) {
     setTimeout(() => setToast(null), 3500)
   }
 
-  async function pullVolunteersFromSupabase(){
+  async function pullVolunteerPositionsFromSupabase(){
     const { roleData, error } = await supabase
           .from('profiles')
           .select(`
@@ -24,15 +24,15 @@ export default function TrainingTab({supabase}) {
     if(error){
       showToast(error.message, 'error')
     } else {
-      setVolunteers(roleData);
+      setVolunteerPositions(roleData)
+      if(!volunteerPositions.length){
+        showToast('No volunteerPositions', 'error')
+      }
     }
   }
 
   useEffect(() => {
-    await pullVolunteersFromSupabase();
-    if(!volunteers.length){
-      showToast('No volunteers', 'error')
-    }
+    pullVolunteerPositionsFromSupabase();
   }, [])
 
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
@@ -42,7 +42,7 @@ export default function TrainingTab({supabase}) {
       {!loading && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
           {
-            volunteers.map(row => (
+            volunteerPositions.map(row => (
               <div style={card}>
                 <span>{row.full_name}</span>
                 <span>{row.role}</span>
