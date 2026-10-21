@@ -15,7 +15,6 @@ export default function TrainingTab({supabase}) {
   }
 
   async function pullVolunteersFromSupabase(){
-    const { data, error } =
     const { roleData, error } = await supabase
           .from('profiles')
           .select(`
