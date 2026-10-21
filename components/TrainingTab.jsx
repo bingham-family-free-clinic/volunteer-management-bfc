@@ -20,10 +20,8 @@ export default function TrainingTab({supabase}) {
     if(error){
       showToast(error.message, 'error')
     } else {
+      console.log('loaded ' + data.length)
       setVolunteerPositions(data || [])
-      if(!data.length){
-        showToast('No volunteerPositions', 'error')
-      }
     }
   }
 
@@ -49,8 +47,7 @@ export default function TrainingTab({supabase}) {
                 <span>{row.full_name}</span>
               </p>
             </div>
-          ))
-          }
+          ))}
           {volunteerPositions && !volunteerPositions.length && (
             <div style={card}>
               <p> No volunteers </p>
