@@ -10,11 +10,11 @@ export default function TrainingTab({supabase}) {
   async function pullVolunteersFromSupabase(){
     const { data } = supabase
           .from('person_role_qualifications')
-          .select('
+          .select(`
               person_id,
               role,
               qualification
-              profiles!inner(full_name)');
+              profiles!inner(full_name)`);
     setVolunteers(data);
   }
 
