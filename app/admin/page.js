@@ -822,6 +822,7 @@ export default function AdminPage() {
   const tabItems = isLabDirector
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+        ['volunteerTraining', 'Volunteer Training'],
       ]
     : isCredentialing
     ? [
@@ -832,21 +833,23 @@ export default function AdminPage() {
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['training', 'Weekly Training'],
+        ['training', 'Weekly Training'], ['volunteerTraining', 'Volunteer Training'],
       ]
     : isOSSM
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
+        ['volunteerTraining', 'Volunteer Training'],
       ]
     : isHR
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
+        ['volunteerTraining', 'Volunteer Training'],
       ]
     : [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
-        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'],
+        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'], ['volunteerTraining', 'Volunteer Training'],
         ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
       ]
 
@@ -857,8 +860,6 @@ export default function AdminPage() {
   } else if (tabItems.length >= 2) {
     tabItems.splice(2, 0, ['messages', 'Messages'])
   }
-
-  tabItems.push(['volunteerTraining', 'Volunteer Training'])
 
   const messagesTabEntry = tabItems.find(([key]) => key === 'messages')
   const messagesBadge = messagesTabEntry ? unreadCount : 0
