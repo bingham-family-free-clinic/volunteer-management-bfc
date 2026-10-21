@@ -3090,7 +3090,7 @@ export default function AdminPage() {
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
         )}
         {tab == 'volunteerTraining' && (
-            <TrainingTab supabase={supabase}>
+            <TrainingTab supabase={supabase} />
         )}
         {/*
         {tab === 'lunch'     && <LunchScheduler supabase={supabase} profile={profile} />}
