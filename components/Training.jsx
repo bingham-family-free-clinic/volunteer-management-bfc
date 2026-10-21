@@ -17,10 +17,7 @@ export default function TrainingTab({supabase}) {
   async function pullVolunteerPositionsFromSupabase(){
     const { roleData, error } = await supabase
           .from('profiles')
-          .select(`
-              id,
-              full_name,
-              person_role_qualifications(role,qualification)`)
+          .select()
     if(error){
       showToast(error.message, 'error')
     } else {
