@@ -29,7 +29,10 @@ export default function TrainingTab({supabase}) {
   }
 
   useEffect(() => {
-    pullVolunteersFromSupabase();
+    await pullVolunteersFromSupabase();
+    if(!volunteers.length){
+      showToast('No volunteers', 'error')
+    }
   }, [])
 
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
