@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 
 export default function TrainingTab({supabase}) {
   const [volunteers, setVolunteers] = useState([])
+  const [loading, setLoading] = useState(false)
 
   async function pullVolunteersFromSupabase(){
     const { data } = supabase
@@ -18,10 +19,27 @@ export default function TrainingTab({supabase}) {
     setVolunteers(data);
   }
 
+  useEffect(() => {
+    pullVolunteersFromSupabase();
+  }, [])
+
+  const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-
+      {!loading && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+          {
+            volunteers.map(row => (
+              <div style={card}>
+                <span>{row.full_name}</span>
+                <span>{row.role}</span>
+                <span>{row.qualification}</span>
+              </div>
+            ))
+          }
+        </div>
+      )}
       {/* Date picker */}
       {/*
       <div style={card}>
