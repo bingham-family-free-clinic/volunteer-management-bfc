@@ -14,22 +14,21 @@ export default function TrainingTab({supabase}) {
   }
 
   async function pullVolunteerPositionsFromSupabase(){
-    const { posData, error } = await supabase
+    const { data, error: supabaseError } = await supabase
           .from('profiles')
           .select()
     if(error){
       showToast(error.message, 'error')
     } else {
-      setVolunteerPositions([...posData])
-      if(!posData.length){
+      setVolunteerPositions(data || [])
+      if(!data.length){
         showToast('No volunteerPositions', 'error')
-      } else {
-        showToast('Loading volunteers... (' + posData.length + ')', 'error')
       }
     }
   }
 
   useEffect(() => {
+    console.log("Loading...")
     pullVolunteerPositionsFromSupabase();
   }, [])
 
@@ -44,12 +43,10 @@ export default function TrainingTab({supabase}) {
       <p> Volunteer Positions </p>
       {!loading && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-          {volunteerPositions && volunteerPositions.map(row => (
+          {volunteerPositions.map(row => (
             <div style={card}>
               <p>
                 <span>{row.full_name}</span>
-                <span>{row.role}</span>
-                <span>{row.qualification}</span>
               </p>
             </div>
           ))
