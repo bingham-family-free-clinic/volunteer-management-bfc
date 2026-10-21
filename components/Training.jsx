@@ -24,7 +24,7 @@ export default function TrainingTab({supabase}) {
     if(error){
       showToast(error.message, 'error')
     } else {
-      setVolunteers(data);
+      setVolunteers(roleData);
     }
   }
 
