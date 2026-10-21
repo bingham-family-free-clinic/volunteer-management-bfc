@@ -24,7 +24,7 @@ export default function TrainingTab({supabase}) {
       if(!posData.length){
         showToast('No volunteerPositions', 'error')
       } else {
-        showToast('Loading volunteers', 'error')
+        showToast('Loading volunteers... (' + posData.length + ')', 'error')
       }
     }
   }
@@ -32,6 +32,10 @@ export default function TrainingTab({supabase}) {
   useEffect(() => {
     pullVolunteerPositionsFromSupabase();
   }, [])
+
+  useEffect(() => {
+    showToast('loaded ' + volunteerPositions.length, 'error');
+  }, [volunteerPositions])
 
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
 
@@ -50,12 +54,11 @@ export default function TrainingTab({supabase}) {
             </div>
           ))
           }
-          {!volunteerPositions && volunteerPositions.map(row => (
+          {volunteerPositions && !volunteerPositions.length && (
             <div style={card}>
               <p> No volunteers </p>
             </div>
-          ))
-          }
+          )}
         </div>
       )}
       {toast && (
