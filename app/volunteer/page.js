@@ -1074,21 +1074,21 @@ function VolunteerPageInner() {
     return { day, shift }
   }
 
-  // Clock-in requires a fully onboarded volunteer: they must either sit on
-  // the waitlist or hold a scheduled shift. Returns true/false when the
-  // checks run, null when they couldn't (e.g. permissions) — callers must
-  // treat anything but true as "do not clock in". Admins bypass the gate.
+  // Clock-in is open to any trained volunteer: they must have finished
+  // training in the pipeline (stage `completed`). Returns true/false when
+  // the check runs, null when it couldn't (e.g. permissions) — callers
+  // must treat anything but true as "do not clock in". Admins bypass the
+  // gate.
   async function checkClockEligible(uid, isAdmin) {
     if (isAdmin) return true
-    const [{ data: wl, error: wlErr }, { data: sched, error: schedErr }] = await Promise.all([
-      supabase.from('waitlist').select('id').eq('volunteer_id', uid).limit(1),
-      supabase.from('schedule').select('id').eq('volunteer_id', uid).limit(1),
-    ])
-    if (wlErr || schedErr) {
-      console.error('clock eligibility check failed:', wlErr || schedErr)
+    const { data: trained, error } = await supabase
+      .from('volunteer_applications')
+      .select('id').eq('volunteer_id', uid).eq('stage', 'completed').limit(1)
+    if (error) {
+      console.error('clock eligibility check failed:', error)
       return null
     }
-    return (wl?.length > 0) || (sched?.length > 0)
+    return trained?.length > 0
   }
 
   async function handleClockIn() {
@@ -1097,7 +1097,7 @@ function VolunteerPageInner() {
     setClockEligible(eligible)
     if (eligible !== true) {
       showToast(eligible === false
-        ? 'You can clock in once you are on the waitlist or have a scheduled shift.'
+        ? 'You can clock in once you have completed training.'
         : 'Could not verify clock-in eligibility. Please try again.', 'error')
       setClockLoading(false)
       return
@@ -1546,7 +1546,7 @@ function VolunteerPageInner() {
             {!activeShift && clockEligible === false && (
               <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: '8px' }}>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.5 }}>
-                  Clock-in unlocks once you are on the waitlist or have a scheduled shift. If you were just added, switch tabs and come back.
+                  Clock-in unlocks once you have completed training. If you were just added, switch tabs and come back.
                 </p>
               </div>
             )}
