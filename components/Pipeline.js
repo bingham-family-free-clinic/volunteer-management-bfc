@@ -2103,11 +2103,40 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   async function toggleChecklistItem(applicantId, key, value) {
     setSavingChecklist(true)
-    const next = { ...checklist, [key]: value }
-    setChecklist(next)
-    const { error } = await supabase.from('onboarding_checklists')
-      .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
-    if (error) { msg(error.message, 'error'); setChecklist(checklist) }
+    const prev = checklist
+    setChecklist({ ...prev, [key]: value })
+    const now = new Date().toISOString()
+
+    // Only write the approval flag — never the whole checklist. A volunteer
+    // may have replaced a document while this page was open, and upserting
+    // every column would silently revert their newer upload.
+    const { data, error } = await supabase.from('onboarding_checklists')
+      .update({ [key]: value, updated_at: now })
+      .eq('applicant_id', applicantId)
+      .select('applicant_id')
+
+    if (error) {
+      msg(error.message, 'error')
+      setChecklist(prev)
+    } else if (!data || data.length === 0) {
+      // No checklist row yet (nothing uploaded/toggled before) — create one
+      // with explicit defaults so the insert never depends on table defaults.
+      const { error: insErr } = await supabase.from('onboarding_checklists').insert({
+        applicant_id: applicantId,
+        confidentiality_agreement: false,
+        tb_test: false,
+        background_check: false,
+        welcome_packet: false,
+        parking_pass: false,
+        id_check: false,
+        immunization: false,
+        licenses_certifications: false,
+        [key]: value,
+        updated_at: now,
+      })
+      if (insErr) { msg(insErr.message, 'error'); setChecklist(prev) }
+    }
+
     setSavingChecklist(false)
   }
 
@@ -2150,30 +2179,23 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           filesArr
       )
 
-      const next = {
-        ...checklist,
-        [item.urlKey]: path,
-        volunteer_uploads: (checklist.volunteer_uploads || []).filter(k => k !== item.key),
-      }
-
-      setChecklist(next)
-
-      const { error: dbErr } = await supabase
-          .from('onboarding_checklists')
-          .upsert(
-              {
-                applicant_id: applicantId,
-                ...next,
-                updated_at: new Date().toISOString()
-              },
-              {
-                onConflict: 'applicant_id'
-              }
-          )
+      // Targeted RPC: writes only this item's URL and removes its volunteer
+      // flag server-side. It never touches other URLs, flags, or approvals,
+      // so a concurrently-uploaded document isn't clobbered.
+      const { error: dbErr } = await supabase.rpc('admin_set_checklist_file', {
+        p_applicant_id: applicantId,
+        p_item_key: item.key,
+        p_url: path,
+      })
 
       if (dbErr) {
         msg(dbErr.message, 'error')
       } else {
+        setChecklist(prev => ({
+          ...prev,
+          [item.urlKey]: path,
+          volunteer_uploads: (prev.volunteer_uploads || []).filter(k => k !== item.key),
+        }))
         msg(`${item.label} uploaded`)
       }
 
@@ -2618,7 +2640,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       tb_exp:            affiliData.tb_exp             || '',
     })
 
-    if (applicant.stage === 'onboarding') loadChecklist(applicant.id)
+    // Always re-read the checklist when opening an applicant so the file
+    // links and volunteer-upload pills reflect any upload made since the
+    // page was last rendered (e.g. the volunteer replaced a document).
+    if (applicant.stage === 'onboarding') await loadChecklist(applicant.id)
 
     // Reset photo state — photo will appear only once uploaded this session
     setApplicantPhotoUrl(null)

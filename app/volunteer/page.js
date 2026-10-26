@@ -802,7 +802,10 @@ function VolunteerPageInner() {
   const onboardingRole        = onboardingApp?.onboard_default_role || null
   const onboardingPrefsSaved  = hasSavedOnboardingPrefs(onboardingAffiliation, onboardingRole)
   const onboardingRequiredKeys = getRequiredDocKeys(onboardingAffiliation, onboardingRole)
-  const onboardingApprovedRequired = onboardingRequiredKeys.filter(key => onboardingChecklist?.[key]).length
+  const onboardingApprovedRequired = onboardingRequiredKeys.filter(key => {
+    const doc = VOLUNTEER_UPLOAD_DOCS.find(d => d.key === key)
+    return onboardingChecklist?.[key] === true && !!onboardingChecklist?.[doc?.urlKey]
+  }).length
 
   // ── CRITICAL PATH INIT — only profile + active shift ─────────────────────
   useEffect(() => {
@@ -1181,6 +1184,7 @@ function VolunteerPageInner() {
 
       setOnboardingChecklist(prev => ({
         ...(prev || {}),
+        [item.key]: false,
         [item.urlKey]: path,
         volunteer_uploads: Array.from(new Set([...(prev?.volunteer_uploads || []), item.key])),
       }))
@@ -1631,11 +1635,18 @@ function VolunteerPageInner() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                   {VOLUNTEER_UPLOAD_DOCS.map(item => {
-                    const approved  = onboardingChecklist?.[item.key] === true
-                    const notNeeded = isDocNotNeeded(item.key, onboardingAffiliation, onboardingRole)
-                    const hasFile   = !!onboardingChecklist?.[item.urlKey]
-                    const uploading = onboardingUploadingKey === item.key
-                    const disabled  = approved || notNeeded || uploading
+                    const approved       = onboardingChecklist?.[item.key] === true
+                    // An admin checking a document overrides the position-based
+                    // "not needed" state — they want that file.
+                    const notNeeded      = !approved && isDocNotNeeded(item.key, onboardingAffiliation, onboardingRole)
+                    const hasFile        = !!onboardingChecklist?.[item.urlKey]
+                    const uploading      = onboardingUploadingKey === item.key
+                    // An approval only locks the card once a file actually
+                    // exists. Admin can tick the box first; uploading then
+                    // clears that tick so they can review the new file.
+                    const locked         = approved && hasFile
+                    const approvedNoFile = approved && !hasFile
+                    const disabled       = locked || notNeeded || uploading
 
                     return (
                       <div
@@ -1643,25 +1654,30 @@ function VolunteerPageInner() {
                         style={{
                           padding: '0.85rem 1rem',
                           borderRadius: '10px',
-                          border: `1px solid ${approved ? 'rgba(2,65,107,0.28)' : 'var(--border)'}`,
-                          background: approved ? 'rgba(2,65,107,0.05)' : notNeeded ? 'var(--bg)' : 'var(--surface)',
+                          border: `1px solid ${locked ? 'rgba(2,65,107,0.28)' : 'var(--border)'}`,
+                          background: locked ? 'rgba(2,65,107,0.05)' : notNeeded ? 'var(--bg)' : 'var(--surface)',
                           opacity: notNeeded ? 0.6 : 1,
                           transition: 'all 0.15s',
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.9rem', fontWeight: approved ? 600 : 500 }}>{item.label}</span>
-                          {approved && (
+                          <span style={{ fontSize: '0.9rem', fontWeight: locked ? 600 : 500 }}>{item.label}</span>
+                          {locked && (
                             <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.08)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.25)' }}>
                               An admin has approved this file
                             </span>
                           )}
-                          {!approved && notNeeded && (
+                          {approvedNoFile && (
+                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.06)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.2)' }}>
+                              Approved — file still needed
+                            </span>
+                          )}
+                          {!locked && notNeeded && (
                             <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
                               Not needed for your position
                             </span>
                           )}
-                          {!approved && !notNeeded && hasFile && (
+                          {!locked && !approvedNoFile && !notNeeded && hasFile && (
                             <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.06)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.2)' }}>
                               File attached
                             </span>
@@ -1691,13 +1707,13 @@ function VolunteerPageInner() {
                               fontWeight: 600,
                               fontFamily: 'DM Sans, sans-serif',
                               cursor: disabled ? 'not-allowed' : 'pointer',
-                              background: approved ? 'rgba(2,65,107,0.08)' : 'var(--surface)',
-                              color: approved ? 'var(--accent)' : 'var(--muted)',
-                              border: `1px solid ${approved ? 'rgba(2,65,107,0.25)' : 'var(--border)'}`,
+                              background: locked ? 'rgba(2,65,107,0.08)' : 'var(--surface)',
+                              color: locked ? 'var(--accent)' : 'var(--muted)',
+                              border: `1px solid ${locked ? 'rgba(2,65,107,0.25)' : 'var(--border)'}`,
                               opacity: notNeeded || uploading ? 0.6 : 1,
                             }}
                           >
-                            {uploading ? 'Uploading...' : approved ? 'Approved' : notNeeded ? 'Not needed' : hasFile ? 'Change File' : 'Attach File'}
+                            {uploading ? 'Uploading...' : locked ? 'Approved' : notNeeded ? 'Not needed' : hasFile ? 'Change File' : 'Attach File'}
                           </button>
                           <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.7 }}>PDF or JPG/PNG</span>
                         </div>
