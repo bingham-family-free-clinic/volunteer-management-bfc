@@ -1527,6 +1527,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     immunization_url: null,
     tb_test_url: null,
     parking_pass_url: null,
+    volunteer_uploads: [],
   }
   const [checklist,       setChecklist]       = useState(EMPTY_CHECKLIST)
   const [savingChecklist, setSavingChecklist] = useState(false)
@@ -1788,6 +1789,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       immunization_url: data.immunization_url ?? null,
       tb_test_url:      data.tb_test_url      ?? null,
       parking_pass_url: data.parking_pass_url ?? null,
+      volunteer_uploads: data.volunteer_uploads ?? [],
     } : EMPTY_CHECKLIST)
   }
 
@@ -2150,7 +2152,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
       const next = {
         ...checklist,
-        [item.urlKey]: path
+        [item.urlKey]: path,
+        volunteer_uploads: (checklist.volunteer_uploads || []).filter(k => k !== item.key),
       }
 
       setChecklist(next)
@@ -2772,6 +2775,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const ref = useRef(null)
     const has       = !!(checklist[item.urlKey])
     const uploading = uploadingKey === item.key
+    const volunteerUploaded = (checklist.volunteer_uploads || []).includes(item.key)
     if (!item.bucket || !item.urlKey) return null
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem' }}>
@@ -2790,8 +2794,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
                }
         />
+        {volunteerUploaded && (
+          <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44`, whiteSpace: 'nowrap' }}>volunteer upload</span>
+        )}
         {has
-          ? <><button onClick={() => openFile(item.bucket, checklist[item.urlKey])} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>View File</button><button onClick={() => ref.current?.click()} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Replace</button></>
+          ? <><button onClick={() => openFile(item.bucket, checklist[item.urlKey])} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>{volunteerUploaded ? 'Download' : 'View File'}</button><button onClick={() => ref.current?.click()} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Replace</button></>
           : <button onClick={() => ref.current?.click()} disabled={uploading} style={{ padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: uploading ? 0.5 : 1 }}>{uploading ? 'Uploading...' : '+ Attach File'}</button>
         }
         <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.6, fontFamily: 'DM Mono, monospace' }}>PDF or JPG/PNG</span>

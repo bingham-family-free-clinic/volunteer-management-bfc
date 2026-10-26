@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } from 'react'
+import JSZip from 'jszip'
 import { supabase } from '../../lib/supabase'
 import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE } from '../../lib/constants'
+import { VOLUNTEER_UPLOAD_DOCS, getRequiredDocKeys, hasSavedOnboardingPrefs, isDocNotNeeded } from '../../lib/onboardingDocs'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import { MessageCard } from '../../components/MessageCard'
@@ -580,6 +582,12 @@ function VolunteerPageInner() {
   const [clockLoading, setClockLoading] = useState(false)
   const [lunchAssignment, setLunchAssignment] = useState(null)
 
+  // ── Onboarding document upload state ──────────────────────────────────────
+  const [onboardingApp, setOnboardingApp] = useState(null)
+  const [onboardingChecklist, setOnboardingChecklist] = useState(null)
+  const [onboardingUploadingKey, setOnboardingUploadingKey] = useState(null)
+  const onboardingFileRefs = useRef({})
+
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
   const [schedule, setSchedule] = useState([])
   const [MyCallouts, setMyCallouts] = useState([])
@@ -790,6 +798,12 @@ function VolunteerPageInner() {
   const isIntern   = profile?.affiliation === 'intern'
   const isProvider = profile?.affiliation === 'provider'
 
+  const onboardingAffiliation = onboardingApp?.onboard_affiliation || null
+  const onboardingRole        = onboardingApp?.onboard_default_role || null
+  const onboardingPrefsSaved  = hasSavedOnboardingPrefs(onboardingAffiliation, onboardingRole)
+  const onboardingRequiredKeys = getRequiredDocKeys(onboardingAffiliation, onboardingRole)
+  const onboardingApprovedRequired = onboardingRequiredKeys.filter(key => onboardingChecklist?.[key]).length
+
   // ── CRITICAL PATH INIT — only profile + active shift ─────────────────────
   useEffect(() => {
     initCriticalPath()
@@ -845,6 +859,34 @@ function VolunteerPageInner() {
     return () => { supabase.removeChannel(channel) }
   }, [user])
 
+  async function loadOnboardingDocs(user) {
+    if (!user?.email) return
+
+    const { data: app } = await supabase
+      .from('volunteer_applications')
+      .select('id, stage, onboard_affiliation, onboard_default_role')
+      .ilike('email', user.email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!app || app.stage !== 'onboarding') {
+      setOnboardingApp(null)
+      setOnboardingChecklist(null)
+      return
+    }
+
+    setOnboardingApp(app)
+
+    const { data: rows } = await supabase
+      .from('onboarding_checklists')
+      .select('*')
+      .eq('applicant_id', app.id)
+      .maybeSingle()
+
+    setOnboardingChecklist(rows || null)
+  }
+
   async function initCriticalPath() {
     const { data: { session } } = await supabase.auth.getSession()
     const user = session?.user
@@ -886,6 +928,8 @@ function VolunteerPageInner() {
       }
 
      setLoading(false)
+
+    loadOnboardingDocs(user)
 
     // Seed the unread message count badge immediately on load
     const { data: allMsgs } = await supabase
@@ -1105,6 +1149,47 @@ function VolunteerPageInner() {
       fetchedTabs.current.delete('account')
     }
     setClockLoading(false)
+  }
+
+  async function handleOnboardingDocUpload(item, filesArr) {
+    if (!onboardingApp?.id || !filesArr.length) return
+
+    const tooBig = filesArr.find(file => file.size > MAX_FILE_SIZE)
+    if (tooBig) {
+      showToast(`${tooBig.name} is larger than 5 MB`, 'error')
+      return
+    }
+
+    setOnboardingUploadingKey(item.key)
+    try {
+      const zip = new JSZip()
+      for (const file of filesArr) zip.file(file.name, file)
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+
+      const path = `${onboardingApp.id}/${item.key}-${Date.now()}.zip`
+      const { error: uploadErr } = await supabase.storage
+        .from(item.bucket)
+        .upload(path, zipBlob, { contentType: 'application/zip', upsert: true })
+      if (uploadErr) throw uploadErr
+
+      const { error: rpcErr } = await supabase.rpc('volunteer_set_checklist_file', {
+        p_applicant_id: onboardingApp.id,
+        p_item_key: item.key,
+        p_url: path,
+      })
+      if (rpcErr) throw rpcErr
+
+      setOnboardingChecklist(prev => ({
+        ...(prev || {}),
+        [item.urlKey]: path,
+        volunteer_uploads: Array.from(new Set([...(prev?.volunteer_uploads || []), item.key])),
+      }))
+      showToast(`${item.label} uploaded`, 'success')
+    } catch (e) {
+      showToast(e.message || 'Upload failed', 'error')
+    } finally {
+      setOnboardingUploadingKey(null)
+    }
   }
 
   async function handleCallout(e) {
@@ -1527,6 +1612,99 @@ function VolunteerPageInner() {
                 <p style={{ fontWeight: 600, color: '#02416b', fontSize: '0.95rem' }}>
                   {lunchAssignment.lunch_shift === 1 ? 'Shift 1 · 12:30–1:00 PM' : 'Shift 2 · 1:00–1:30 PM'}
                 </p>
+              </div>
+            )}
+
+            {onboardingApp?.stage === 'onboarding' && (
+              <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.3rem' }}>
+                  <h2 style={{ fontWeight: 600, fontSize: '1.05rem' }}>Onboarding Documents</h2>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
+                    {onboardingApprovedRequired} / {onboardingRequiredKeys.length} approved
+                  </span>
+                </div>
+                <p style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
+                  {onboardingPrefsSaved
+                    ? 'Upload the documents required for your position. An admin will review and approve each file.'
+                    : 'Your affiliation and position are still being finalized, so every document type is available. Upload what you have — an admin will review and approve each file.'}
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  {VOLUNTEER_UPLOAD_DOCS.map(item => {
+                    const approved  = onboardingChecklist?.[item.key] === true
+                    const notNeeded = isDocNotNeeded(item.key, onboardingAffiliation, onboardingRole)
+                    const hasFile   = !!onboardingChecklist?.[item.urlKey]
+                    const uploading = onboardingUploadingKey === item.key
+                    const disabled  = approved || notNeeded || uploading
+
+                    return (
+                      <div
+                        key={item.key}
+                        style={{
+                          padding: '0.85rem 1rem',
+                          borderRadius: '10px',
+                          border: `1px solid ${approved ? 'rgba(2,65,107,0.28)' : 'var(--border)'}`,
+                          background: approved ? 'rgba(2,65,107,0.05)' : notNeeded ? 'var(--bg)' : 'var(--surface)',
+                          opacity: notNeeded ? 0.6 : 1,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.9rem', fontWeight: approved ? 600 : 500 }}>{item.label}</span>
+                          {approved && (
+                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.08)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.25)' }}>
+                              An admin has approved this file
+                            </span>
+                          )}
+                          {!approved && notNeeded && (
+                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
+                              Not needed for your position
+                            </span>
+                          )}
+                          {!approved && !notNeeded && hasFile && (
+                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.06)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.2)' }}>
+                              File attached
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.55rem', flexWrap: 'wrap' }}>
+                          <input
+                            ref={el => { onboardingFileRefs.current[item.key] = el }}
+                            type="file"
+                            multiple
+                            accept=".pdf,.jpg,.jpeg,.png,.webp,image/*"
+                            style={{ display: 'none' }}
+                            onChange={e => {
+                              const files = Array.from(e.target.files || [])
+                              if (files.length) handleOnboardingDocUpload(item, files)
+                              e.target.value = ''
+                            }}
+                          />
+                          <button
+                            onClick={() => onboardingFileRefs.current[item.key]?.click()}
+                            disabled={disabled}
+                            style={{
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              fontFamily: 'DM Sans, sans-serif',
+                              cursor: disabled ? 'not-allowed' : 'pointer',
+                              background: approved ? 'rgba(2,65,107,0.08)' : 'var(--surface)',
+                              color: approved ? 'var(--accent)' : 'var(--muted)',
+                              border: `1px solid ${approved ? 'rgba(2,65,107,0.25)' : 'var(--border)'}`,
+                              opacity: notNeeded || uploading ? 0.6 : 1,
+                            }}
+                          >
+                            {uploading ? 'Uploading...' : approved ? 'Approved' : notNeeded ? 'Not needed' : hasFile ? 'Change File' : 'Attach File'}
+                          </button>
+                          <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.7 }}>PDF or JPG/PNG</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
 
