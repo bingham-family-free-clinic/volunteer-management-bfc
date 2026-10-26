@@ -3491,6 +3491,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               <h3 style={{ fontWeight: 600, fontSize: '1.1rem' }}>{applicant.full_name}</h3>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.2rem' }}>
                 <StagePill stage={applicant.stage} />
+                {isPastOnboardingDeadline(applicant) && (
+                  <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: 'rgba(220,38,38,0.10)', color: '#dc2626', border: '1px solid rgba(220,38,38,0.35)', whiteSpace: 'nowrap' }}>
+                    Past Deadline (4 Weeks)
+                  </span>
+                )}
                 <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>Applied {applicant.created_at ? new Date(applicant.created_at).toLocaleDateString() : '—'}</span>
               </div>
             </div>
