@@ -16,7 +16,7 @@ import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import { MessageTab } from '../../components/MessageTab'
-import TrainingTab from '../../components/TrainingTab.jsx'
+import VolunteerPositions from '../../components/VolunteerPositions.jsx'
 
 export const dynamic = 'force-dynamic'
 
@@ -822,7 +822,7 @@ export default function AdminPage() {
   const tabItems = isLabDirector
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
-        ['volunteerTraining', 'Volunteer Training'],
+        ['volunteerPositions', 'Volunteer Positions'],
       ]
     : isCredentialing
     ? [
@@ -833,23 +833,23 @@ export default function AdminPage() {
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['training', 'Weekly Training'], ['volunteerTraining', 'Volunteer Training'],
+        ['training', 'Weekly Training'], ['volunteerPositions', 'Volunteer Positions'],
       ]
     : isOSSM
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['volunteerTraining', 'Volunteer Training'],
+        ['volunteerPositions', 'Volunteer Positions'],
       ]
     : isHR
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['volunteerTraining', 'Volunteer Training'],
+        ['volunteerPositions', 'Volunteer Positions'],
       ]
     : [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
-        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'], ['volunteerTraining', 'Volunteer Training'],
+        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'], ['volunteerPositions', 'Volunteer Positions'],
         ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
       ]
 
@@ -2357,6 +2357,10 @@ export default function AdminPage() {
           </div>
         )}
 
+      {tab === 'volunteerPositions' && (
+              <VolunteerPositions supabase={supabase} onSelectVolunteer={(v) => openVolunteer(v)} showEmptyPositions={true}/>
+      )}
+
         {/* ── VOLUNTEERS LIST ────────────────────────────────────────────────── */}
         {tab === 'volunteers' && !selectedVolunteer && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -3089,9 +3093,6 @@ export default function AdminPage() {
         {tab === 'training'  && <WeeklyTraining supabase={supabase} profile={profile} />}
         {tab === 'languages' && canSeeLanguageCoverage && (
           <LanguageCoverage volunteers={volunteers} schedule={schedule} />
-        )}
-        {tab == 'volunteerTraining' && (
-            <TrainingTab supabase={supabase} />
         )}
         {/*
         {tab === 'lunch'     && <LunchScheduler supabase={supabase} profile={profile} />}
