@@ -293,6 +293,9 @@ const MATCH_ROLE_ALIASES = {
   'clinical supervisor': 'Clinical Supervisor',
 }
 
+// Roles that should never surface as "open shifts" for an applicant
+const OPEN_SHIFT_EXCLUDED_ROLES = new Set(['Clinical Supervisor', 'Float'])
+
 // Canonical schedulable roles the applicant expressed interest in, deduped,
 // in the order listed. Extends getApplicantStaffingRoles (left untouched for
 // preparedness scoring) with the MATCH_ROLES above.
@@ -389,6 +392,7 @@ function getStaffingNeedLevel(applicant, openSlotSet, waitlistCounts) {
 // no recognized clinic roles.
 function getOpenShiftLines(applicant, openSlotSet) {
   const roles = getApplicantMatchRoles(applicant)
+    .filter(role => !OPEN_SHIFT_EXCLUDED_ROLES.has(role))
   if (roles.length === 0) return []
   const statedSlots = getStatedAvailability(applicant)
   const slots = statedSlots.length > 0 ? statedSlots : ALL_SLOTS
