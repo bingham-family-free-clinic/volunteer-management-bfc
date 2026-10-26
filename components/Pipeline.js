@@ -64,6 +64,16 @@ function formatReference(name, contact) {
 const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
 const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', training: 'Training', rejected: 'Rejected' }
 
+// Onboarding is expected to be finished within four weeks. Applicants still
+// sitting in the onboarding stage after that are flagged as past deadline.
+const ONBOARDING_DEADLINE_DAYS = 28
+function isPastOnboardingDeadline(applicant) {
+  if (applicant?.stage !== 'onboarding' || !applicant.stage_updated_at) return false
+  const entered = new Date(applicant.stage_updated_at).getTime()
+  if (Number.isNaN(entered)) return false
+  return Date.now() - entered >= ONBOARDING_DEADLINE_DAYS * 24 * 60 * 60 * 1000
+}
+
 // ── Blue-only palette ─────────────────────────────────────────────────────────
 const C = {
   primary:  '#02416b',
@@ -2635,10 +2645,17 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       return [...upcoming, ...past, ...noDate]
     }
     if (stageFilter === 'onboarding') {
-      // Sort by interview date descending; applicants without one go to the bottom.
-      const withDate    = base.filter(a =>  a.interview_scheduled_at).sort((a, b) => new Date(b.interview_scheduled_at) - new Date(a.interview_scheduled_at))
-      const withoutDate = base.filter(a => !a.interview_scheduled_at)
-      return [...withDate, ...withoutDate]
+      // Overdue applicants (past the 4-week deadline) float to the top. Within
+      // each group, sort by interview date descending; applicants without one
+      // go to the bottom.
+      const byInterview = arr => {
+        const withDate    = arr.filter(a =>  a.interview_scheduled_at).sort((a, b) => new Date(b.interview_scheduled_at) - new Date(a.interview_scheduled_at))
+        const withoutDate = arr.filter(a => !a.interview_scheduled_at)
+        return [...withDate, ...withoutDate]
+      }
+      const overdue = base.filter(isPastOnboardingDeadline)
+      const current = base.filter(a => !isPastOnboardingDeadline(a))
+      return [...byInterview(overdue), ...byInterview(current)]
     }
     if (stageFilter === 'rejected') {
       // Alphabetical by full name.
@@ -3883,7 +3900,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         {a.stage === 'applied' && <StaffingNeedBadge applicant={a} />}
                         {a.stage === 'applied' && <OpenShiftsBadge applicant={a} />}
-                        {a.stage !== 'applied' && <StagePill stage={a.stage} />}
+                        {isPastOnboardingDeadline(a) && (
+                          <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.6rem', borderRadius: '100px', fontWeight: 600, background: 'rgba(220,38,38,0.10)', color: '#dc2626', border: '1px solid rgba(220,38,38,0.35)', whiteSpace: 'nowrap' }}>
+                            Past Deadline (4 Weeks)
+                          </span>
+                        )}
                         {a.created_at && <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{new Date(a.created_at).toLocaleDateString()}</span>}
                         <span style={{ color: 'var(--muted)' }}>›</span>
                       </div>
