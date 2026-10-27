@@ -170,14 +170,14 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
                   style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     padding: '0.75rem 1rem',
-                    background: inTraining ? 'rgba(239,68,68,0.12)' : 'rgba(2,65,107,0.05)', borderRadius: '8px',
-                    border: `1px solid ${inTraining ? 'rgba(239,68,68,0.5)' : 'var(--accent)'}`, cursor: 'pointer',
+                    background: 'rgba(2,65,107,0.05)', borderRadius: '8px',
+                    border: '1px solid var(--accent)', cursor: 'pointer',
                   }}
                   onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
                   onMouseLeave={e => e.currentTarget.style.opacity = '1'}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: inTraining ? '#ef4444' : 'var(--accent)', boxShadow: inTraining ? '0 0 6px rgba(239,68,68,0.6)' : '0 0 6px var(--accent)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 6px var(--accent)' }} />
                     <span style={{ fontWeight: 500 }}>{s.profiles?.full_name}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

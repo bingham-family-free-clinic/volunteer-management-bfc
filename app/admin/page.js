@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { useConfirm } from '../../lib/ConfirmDialog'
 import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
@@ -622,6 +623,7 @@ function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitc
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AdminPage() {
+  const confirmAction = useConfirm()
   const [profile, setProfile] = useState(null)
   const [user, setUser] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
@@ -2328,12 +2330,9 @@ export default function AdminPage() {
                             const approvedCallout = callouts.find(c => c.volunteer_id === entry.volunteer_id && c.callout_date === scheduleDate && c.shift_time === scheduleShift && c.status === 'approved')
                             const coverShift = approvedCallout && dateCoverShifts.find(s => s.volunteer_id === approvedCallout.covered_by)
                             const coverName = coverShift ? coverShift.profiles?.full_name : null
-                            const wlEntry = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
-                            const trainedRoles = wlEntry?.preferred_roles || []
-                            const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry.role))
                             return (
                               <div key={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: inTraining ? 'rgba(239,68,68,0.12)' : approvedCallout ? 'rgba(96,165,250,0.08)' : 'rgba(2,65,107,0.08)', border: `1px solid ${inTraining ? 'rgba(239,68,68,0.4)' : approvedCallout ? 'rgba(96,165,250,0.4)' : 'rgba(2,65,107,0.35)'}`, color: approvedCallout ? 'var(--warn)' : 'var(--text)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: approvedCallout ? 'rgba(96,165,250,0.08)' : 'rgba(2,65,107,0.08)', border: `1px solid ${approvedCallout ? 'rgba(96,165,250,0.4)' : 'rgba(2,65,107,0.35)'}`, color: approvedCallout ? 'var(--warn)' : 'var(--text)' }}>
                                   {approvedCallout && <span style={{ fontSize: '0.7rem' }}>out</span>}
                                   <span style={{ textDecoration: approvedCallout ? 'line-through' : 'none', opacity: approvedCallout ? 0.6 : 1 }}>{entry.profiles?.full_name}</span>
                                   {entry.notes && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.notes})</span>}
@@ -2352,7 +2351,14 @@ export default function AdminPage() {
                             <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No one assigned yet.</p>
                           ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                              {entries.map(entry => {
+                              {[...entries].sort((a, b) => {
+                                const getInTraining = (entry) => {
+                                  const wlEntry = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
+                                  const trainedRoles = wlEntry?.preferred_roles || []
+                                  return !(trainedRoles.length === 0 || trainedRoles.includes(entry.role))
+                                }
+                                return (getInTraining(b) ? 1 : 0) - (getInTraining(a) ? 1 : 0)
+                              }).map(entry => {
                                 const approvedCallout = callouts.find(c => c.volunteer_id === entry.volunteer_id && c.callout_date === scheduleDate && c.shift_time === scheduleShift && c.status === 'approved')
                                 const coverShift = approvedCallout && dateCoverShifts.find(s => s.volunteer_id === approvedCallout.covered_by)
                                 const coverName = coverShift ? coverShift.profiles?.full_name : null
@@ -2360,7 +2366,7 @@ export default function AdminPage() {
                                 const trainedRoles = wlEntry?.preferred_roles || []
                                 const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry.role))
                                 return (
-                                  <div key={entry.id} style={{ width: '100%', padding: '0.9rem 1rem', borderRadius: '10px', border: `1px solid ${inTraining ? 'rgba(239,68,68,0.5)' : 'var(--border)'}`, background: inTraining ? 'rgba(239,68,68,0.08)' : 'var(--bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+                                  <div key={entry.id} style={{ width: '100%', padding: '0.9rem 1rem', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 }}>
                                       <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
                                         <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>{entry.profiles?.full_name}</span>
@@ -2375,9 +2381,56 @@ export default function AdminPage() {
                                       {coverName && <div style={{ fontSize: '0.8rem', color: '#60a5fa' }}>Cover: {coverName}</div>}
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                        <select
+                                          value={inTraining ? 'training' : 'trained'}
+                                          onChange={async (e) => {
+                                            const val = e.target.value
+                                            if (val === 'trained') {
+                                              // Add this role to trained roles
+                                              const current = wlEntry?.preferred_roles || []
+                                              if (!current.includes(entry.role)) {
+                                                const newRoles = [...current, entry.role]
+                                                if (wlEntry) {
+                                                  await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
+                                                  setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
+                                                } else {
+                                                  // Create waitlist entry if doesn't exist
+                                                  const { data } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: newRoles }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
+                                                  if (data) setWaitlist(prev => [...prev, data])
+                                                }
+                                              }
+                                            } else {
+                                              // Mark as training - remove from trained roles if present
+                                              const current = wlEntry?.preferred_roles || []
+                                              if (current.includes(entry.role)) {
+                                                const newRoles = current.filter(r => r !== entry.role)
+                                                if (wlEntry) {
+                                                  await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
+                                                  setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
+                                                }
+                                              }
+                                            }
+                                            showMessage('Training status updated', 'success')
+                                          }}
+                                          style={{ ...inputStyle, width: 'auto', padding: '0.4rem 1.8rem 0.4rem 0.7rem', fontSize: '0.85rem', appearance: 'none', WebkitAppearance: 'none', background: inTraining ? 'rgba(239,68,68,0.15)' : 'var(--bg)', color: inTraining ? '#ef4444' : 'var(--text)', border: inTraining ? '1px solid rgba(239,68,68,0.5)' : '1px solid var(--border)' }}
+                                        >
+                                          <option value="trained">Trained</option>
+                                          <option value="training">Training</option>
+                                        </select>
+                                        <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '0.6rem', pointerEvents: 'none', color: inTraining ? '#ef4444' : 'var(--muted)' }}>
+                                          <polyline points="6 8 10 12 14 8" />
+                                        </svg>
+                                      </div>
                                       <button
                                         onClick={async () => {
-                                          if (!confirm('Remove this volunteer from this shift?')) return
+                                          const ok = await confirmAction({
+                                            label: 'Remove this volunteer from this shift?',
+                                            confirmText: 'Remove',
+                                            cancelText: 'Cancel',
+                                            danger: true,
+                                          })
+                                          if (!ok) return
                                           await handleRemoveEntry(entry.id)
                                         }}
                                         style={{ padding: '0.4rem 0.9rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.4)' }}
