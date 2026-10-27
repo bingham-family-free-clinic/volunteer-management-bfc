@@ -1624,7 +1624,7 @@ function VolunteerPageInner() {
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.3rem' }}>
                   <h2 style={{ fontWeight: 600, fontSize: '1.05rem' }}>Onboarding Documents</h2>
                   <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
-                    {onboardingApprovedRequired} / {onboardingRequiredKeys.length} approved
+                    {onboardingApprovedRequired} / {onboardingRequiredKeys.length} required approved
                   </span>
                 </div>
                 <p style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
@@ -1647,6 +1647,16 @@ function VolunteerPageInner() {
                     const locked         = approved && hasFile
                     const approvedNoFile = approved && !hasFile
                     const disabled       = locked || notNeeded || uploading
+                    const blueCard       = hasFile || approved
+                    const storedFileName = hasFile
+                      ? (onboardingChecklist?.[item.urlKey] || '').split('/').pop()
+                      : null
+                    const displayFileName = storedFileName
+                      ? storedFileName.replace(/-\d+(\.\w+)$/, '$1')
+                      : null
+                    const buttonLabel    = uploading
+                      ? 'Uploading...'
+                      : locked ? 'Approved' : hasFile ? 'Change File' : 'Attach File'
 
                     return (
                       <div
@@ -1654,17 +1664,17 @@ function VolunteerPageInner() {
                         style={{
                           padding: '0.85rem 1rem',
                           borderRadius: '10px',
-                          border: `1px solid ${locked ? 'rgba(2,65,107,0.28)' : 'var(--border)'}`,
-                          background: locked ? 'rgba(2,65,107,0.05)' : notNeeded ? 'var(--bg)' : 'var(--surface)',
-                          opacity: notNeeded ? 0.6 : 1,
+                          border: `1px solid ${blueCard ? '#0369a155' : 'var(--border)'}`,
+                          background: blueCard ? '#0369a108' : notNeeded ? 'var(--bg)' : 'var(--surface)',
+                          opacity: notNeeded && !blueCard ? 0.6 : 1,
                           transition: 'all 0.15s',
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.9rem', fontWeight: locked ? 600 : 500 }}>{item.label}</span>
+                          <span style={{ fontSize: '0.9rem', fontWeight: blueCard ? 600 : 500 }}>{item.label}</span>
                           {locked && (
                             <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.08)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.25)' }}>
-                              An admin has approved this file
+                              admin approved
                             </span>
                           )}
                           {approvedNoFile && (
@@ -1675,11 +1685,6 @@ function VolunteerPageInner() {
                           {!locked && notNeeded && (
                             <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
                               Not needed for your position
-                            </span>
-                          )}
-                          {!locked && !approvedNoFile && !notNeeded && hasFile && (
-                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.06)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.2)' }}>
-                              File attached
                             </span>
                           )}
                         </div>
@@ -1697,6 +1702,14 @@ function VolunteerPageInner() {
                               e.target.value = ''
                             }}
                           />
+                          {displayFileName && (
+                            <span
+                              title={storedFileName}
+                              style={{ fontSize: '0.72rem', fontWeight: 600, color: '#0369a1', maxWidth: '190px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            >
+                              {displayFileName}
+                            </span>
+                          )}
                           <button
                             onClick={() => onboardingFileRefs.current[item.key]?.click()}
                             disabled={disabled}
@@ -1707,13 +1720,13 @@ function VolunteerPageInner() {
                               fontWeight: 600,
                               fontFamily: 'DM Sans, sans-serif',
                               cursor: disabled ? 'not-allowed' : 'pointer',
-                              background: locked ? 'rgba(2,65,107,0.08)' : 'var(--surface)',
-                              color: locked ? 'var(--accent)' : 'var(--muted)',
-                              border: `1px solid ${locked ? 'rgba(2,65,107,0.25)' : 'var(--border)'}`,
-                              opacity: notNeeded || uploading ? 0.6 : 1,
+                              background: 'var(--surface)',
+                              color: 'var(--muted)',
+                              border: '1px solid var(--border)',
+                              opacity: locked || notNeeded || uploading ? 0.6 : 1,
                             }}
                           >
-                            {uploading ? 'Uploading...' : locked ? 'Approved' : notNeeded ? 'Not needed' : hasFile ? 'Change File' : 'Attach File'}
+                            {buttonLabel}
                           </button>
                           <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.7 }}>PDF or JPG/PNG</span>
                         </div>

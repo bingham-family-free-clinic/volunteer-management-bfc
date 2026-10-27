@@ -1,6 +1,6 @@
 -- Volunteer-facing onboarding document uploads
 --
--- Assumes this migration has not been applied to the database yet (run once).
+-- Safe to re-run: each policy is only created when it is missing.
 --
 -- 1. Adds onboarding_checklists.volunteer_uploads so the admin pipeline can
 --    flag files that were uploaded by the volunteer. Existing rows get an
@@ -9,7 +9,8 @@
 --    onboarding row (clearing that item's approval tick so an admin can review
 --    the new file), plus an admin RPC that writes only one item's path without
 --    clobbering other columns.
--- 3. Adds SELECT access so volunteers can read their own checklist state.
+-- 3. Adds SELECT access so volunteers can read their own application row and
+--    checklist state.
 -- 4. Adds storage policies for the five volunteer-upload buckets, scoped to
 --    the applicant's own folder (<application id>/...).
 
@@ -220,96 +221,159 @@ revoke all on function public.admin_set_checklist_file(uuid, text, text) from pu
 grant execute on function public.admin_set_checklist_file(uuid, text, text) to authenticated;
 
 -- ─── 3. Volunteer read access ────────────────────────────────────────────────
+-- The portal loads the applicant row itself (stage + onboarding fields) using
+-- the signed-in user's email, so that read must be allowed too.
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'public'
+       and tablename = 'volunteer_applications'
+       and policyname = 'Volunteers can read own application'
+  ) then
+    create policy "Volunteers can read own application"
+      on public.volunteer_applications
+      for select
+      to authenticated
+      using (lower(email) = lower(auth.jwt() ->> 'email'));
+  end if;
+end
+$$;
+
 alter table public.onboarding_checklists enable row level security;
 
-create policy "Volunteers can read own onboarding checklist"
-  on public.onboarding_checklists
-  for select
-  to authenticated
-  using (
-    exists (
-      select 1
-        from public.volunteer_applications va
-       where va.id = onboarding_checklists.applicant_id
-         and lower(va.email) = lower(auth.jwt() ->> 'email')
-    )
-  );
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'public'
+       and tablename = 'onboarding_checklists'
+       and policyname = 'Volunteers can read own onboarding checklist'
+  ) then
+    create policy "Volunteers can read own onboarding checklist"
+      on public.onboarding_checklists
+      for select
+      to authenticated
+      using (
+        exists (
+          select 1
+            from public.volunteer_applications va
+           where va.id = onboarding_checklists.applicant_id
+             and lower(va.email) = lower(auth.jwt() ->> 'email')
+        )
+      );
+  end if;
+end
+$$;
 
 -- ─── 4. Volunteer storage access ─────────────────────────────────────────────
 -- Files are written to <application id>/<item key>-<timestamp>.zip by
 -- app/volunteer/page.js, matching the admin pipeline's path scheme.
 
-create policy "Volunteers can read own onboarding documents"
-  on storage.objects
-  for select
-  to authenticated
-  using (
-    bucket_id = any (array[
-      'onboarding-background-checks',
-      'onboarding-ids',
-      'onboarding-immunizations',
-      'onboarding-tb-tests',
-      'onboarding-licenses'
-    ])
-    and exists (
-      select 1
-        from public.volunteer_applications va
-       where va.id::text = (storage.foldername(name))[1]
-         and lower(va.email) = lower(auth.jwt() ->> 'email')
-    )
-  );
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'storage'
+       and tablename = 'objects'
+       and policyname = 'Volunteers can read own onboarding documents'
+  ) then
+    create policy "Volunteers can read own onboarding documents"
+      on storage.objects
+      for select
+      to authenticated
+      using (
+        bucket_id = any (array[
+          'onboarding-background-checks',
+          'onboarding-ids',
+          'onboarding-immunizations',
+          'onboarding-tb-tests',
+          'onboarding-licenses'
+        ])
+        and exists (
+          select 1
+            from public.volunteer_applications va
+           where va.id::text = (storage.foldername(name))[1]
+             and lower(va.email) = lower(auth.jwt() ->> 'email')
+        )
+      );
+  end if;
+end
+$$;
 
-create policy "Volunteers can upload own onboarding documents"
-  on storage.objects
-  for insert
-  to authenticated
-  with check (
-    bucket_id = any (array[
-      'onboarding-background-checks',
-      'onboarding-ids',
-      'onboarding-immunizations',
-      'onboarding-tb-tests',
-      'onboarding-licenses'
-    ])
-    and exists (
-      select 1
-        from public.volunteer_applications va
-       where va.id::text = (storage.foldername(name))[1]
-         and lower(va.email) = lower(auth.jwt() ->> 'email')
-    )
-  );
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'storage'
+       and tablename = 'objects'
+       and policyname = 'Volunteers can upload own onboarding documents'
+  ) then
+    create policy "Volunteers can upload own onboarding documents"
+      on storage.objects
+      for insert
+      to authenticated
+      with check (
+        bucket_id = any (array[
+          'onboarding-background-checks',
+          'onboarding-ids',
+          'onboarding-immunizations',
+          'onboarding-tb-tests',
+          'onboarding-licenses'
+        ])
+        and exists (
+          select 1
+            from public.volunteer_applications va
+           where va.id::text = (storage.foldername(name))[1]
+             and lower(va.email) = lower(auth.jwt() ->> 'email')
+        )
+      );
+  end if;
+end
+$$;
 
-create policy "Volunteers can update own onboarding documents"
-  on storage.objects
-  for update
-  to authenticated
-  using (
-    bucket_id = any (array[
-      'onboarding-background-checks',
-      'onboarding-ids',
-      'onboarding-immunizations',
-      'onboarding-tb-tests',
-      'onboarding-licenses'
-    ])
-    and exists (
-      select 1
-        from public.volunteer_applications va
-       where va.id::text = (storage.foldername(name))[1]
-         and lower(va.email) = lower(auth.jwt() ->> 'email')
-    )
-  )
-  with check (
-    bucket_id = any (array[
-      'onboarding-background-checks',
-      'onboarding-ids',
-      'onboarding-immunizations',
-      'onboarding-tb-tests',
-      'onboarding-licenses'
-    ])
-    and exists (
-      select 1
-        from public.volunteer_applications va
-       where va.id::text = (storage.foldername(name))[1]
-         and lower(va.email) = lower(auth.jwt() ->> 'email')
-    )
-  );
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'storage'
+       and tablename = 'objects'
+       and policyname = 'Volunteers can update own onboarding documents'
+  ) then
+    create policy "Volunteers can update own onboarding documents"
+      on storage.objects
+      for update
+      to authenticated
+      using (
+        bucket_id = any (array[
+          'onboarding-background-checks',
+          'onboarding-ids',
+          'onboarding-immunizations',
+          'onboarding-tb-tests',
+          'onboarding-licenses'
+        ])
+        and exists (
+          select 1
+            from public.volunteer_applications va
+           where va.id::text = (storage.foldername(name))[1]
+             and lower(va.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
+      with check (
+        bucket_id = any (array[
+          'onboarding-background-checks',
+          'onboarding-ids',
+          'onboarding-immunizations',
+          'onboarding-tb-tests',
+          'onboarding-licenses'
+        ])
+        and exists (
+          select 1
+            from public.volunteer_applications va
+           where va.id::text = (storage.foldername(name))[1]
+             and lower(va.email) = lower(auth.jwt() ->> 'email')
+        )
+      );
+  end if;
+end
+$$;
