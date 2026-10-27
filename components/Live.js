@@ -34,7 +34,7 @@ export function isActiveThisWeek(dateStr, week_pattern) {
  * Compute which volunteers are expected right now but haven't clocked in.
  * Extracted so both the stats banner and Live tab use identical logic.
  */
-export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers }) {
+export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers, waitlist = [] }) {
   const todayMtnStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
   const mtnNow      = getMountainNow()
   const dayIndex    = mtnNow.getDay()
@@ -78,7 +78,10 @@ export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, 
       const vol   = volunteers.find(v => v.id === id)
       const entry = scheduled.find(s => s.volunteer_id === id)
       if (!vol) return null
-      return { ...vol, role: entry?.role || '—', notes: entry?.notes || null }
+      const wlEntry = waitlist?.find(w => w.volunteer_id === id)
+      const trainedRoles = wlEntry?.preferred_roles || []
+      const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry?.role))
+      return { ...vol, role: entry?.role || '—', notes: entry?.notes || null, training_status: inTraining ? 'training' : 'trained' }
     })
     .filter(Boolean)
 
@@ -87,12 +90,12 @@ export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, 
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function Live({ schedule, callouts, activeShifts, volunteers, onOpenVolunteer }) {
+export default function Live({ schedule, callouts, activeShifts, volunteers, onOpenVolunteer, waitlist = [] }) {
   const todayMtn = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
   const mtnNow   = getMountainNow()
 
   const { list: expectedVols, currentDay, currentShift, isWeekday } =
-    computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers })
+    computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers, waitlist })
 
   const card = {
     background: 'var(--surface)',
@@ -125,15 +128,20 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
                   style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     padding: '0.5rem 0.75rem',
-                    background: 'rgba(239,68,68,0.06)', borderRadius: '8px',
-                    border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer',
+                    background: v.training_status === 'training' ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.06)', borderRadius: '8px',
+                    border: `1px solid ${v.training_status === 'training' ? 'rgba(239,68,68,0.5)' : 'rgba(239,68,68,0.2)'}`, cursor: 'pointer',
                   }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(239,68,68,0.2)'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = v.training_status === 'training' ? 'rgba(239,68,68,0.5)' : 'rgba(239,68,68,0.2)'}
                 >
-                  <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>{v.full_name}</span>
-                  {v.notes && <span style={{ fontSize: '0.78rem', color: '#60a5fa', fontStyle: 'italic' }}>({v.notes})</span>}
-                  <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{v.role}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>{v.full_name}</span>
+                    {v.notes && <span style={{ fontSize: '0.78rem', color: '#60a5fa', fontStyle: 'italic' }}>({v.notes})</span>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    {v.training_status === 'training' && <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.45rem', borderRadius: '100px', background: 'rgba(239,68,68,0.2)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.5)', fontWeight: 600 }}>In Training</span>}
+                    <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{v.role}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -149,24 +157,37 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {activeShifts.map(s => (
+              {(() => {
+                const id = s.volunteer_id ?? s.profiles?.id
+                const full = volunteers.find(v => v.id === id)
+                const entry = schedule?.find(x => x.volunteer_id === id)
+                const wlEntry = waitlist?.find(w => w.volunteer_id === id)
+                const trainedRoles = wlEntry?.preferred_roles || []
+                const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry?.role))
+                return (
               <div
                 key={s.id}
-                onClick={() => { const id = s.volunteer_id ?? s.profiles?.id; const full = volunteers.find(v => v.id === id); if (full) onOpenVolunteer(full) }}
+                onClick={() => { if (full) onOpenVolunteer(full) }}
                 style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   padding: '0.75rem 1rem',
-                  background: 'rgba(2,65,107,0.05)', borderRadius: '8px',
-                  border: '1px solid var(--accent)', cursor: 'pointer',
+                  background: inTraining ? 'rgba(239,68,68,0.12)' : 'rgba(2,65,107,0.05)', borderRadius: '8px',
+                  border: `1px solid ${inTraining ? 'rgba(239,68,68,0.5)' : 'var(--accent)'}`, cursor: 'pointer',
                 }}
                 onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 6px var(--accent)' }} />
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: inTraining ? '#ef4444' : 'var(--accent)', boxShadow: inTraining ? '0 0 6px rgba(239,68,68,0.6)' : '0 0 6px var(--accent)' }} />
                   <span style={{ fontWeight: 500 }}>{s.profiles?.full_name}</span>
                 </div>
-                <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Since {formatMountain(s.clock_in)}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {inTraining && <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.45rem', borderRadius: '100px', background: 'rgba(239,68,68,0.2)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.5)', fontWeight: 600 }}>In Training</span>}
+                  <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>{full?.role || s.role || ''}{(full?.role || s.role) ? ' · ' : ''}Since {formatMountain(s.clock_in)}</span>
+                </div>
               </div>
+                )
+              })()}
             ))}
           </div>
         )}

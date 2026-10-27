@@ -632,6 +632,7 @@ export default function AdminPage() {
   const [activeShifts, setActiveShifts] = useState([])
   const [callouts, setCallouts]         = useState([])
   const [schedule, setSchedule]         = useState([])
+  const [waitlist, setWaitlist]         = useState([])
   const [tab, setTab]                   = useState('dashboard')
   const [loading, setLoading]           = useState(true)
   const [toast, setToast]               = useState(null)
@@ -646,6 +647,7 @@ export default function AdminPage() {
   const [scheduleShift, setScheduleShift]           = useState('10-2')
   const [addingRole, setAddingRole]                 = useState(null)
   const [addVolId, setAddVolId]                     = useState('')
+  const scheduleCardRefs = useRef({})
   const [addingEntry, setAddingEntry]               = useState(false)
   const [addStartDate, setAddStartDate]             = useState('')
   const [addEndDate, setAddEndDate]                 = useState('')
@@ -1036,11 +1038,16 @@ export default function AdminPage() {
 
   async function loadSchedule() {
     const { data } = await supabase
-      .from('schedule')
-      .select('id,volunteer_id,day_of_week,shift_time,role,start_date,end_date,week_pattern,notes,profiles(id,full_name)')
-      .order('role')
-    setSchedule(data || [])
-  }
+       .from('schedule')
+       .select('id,volunteer_id,day_of_week,shift_time,role,start_date,end_date,week_pattern,notes,profiles(id,full_name)')
+       .order('role')
+     setSchedule(data || [])
+   }
+
+   async function loadWaitlistData() {
+     const { data } = await supabase.from('waitlist').select('id,volunteer_id,preferred_roles,preferred_slots,notes').order('added_at', { ascending: true })
+     setWaitlist(data || [])
+   }
 
   async function loadCoverRequests() {
     // Fetch pending cover requests first, then reviewed ones to fill remaining slots
@@ -1325,12 +1332,13 @@ export default function AdminPage() {
     setAddingRole(null)
     if (!loadedTabs.current.has(key)) {
       loadedTabs.current.add(key)
-      if (key === 'shifts') { loadShiftsFirstPage(); loadGuestOrgs(); loadGuestHoursTotals() }
-      if (key === 'hours')  loadPendingHours()
-      if (key === 'audit')  loadAuditFirstPage()
-      if (key === 'volunteers') { loadGuestOrgs(); loadGuestHoursTotals() }
-      if (key === 'messages') fetchMessages(user?.id)
-    }
+    if (key === 'shifts') { loadShiftsFirstPage(); loadGuestOrgs(); loadGuestHoursTotals() }
+    if (key === 'hours')  loadPendingHours()
+    if (key === 'audit')  loadAuditFirstPage()
+    if (key === 'volunteers') { loadGuestOrgs(); loadGuestHoursTotals() }
+    if (key === 'messages') fetchMessages(user?.id)
+    loadWaitlistData()
+  }
   }
 
   // ── Init ────────────────────────────────────────────────────────────────────
@@ -1354,7 +1362,7 @@ export default function AdminPage() {
       }
        setProfile(p)
        if (p?.default_role === 'Credentialing') setTab('providers')
-       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
+       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests(), loadWaitlistData()])
        fetchMessages(user.id)
        // Guest orgs load best-effort (tables may not exist until migrations run).
       loadGuestOrgs()
@@ -2257,6 +2265,7 @@ export default function AdminPage() {
             activeShifts={visibleActiveShifts}
             volunteers={visibleVolunteers}
             onOpenVolunteer={openVolunteer}
+            waitlist={waitlist}
           />
         )}
 
@@ -2289,10 +2298,29 @@ export default function AdminPage() {
                   const entries = getEntries(scheduleDay, scheduleShift, role)
                   const isOpen = addingRole === role
                   return (
-                    <div key={role} style={{ ...card, padding: '1rem 1.25rem' }}>
+                    <div key={role} ref={el => { if (el) scheduleCardRefs.current[role] = el }} style={{ ...card, padding: '1rem 1.25rem', transition: 'all 0.25s ease' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: entries.length > 0 || isOpen ? '0.75rem' : 0 }}>
                         <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{role}{getRoleCapacity(scheduleDay, scheduleShift, role) ? ` — ${getRoleCapacity(scheduleDay, scheduleShift, role)}` : ''}</span>
-                        <button onClick={() => { setAddingRole(isOpen ? null : role); setAddVolId('') }} style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOpen ? 'var(--surface)' : 'rgba(2,65,107,0.12)', color: isOpen ? 'var(--muted)' : 'var(--accent)', border: `1px solid ${isOpen ? 'var(--border)' : 'var(--accent)'}` }}>{isOpen ? 'Cancel' : '+ Assign'}</button>
+                        <button onClick={() => {
+                    if (isOpen) {
+                      setAddingRole(null)
+                      setAddVolId('')
+                    } else {
+                      setAddingRole(role)
+                      setAddVolId('')
+                      setTimeout(() => {
+                        const el = scheduleCardRefs.current[role]
+                        if (el) {
+                          const rect = el.getBoundingClientRect()
+                          const viewportHeight = window.innerHeight
+                          if (rect.bottom > viewportHeight) {
+                            const targetTop = window.scrollY + rect.bottom - viewportHeight
+                            window.scrollTo({ top: targetTop, behavior: 'smooth' })
+                          }
+                        }
+                      }, 50)
+                    }
+                  }} style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOpen ? 'var(--surface)' : 'rgba(2,65,107,0.12)', color: isOpen ? 'var(--muted)' : 'var(--accent)', border: `1px solid ${isOpen ? 'var(--border)' : 'var(--accent)'}`, transition: 'all 0.2s ease' }}>{isOpen ? 'Cancel' : 'Edit'}</button>
                       </div>
                       {entries.length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: isOpen ? '0.75rem' : 0 }}>
@@ -2300,15 +2328,17 @@ export default function AdminPage() {
                             const approvedCallout = callouts.find(c => c.volunteer_id === entry.volunteer_id && c.callout_date === scheduleDate && c.shift_time === scheduleShift && c.status === 'approved')
                             const coverShift = approvedCallout && dateCoverShifts.find(s => s.volunteer_id === approvedCallout.covered_by)
                             const coverName = coverShift ? coverShift.profiles?.full_name : null
+                            const wlEntry = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
+                            const trainedRoles = wlEntry?.preferred_roles || []
+                            const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry.role))
                             return (
                               <div key={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: approvedCallout ? 'rgba(96,165,250,0.08)' : 'rgba(2,65,107,0.08)', border: `1px solid ${approvedCallout ? 'rgba(96,165,250,0.4)' : 'rgba(2,65,107,0.35)'}`, color: approvedCallout ? 'var(--warn)' : 'var(--text)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: inTraining ? 'rgba(239,68,68,0.12)' : approvedCallout ? 'rgba(96,165,250,0.08)' : 'rgba(2,65,107,0.08)', border: `1px solid ${inTraining ? 'rgba(239,68,68,0.4)' : approvedCallout ? 'rgba(96,165,250,0.4)' : 'rgba(2,65,107,0.35)'}`, color: approvedCallout ? 'var(--warn)' : 'var(--text)' }}>
                                   {approvedCallout && <span style={{ fontSize: '0.7rem' }}>out</span>}
                                   <span style={{ textDecoration: approvedCallout ? 'line-through' : 'none', opacity: approvedCallout ? 0.6 : 1 }}>{entry.profiles?.full_name}</span>
                                   {entry.notes && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.notes})</span>}
                                   {(entry.start_date || entry.end_date) && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.start_date ?? '...'} → {entry.end_date ?? '...'})</span>}
                                   {entry.week_pattern && entry.week_pattern !== 'every' && <span style={{ ...biweeklyBadge, fontSize: '0.65rem', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>{entry.week_pattern === 'odd' ? '1st&3rd' : '2nd&4th'}</span>}
-                                  <button onClick={() => handleRemoveEntry(entry.id)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.75rem', padding: '0 2px' }}>✕</button>
                                 </div>
                                 {coverName && <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.6rem 0.25rem 0.75rem', borderRadius: '100px', fontSize: '0.82rem', background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.35)', color: '#60a5fa', marginLeft: '0.5rem' }}><span style={{ fontSize: '0.7rem' }}>cover</span><span>{coverName}</span></div>}
                               </div>
@@ -2317,19 +2347,63 @@ export default function AdminPage() {
                         </div>
                       )}
                       {isOpen && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                          <select value={addVolId} onChange={e => setAddVolId(e.target.value)} style={inputStyle}><option value="">— Select volunteer —</option>{userList.map(v => <option key={v.id} value={v.id}>{v.full_name}</option>)}</select>
-                          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                            {[{ value: 'every', label: 'Every week' }, { value: 'odd', label: '1st & 3rd' }, { value: 'even', label: '2nd & 4th' }].map(opt => (<button key={opt.value} type="button" onClick={() => setAddWeekPattern(opt.value)} style={{ ...pillBtn(addWeekPattern === opt.value, false), fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}>{opt.label}</button>))}
-                          </div>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                            <div><label style={labelStyle}>Start date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="date" value={addStartDate} onChange={e => setAddStartDate(e.target.value)} style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
-                            <div><label style={labelStyle}>End date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="date" value={addEndDate} onChange={e => setAddEndDate(e.target.value)} style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
-                          </div>
-                          {profile?.default_role === 'Director' && (
-                            <div><label style={labelStyle}>Schedule note <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="text" value={addNotes} onChange={e => setAddNotes(e.target.value)} placeholder="e.g. arriving late" style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', animation: 'fadeSlideDown 0.25s ease', transition: 'all 0.25s ease' }}>
+                          {entries.length === 0 ? (
+                            <p style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No one assigned yet.</p>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                              {entries.map(entry => {
+                                const approvedCallout = callouts.find(c => c.volunteer_id === entry.volunteer_id && c.callout_date === scheduleDate && c.shift_time === scheduleShift && c.status === 'approved')
+                                const coverShift = approvedCallout && dateCoverShifts.find(s => s.volunteer_id === approvedCallout.covered_by)
+                                const coverName = coverShift ? coverShift.profiles?.full_name : null
+                                const wlEntry = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
+                                const trainedRoles = wlEntry?.preferred_roles || []
+                                const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry.role))
+                                return (
+                                  <div key={entry.id} style={{ width: '100%', padding: '0.9rem 1rem', borderRadius: '10px', border: `1px solid ${inTraining ? 'rgba(239,68,68,0.5)' : 'var(--border)'}`, background: inTraining ? 'rgba(239,68,68,0.08)' : 'var(--bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 }}>
+                                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                        <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>{entry.profiles?.full_name}</span>
+                                        {approvedCallout && <span style={{ fontSize: '0.7rem', color: 'var(--warn)' }}>out</span>}
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', color: 'var(--muted)', fontSize: '0.88rem' }}>
+                                        {entry.week_pattern && entry.week_pattern !== 'every' && <span style={{ ...biweeklyBadge, fontSize: '0.65rem', borderRadius: '4px', padding: '0.1rem 0.35rem', color: '#1e3a8a' }}>{entry.week_pattern === 'odd' ? '1st & 3rd' : '2nd & 4th'}</span>}
+                                        <span>{entry.day_of_week ? entry.day_of_week.charAt(0).toUpperCase() + entry.day_of_week.slice(1) : scheduleDay.charAt(0).toUpperCase() + scheduleDay.slice(1)} {entry.shift_time || scheduleShift} Shift</span>
+                                        {entry.notes && <span style={{ fontStyle: 'italic' }}>({entry.notes})</span>}
+                                        {(entry.start_date || entry.end_date) && <span style={{ fontStyle: 'italic' }}>({entry.start_date ?? '...'} → {entry.end_date ?? '...'})</span>}
+                                      </div>
+                                      {coverName && <div style={{ fontSize: '0.8rem', color: '#60a5fa' }}>Cover: {coverName}</div>}
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                      <button
+                                        onClick={async () => {
+                                          if (!confirm('Remove this volunteer from this shift?')) return
+                                          await handleRemoveEntry(entry.id)
+                                        }}
+                                        style={{ padding: '0.4rem 0.9rem', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.4)' }}
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
                           )}
-                          <button onClick={handleAddEntry} disabled={!addVolId || addingEntry} style={{ padding: '0.75rem 1.25rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{addingEntry ? '...' : 'Assign'}</button>
+                          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <select value={addVolId} onChange={e => setAddVolId(e.target.value)} style={inputStyle}><option value="">— Select volunteer —</option>{userList.map(v => <option key={v.id} value={v.id}>{v.full_name}</option>)}</select>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              {[{ value: 'every', label: 'Every week' }, { value: 'odd', label: '1st & 3rd' }, { value: 'even', label: '2nd & 4th' }].map(opt => (<button key={opt.value} type="button" onClick={() => setAddWeekPattern(opt.value)} style={{ ...pillBtn(addWeekPattern === opt.value, false), fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}>{opt.label}</button>))}
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                              <div><label style={labelStyle}>Start date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="date" value={addStartDate} onChange={e => setAddStartDate(e.target.value)} style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
+                              <div><label style={labelStyle}>End date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="date" value={addEndDate} onChange={e => setAddEndDate(e.target.value)} style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
+                            </div>
+                            {profile?.default_role === 'Director' && (
+                              <div><label style={labelStyle}>Schedule note <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="text" value={addNotes} onChange={e => setAddNotes(e.target.value)} placeholder="e.g. arriving late" style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
+                            )}
+                            <button onClick={handleAddEntry} disabled={!addVolId || addingEntry} style={{ padding: '0.75rem 1.25rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{addingEntry ? '...' : 'Assign'}</button>
+                          </div>
                         </div>
                       )}
                     </div>

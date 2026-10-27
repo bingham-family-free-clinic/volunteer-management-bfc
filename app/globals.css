@@ -28,3 +28,14 @@ body {
 }
 
 .mono { font-family: 'DM Mono', monospace; }
+
+@keyframes fadeSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
