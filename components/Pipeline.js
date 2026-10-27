@@ -2400,21 +2400,80 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     throw new Error('Upload did not complete')
   }
 
+  async function cleanupOffload(applicant, applicantZip, oneDriveArchive) {
+    const { data, error } = await supabase.functions.invoke(
+        'offload-cleanup',
+        {
+          body: {
+            applicantId: applicant.id,
+            archive: oneDriveArchive,
+            files: applicantZip.urls.map(({ bucket, path }) => ({
+              bucket,
+              path
+            }))
+          }
+        }
+    )
+
+    if (error) {
+      let details = error.message
+
+      if (error.context instanceof Response) {
+        const status = error.context.status
+        const body = await error.context.json().catch(() => null)
+        details = `HTTP ${status}: ${body?.error || body?.message || error.message}`
+      }
+
+      throw new Error(`Cleanup failed: ${details}`)
+    }
+
+    if (!data?.success || data.stage !== 'offloaded') {
+      throw new Error('Cleanup did not confirm successful offloading')
+    }
+
+    return data
+  }
+
+  const offloadingRef = useRef(false) // better than offloadingId I suppose
 
   async function handleOffload(applicant) {
+
+    // multiple offloads at the same time could be a bit dangerous, so we should
+    // probably wait for the current one to finish
+    if (offloadingRef.current) return
+
+    offloadingRef.current = true
+
     setOffloadingId(applicant.id)
+
+    let oneDriveArchive = null
 
     try {
       const applicantZip = await makeApplicantZip(applicant)
 
       if (applicantZip.zip) {
-        await uploadToOneDrive(applicant, applicantZip.zip)
+        oneDriveArchive = await uploadToOneDrive(applicant, applicantZip.zip)
       }
 
+      const cleanupResult = await cleanupOffload(applicant, applicantZip, oneDriveArchive)
+
+      await audit(
+          'applicant_offloaded',
+          'applicant',
+          applicant.id,
+          applicant.full_name,
+          `${cleanupResult.deletedFiles} files removed from Supabase Storage`
+      )
+
+      await loadAll() // we don't want to offload someone twice
+
+      msg(`Successfully offloaded ${applicant.full_name}`)
+
     } catch (error) {
-      msg(`Offload failed: "${error.message}"`, 'error')
+      msg(`Offload failed: "${error.message}"` + (oneDriveArchive ? "(OneDrive archive successfully created)" : ""), 'error')
     } finally {
       setOffloadingId(null)
+      offloadingRef.current = false
     }
   }
 
@@ -3200,12 +3259,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   </button>
                   <button
                     onClick={() => handleOffload(a)}
-                    disabled={isOffloading}
+                    disabled={offloadingId !== null}
                     style={{ padding: '0.35rem 0.85rem', borderRadius: '7px', fontSize: '0.75rem', fontWeight: 600, cursor: isOffloading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOffloading ? 'var(--surface)' : C.primary + '12', color: isOffloading ? 'var(--muted)' : C.primary, border: `1px solid ${C.primary}${isOffloading ? '22' : '55'}`, opacity: isOffloading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '0.35rem' }}
                   >
                     {isOffloading
                       ? <><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.primary}`, borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} /> Offloading...</>
-                      : 'Do not click this button.'
+                      : 'OFFLOAD.'
                     }
                   </button>
                 </div>
