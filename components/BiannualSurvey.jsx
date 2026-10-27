@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { DAYS, SHIFTS, ROLES } from '../lib/constants'
+import { toWeekKey } from '../lib/trainingUtils'
 
 // ── Survey window configuration ──────────────────────────────────────────────
 // Adjust these to change when the survey is active.
@@ -29,6 +30,17 @@ export function isSurveyWeek() {
   return now >= start && now <= end
 }
 
+// True if the given weekly-training week key (the ISO date, YYYY-MM-DD, of a
+// Monday) is the survey week. Uses the same SURVEY_MONTHS / getSurveyWindow
+// config as isSurveyWeek(), so the two can never disagree. The weekly
+// training is not offered during the survey week.
+export function isSurveyWeekKey(weekKey) {
+  if (!weekKey) return false
+  const [y, m] = weekKey.split('-').map(Number)
+  const month = m - 1
+  if (!SURVEY_MONTHS.includes(month)) return false
+  return toWeekKey(getSurveyWindow(y, month).start) === weekKey
+}
 
 export function currentSurveyPeriod() {
   const now = new Date()
