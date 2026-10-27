@@ -107,8 +107,8 @@ function VolunteerRow({
       onMouseEnter={selectable ? e => { e.currentTarget.style.borderColor = 'var(--accent)' } : undefined}
       onMouseLeave={selectable ? e => { e.currentTarget.style.borderColor = 'var(--border)' } : undefined}
     >
-      <div
-        onClick={selectable ? () => onSelectVolunteer(volunteer) : undefined}
+    <div
+        onClick={e => { e.stopPropagation(); onToggle() }}
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -117,8 +117,9 @@ function VolunteerRow({
           padding: '0.65rem 0.85rem',
           cursor: selectable ? 'pointer' : 'default',
         }}
-      >
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', minWidth: 0 }}>
+    >
+      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', minWidth: 0 }}>
+         <span style={{ fontSize: '0.65rem' }}>{expanded ? '▴' : '▾'}</span>
           <div
             style={{
               width: 36,
@@ -148,7 +149,7 @@ function VolunteerRow({
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', flexShrink: 0 }}>
           {isInactive && <span style={badgeStyle('#9ca3af')}>inactive</span>}
           {volunteer.role === 'admin' && <span style={badgeStyle('#f59e0b')}>admin</span>}
           {volunteer.affiliation && (
@@ -158,7 +159,7 @@ function VolunteerRow({
           )}
           <button
             type="button"
-            onClick={e => { e.stopPropagation(); onToggle() }}
+            onClick={selectable ? () => onSelectVolunteer(volunteer) : undefined}
             aria-expanded={expanded}
             aria-label={`${expanded ? 'Hide' : 'Manage'} roles for ${volunteer.full_name || 'volunteer'}`}
             style={{
@@ -176,10 +177,9 @@ function VolunteerRow({
               cursor: 'pointer',
             }}
           >
-            Roles
-            <span style={{ fontSize: '0.65rem' }}>{expanded ? '▴' : '▾'}</span>
+            Info
+            {selectable && <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)', fontSize: '0.8rem' }}>›</span>}
           </button>
-          {selectable && <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--muted)', fontSize: '0.8rem' }}>›</span>}
         </div>
       </div>
 
@@ -187,7 +187,7 @@ function VolunteerRow({
         <div style={{ padding: '0.85rem', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.55rem' }}>
             <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-              Assigned roles
+              Trained in
             </p>
             {isPending && <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Saving…</span>}
           </div>
@@ -279,7 +279,7 @@ function PositionSection({
   onSelectVolunteer,
   allRoles,
   roleOverrides,
-  expandedVolunteerKey,
+  expandedVolunteerKeys,
   onToggleVolunteer,
   onAddRole,
   onRemoveRole,
@@ -376,7 +376,7 @@ function PositionSection({
                     volunteer={volunteer}
                     roles={volunteerRoleList(volunteer, roleOverrides)}
                     allRoles={allRoles}
-                    expanded={expandedVolunteerKey === rowKey}
+                    expanded={expandedVolunteerKeys.has(rowKey)}
                     onToggle={() => onToggleVolunteer(rowKey)}
                     onSelectVolunteer={onSelectVolunteer}
                     onAddRole={onAddRole}
@@ -418,11 +418,11 @@ export default function VolunteerPositions({
   const [showInactive, setShowInactive] = useState(false)
   const [showEmpty, setShowEmpty] = useState(showEmptyPositions)
   const [filtersOpen, setFiltersOpen] = useState(true)
-  const [collapsed, setCollapsed] = useState(() => new Set())
+  const [expanded, setExpanded] = useState(() => new Set())
 
   const [volunteers, setVolunteers] = useState([])
   const [roleOverrides, setRoleOverrides] = useState({})
-  const [expandedVolunteerKey, setExpandedVolunteerKey] = useState(null)
+  const [expandedVolunteerKeys, setExpandedVolunteerKeys] = useState(() => new Set())
   const [pendingRole, setPendingRole] = useState(null)
   const [roleErrors, setRoleErrors] = useState({})
   const [loadError, setLoadError] = useState(null)
@@ -585,7 +585,7 @@ export default function VolunteerPositions({
   const populatedPositions = positionGroups.filter(group => group.volunteers.length > 0).length
 
   function togglePosition(name) {
-    setCollapsed(prev => {
+    setExpanded(prev => {
       const next = new Set(prev)
       if (next.has(name)) next.delete(name)
       else next.add(name)
@@ -593,16 +593,26 @@ export default function VolunteerPositions({
     })
   }
 
-  function expandAll() {
-    setCollapsed(new Set())
+  function collapseAll() {
+    setExpanded(new Set())
   }
 
-  function collapseAll() {
-    setCollapsed(new Set(positionGroups.map(group => group.name)))
+  function expandAll() {
+    setExpanded(new Set(positionGroups.map(group => group.name)))
   }
 
   function toggleVolunteer(key) {
-    setExpandedVolunteerKey(prev => (prev === key ? null : key))
+    //setExpandedVolunteerKey(prev => (prev === key ? null : key))
+    setExpandedVolunteerKeys(prev => {
+      const add = !prev.has(key)
+      const nextTags = new Set(prev)
+      if(add){
+        nextTags.add(key)
+      } else {
+        nextTags.delete(key)
+      }
+      return nextTags
+    })
   }
 
   function clearRoleError(volunteerId) {
@@ -675,13 +685,6 @@ export default function VolunteerPositions({
           <h2 style={{ fontWeight: 600, fontSize: '1.1rem' }}>{title}</h2>
           {subtitle && <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: '0.2rem' }}>{subtitle}</p>}
         </div>
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
-            {populatedPositions} {populatedPositions === 1 ? 'position' : 'positions'} · {totalVolunteers} {totalVolunteers === 1 ? 'volunteer' : 'volunteers'}
-          </span>
-          <button onClick={expandAll} style={{ ...pillBtn(false), padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}>Expand all</button>
-          <button onClick={collapseAll} style={{ ...pillBtn(false), padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}>Collapse all</button>
-        </div>
       </div>
 
       {/* Filters */}
@@ -753,12 +756,12 @@ export default function VolunteerPositions({
             <PositionSection
               key={group.name}
               group={group}
-              collapsed={collapsed.has(group.name)}
+              collapsed={!expanded.has(group.name)}
               onToggle={() => togglePosition(group.name)}
               onSelectVolunteer={onSelectVolunteer}
               allRoles={allRoles}
               roleOverrides={roleOverrides}
-              expandedVolunteerKey={expandedVolunteerKey}
+              expandedVolunteerKeys={expandedVolunteerKeys}
               onToggleVolunteer={toggleVolunteer}
               onAddRole={handleAddRole}
               onRemoveRole={handleRemoveRole}
