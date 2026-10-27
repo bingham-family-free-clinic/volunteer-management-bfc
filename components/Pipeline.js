@@ -2438,6 +2438,16 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   async function handleOffload(applicant) {
 
+    const confirmed = window.confirm(
+        `Offload documents for ${applicant.full_name}?\n\n` +
+        `This will archive their documents to OneDrive and ` +
+        `permanently delete the originals from the portal, ` +
+        `once the archive has been verified.\n\n` +
+        `This action cannot be undone.`
+    )
+
+    if (!confirmed) return
+
     // multiple offloads at the same time could be a bit dangerous, so we should
     // probably wait for the current one to finish
     if (offloadingRef.current) return
@@ -3264,7 +3274,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   >
                     {isOffloading
                       ? <><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.primary}`, borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} /> Offloading...</>
-                      : 'OFFLOAD.'
+                      : 'OFFLOAD'
                     }
                   </button>
                 </div>
