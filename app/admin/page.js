@@ -659,6 +659,16 @@ export default function AdminPage() {
   const [showWaitlist, setShowWaitlist]             = useState(false)
   const [scheduleDate, setScheduleDate]             = useState('')
   const [dateCoverShifts, setDateCoverShifts]       = useState([])
+  const [trainingMenuOpenId, setTrainingMenuOpenId] = useState(null)
+  const trainingMenuRef = useRef(null)
+  useEffect(() => {
+    if (!trainingMenuOpenId) return
+    const onDown = (e) => {
+      if (trainingMenuRef.current && !trainingMenuRef.current.contains(e.target)) setTrainingMenuOpenId(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [trainingMenuOpenId])
 
   // ── Volunteer tab state ─────────────────────────────────────────────────────
   const [selectedVolunteer, setSelectedVolunteer]       = useState(null)
@@ -2355,7 +2365,7 @@ export default function AdminPage() {
                                 const getInTraining = (entry) => {
                                   const wlEntry = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
                                   const trainedRoles = wlEntry?.preferred_roles || []
-                                  return !(trainedRoles.length === 0 || trainedRoles.includes(entry.role))
+                                  return !trainedRoles.includes(entry.role)
                                 }
                                 return (getInTraining(b) ? 1 : 0) - (getInTraining(a) ? 1 : 0)
                               }).map(entry => {
@@ -2364,7 +2374,7 @@ export default function AdminPage() {
                                 const coverName = coverShift ? coverShift.profiles?.full_name : null
                                 const wlEntry = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
                                 const trainedRoles = wlEntry?.preferred_roles || []
-                                const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry.role))
+                                const inTraining = !trainedRoles.includes(entry.role)
                                 return (
                                   <div key={entry.id} style={{ width: '100%', padding: '0.9rem 1rem', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 }}>
@@ -2381,62 +2391,138 @@ export default function AdminPage() {
                                       {coverName && <div style={{ fontSize: '0.8rem', color: '#60a5fa' }}>Cover: {coverName}</div>}
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                                        <select
-                                          value={inTraining ? 'training' : 'trained'}
-                                          onChange={async (e) => {
-                                            const val = e.target.value
-                                            try {
-                                              if (val === 'trained') {
-                                                const current = wlEntry?.preferred_roles || []
-                                                if (!current.includes(entry.role)) {
-                                                  const newRoles = [...current, entry.role]
-                                                  if (wlEntry) {
-                                                    const { error } = await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
-                                                    if (error) { showMessage(error.message, 'error'); return }
-                                                    setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
-                                                  } else {
-                                                    const { data, error } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: newRoles }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
-                                                    if (error) { showMessage(error.message, 'error'); return }
-                                                    if (data) setWaitlist(prev => [...prev, data])
-                                                  }
-                                                }
-                                              } else {
-                                                const current = wlEntry?.preferred_roles || []
-                                                if (current.includes(entry.role)) {
-                                                  const newRoles = current.filter(r => r !== entry.role)
-                                                  if (wlEntry) {
-                                                    const { error } = await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
-                                                    if (error) { showMessage(error.message, 'error'); return }
-                                                    setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
-                                                  }
-                                                } else if (!wlEntry) {
-                                                  // Create entry with this role NOT trained
-                                                  const { data, error } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: [] }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
-                                                  if (error) { showMessage(error.message, 'error'); return }
-                                                  if (data) setWaitlist(prev => [...prev, data])
-                                                }
-                                              }
-                                              showMessage('Training status updated', 'success')
-                                            } catch (err) {
-                                              showMessage(err.message || 'Failed to update', 'error')
-                                            }
+                                      <div ref={trainingMenuOpenId === entry.id ? trainingMenuRef : null} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                        <button
+                                          type="button"
+                                          aria-haspopup="listbox"
+                                          aria-expanded={trainingMenuOpenId === entry.id}
+                                          onClick={() => setTrainingMenuOpenId(o => o === entry.id ? null : entry.id)}
+                                          style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.4rem',
+                                            padding: '0.4rem 0.6rem',
+                                            background: inTraining ? 'rgba(239,68,68,0.15)' : '#fff',
+                                            border: inTraining ? '1px solid rgba(239,68,68,0.5)' : '1px solid var(--border)',
+                                            borderRadius: '7px',
+                                            color: inTraining ? '#ef4444' : 'var(--text)',
+                                            fontSize: '0.85rem',
+                                            fontWeight: 500,
+                                            cursor: 'pointer',
+                                            fontFamily: 'DM Sans, sans-serif',
                                           }}
-                                          style={{ ...inputStyle, width: 'auto', padding: '0.4rem 1.8rem 0.4rem 0.7rem', fontSize: '0.85rem', appearance: 'none', WebkitAppearance: 'none', background: inTraining ? 'rgba(239,68,68,0.15)' : 'var(--bg)', color: inTraining ? '#ef4444' : 'var(--text)', border: inTraining ? '1px solid rgba(239,68,68,0.5)' : '1px solid var(--border)' }}
                                         >
-                                          <option value="trained">Trained</option>
-                                          <option value="training">Training</option>
-                                        </select>
-                                        <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '0.6rem', pointerEvents: 'none', color: inTraining ? '#ef4444' : 'var(--muted)' }}>
-                                          <polyline points="6 8 10 12 14 8" />
-                                        </svg>
+                                          <span>{inTraining ? 'Training' : 'Trained'}</span>
+                                          <svg
+                                            width="11"
+                                            height="11"
+                                            viewBox="0 0 16 16"
+                                            fill="currentColor"
+                                            stroke="currentColor"
+                                            strokeWidth="1.6"
+                                            strokeLinejoin="round"
+                                            strokeLinecap="round"
+                                            aria-hidden="true"
+                                            style={{ flexShrink: 0, transform: trainingMenuOpenId === entry.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}
+                                          >
+                                            <polygon points="3.5,5.5 12.5,5.5 8,11.5" />
+                                          </svg>
+                                        </button>
+                                        {trainingMenuOpenId === entry.id && (
+                                          <div
+                                            role="listbox"
+                                            style={{
+                                              position: 'absolute',
+                                              top: 'calc(100% + 0.35rem)',
+                                              left: 0,
+                                              zIndex: 60,
+                                              minWidth: '100%',
+                                              background: 'var(--surface)',
+                                              border: '1px solid var(--border)',
+                                              borderRadius: '8px',
+                                              boxShadow: '0 8px 24px rgba(2,65,107,0.12)',
+                                              padding: '0.25rem',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              gap: '0.15rem',
+                                              whiteSpace: 'nowrap',
+                                            }}
+                                          >
+                                            {[
+                                              { value: 'trained', label: 'Trained' },
+                                              { value: 'training', label: 'Training' },
+                                            ].map(opt => {
+                                              const selected = (opt.value === 'training') === inTraining
+                                              return (
+                                                <button
+                                                  key={opt.value}
+                                                  type="button"
+                                                  role="option"
+                                                  aria-selected={selected}
+                                                  onClick={async () => {
+                                                    const val = opt.value
+                                                    try {
+                                                      const current = wlEntry?.preferred_roles || []
+                                                      if (val === 'trained') {
+                                                        if (!current.includes(entry.role)) {
+                                                          const newRoles = [...current, entry.role]
+                                                          if (wlEntry) {
+                                                            const { error } = await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
+                                                            if (error) { showMessage(error.message, 'error'); return }
+                                                            setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
+                                                          } else {
+                                                            const { data, error } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: newRoles }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
+                                                            if (error) { showMessage(error.message, 'error'); return }
+                                                            if (data) setWaitlist(prev => [...prev, data])
+                                                          }
+                                                        }
+                                                      } else {
+                                                        if (current.includes(entry.role)) {
+                                                          const newRoles = current.filter(r => r !== entry.role)
+                                                          if (wlEntry) {
+                                                            const { error } = await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
+                                                            if (error) { showMessage(error.message, 'error'); return }
+                                                            setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
+                                                          } else {
+                                                            const { data, error } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: newRoles }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
+                                                            if (error) { showMessage(error.message, 'error'); return }
+                                                            if (data) setWaitlist(prev => [...prev, data])
+                                                          }
+                                                        }
+                                                      }
+                                                      showMessage('Training status updated', 'success')
+                                                    } catch (err) {
+                                                      showMessage(err.message || 'Failed to update', 'error')
+                                                    }
+                                                    setTrainingMenuOpenId(null)
+                                                  }}
+                                                  style={{
+                                                    padding: '0.3rem 0.5rem',
+                                                    background: selected ? 'rgba(239,68,68,0.08)' : 'transparent',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    color: opt.value === 'training' ? '#ef4444' : 'var(--text)',
+                                                    fontSize: '0.85rem',
+                                                    fontWeight: selected ? 700 : 500,
+                                                    cursor: 'pointer',
+                                                    textAlign: 'left',
+                                                    whiteSpace: 'nowrap',
+                                                    fontFamily: 'DM Sans, sans-serif',
+                                                  }}
+                                                >
+                                                  {opt.label}
+                                                </button>
+                                              )
+                                            })}
+                                          </div>
+                                        )}
                                       </div>
                                       <button
                                         onClick={async () => {
                                           const ok = await confirmAction({
-                                            label: 'Remove this volunteer from this shift?',
-                                            confirmText: 'Remove',
-                                            cancelText: 'Cancel',
+                                            label: 'Remove volunteer from shift?',
+                                            confirmText: 'Yes',
+                                            cancelText: 'No',
                                             danger: true,
                                           })
                                           if (!ok) return

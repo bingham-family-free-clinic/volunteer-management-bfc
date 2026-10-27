@@ -80,7 +80,7 @@ export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, 
       if (!vol) return null
       const wlEntry = waitlist?.find(w => w.volunteer_id === id)
       const trainedRoles = wlEntry?.preferred_roles || []
-      const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry?.role))
+      const inTraining = !trainedRoles.includes(entry?.role)
       return { ...vol, role: entry?.role || '—', notes: entry?.notes || null, training_status: inTraining ? 'training' : 'trained' }
     })
     .filter(Boolean)
@@ -162,7 +162,7 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
               const entry = schedule?.find(x => x.volunteer_id === id)
               const wlEntry = waitlist?.find(w => w.volunteer_id === id)
               const trainedRoles = wlEntry?.preferred_roles || []
-              const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry?.role))
+              const inTraining = !trainedRoles.includes(entry?.role)
               return (
                 <div
                   key={s.id}
