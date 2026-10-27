@@ -406,8 +406,8 @@ export default function VolunteerPositions({
   supabase,
   // Called when a role is added/removed. Both may be async and receive
   // (volunteer, role, nextRoles). Return false (or throw) to roll back the UI.
-  onAddRole,
-  onRemoveRole,
+  onNewAddRole,
+  onNewRemoveRole,
   title = 'Volunteer Positions',
   subtitle = 'Volunteers grouped by their assigned position.',
   loading = false,
@@ -427,12 +427,34 @@ export default function VolunteerPositions({
   const [roleErrors, setRoleErrors] = useState({})
   const [loadError, setLoadError] = useState(null)
 
+ async function setRoleOverridesFromSupabase(){
+  const {data, error} = await supabase
+        .from('person_role_qualifications')
+        .select()
+  if(error){
+   setLoadError(error.message)
+   return;
+  } else {
+   setLoadError(null)
+  }
+  const savedOverrides = {}
+  for(const row of data){
+   if(row.qualification != 'Trained') continue;
+   if(!savedOverrides[row.person_id]){
+    savedOverrides[row.person_id] = []
+   }
+   savedOverrides[row.person_id].push(row.role)
+  }
+  setRoleOverrides(savedOverrides)
+ }
+
   async function pullVolunteersFromSupabase(){
     const {data, error} = await supabase
           .from('profiles')
           .select()
     if(error){
       setLoadError(error.message)
+      return;
     } else {
       setLoadError(null)
       setVolunteers(data || [])
@@ -440,7 +462,9 @@ export default function VolunteerPositions({
   }
 
   useEffect(() => {
-    if (supabase) pullVolunteersFromSupabase()
+   if (!supabase) return;
+   pullVolunteersFromSupabase()
+   setRoleOverridesFromSupabase()
   }, [supabase]);
 
   // Role options = configured positions plus any already assigned to a
@@ -498,6 +522,59 @@ export default function VolunteerPositions({
       }))
       .filter(group => showEmptyNow || group.volunteers.length > 0)
   }, [volunteers, positions, filterSearch, filterAffiliation, showInactive, showEmpty, roleOverrides])
+
+  // Delete and replace for now when a role updates
+  async function onRemoveRole(v,r,nr){
+    //console.log("REMOVE ",v,r,nr);
+    const {error: deleteError} = await supabase
+          .from('person_role_qualifications')
+          .delete()
+          .eq('person_id', v.id)
+    if(deleteError){
+      console.warn('SUPABASE ERROR ', deleteError);
+      return;
+    }
+
+    const newRows = nr.map((rn) => {return {person_id: v.id, role: rn, qualification: 'Trained'}})
+
+    const {error: insertError} = await supabase
+          .from('person_role_qualifications')
+          .insert(newRows)
+    onNewRemoveRole && onNewRemoveRole(v,r,nr);
+
+    if(insertError){
+      console.warn('SUPABASE ERROR ', insertError);
+      return;
+    }
+
+   console.log(v,r,nr)
+  }
+  async function onAddRole(v,r,nr){
+    const {error: deleteError} = await supabase
+          .from('person_role_qualifications')
+          .delete()
+          .eq('person_id', v.id)
+    if(deleteError){
+      console.warn('SUPABASE ERROR ', deleteError);
+      return;
+    }
+
+    const newRows = nr.map((rn) => {return {person_id: v.id, role: rn, qualification: 'Trained'}})
+
+    const {error: insertError} = await supabase
+          .from('person_role_qualifications')
+          .insert(newRows)
+    onNewRemoveRole && onNewRemoveRole(v,r,nr);
+
+    if(insertError){
+      console.warn('SUPABASE ERROR ', insertError);
+      return;
+    }
+
+   onNewAddRole && onNewAddRole(v,r,nr);
+
+   console.log(v,r,nr)
+  }
 
   // A volunteer can appear under more than one role, so count unique people.
   const totalVolunteers = useMemo(() => {
