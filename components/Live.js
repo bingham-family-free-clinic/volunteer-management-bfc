@@ -156,39 +156,37 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No one is currently clocked in.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {activeShifts.map(s => (
-              {(() => {
-                const id = s.volunteer_id ?? s.profiles?.id
-                const full = volunteers.find(v => v.id === id)
-                const entry = schedule?.find(x => x.volunteer_id === id)
-                const wlEntry = waitlist?.find(w => w.volunteer_id === id)
-                const trainedRoles = wlEntry?.preferred_roles || []
-                const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry?.role))
-                return (
-              <div
-                key={s.id}
-                onClick={() => { if (full) onOpenVolunteer(full) }}
-                style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '0.75rem 1rem',
-                  background: inTraining ? 'rgba(239,68,68,0.12)' : 'rgba(2,65,107,0.05)', borderRadius: '8px',
-                  border: `1px solid ${inTraining ? 'rgba(239,68,68,0.5)' : 'var(--accent)'}`, cursor: 'pointer',
-                }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: inTraining ? '#ef4444' : 'var(--accent)', boxShadow: inTraining ? '0 0 6px rgba(239,68,68,0.6)' : '0 0 6px var(--accent)' }} />
-                  <span style={{ fontWeight: 500 }}>{s.profiles?.full_name}</span>
+            {activeShifts.map(s => {
+              const id = s.volunteer_id ?? s.profiles?.id
+              const full = volunteers.find(v => v.id === id)
+              const entry = schedule?.find(x => x.volunteer_id === id)
+              const wlEntry = waitlist?.find(w => w.volunteer_id === id)
+              const trainedRoles = wlEntry?.preferred_roles || []
+              const inTraining = !(trainedRoles.length === 0 || trainedRoles.includes(entry?.role))
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => { if (full) onOpenVolunteer(full) }}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '0.75rem 1rem',
+                    background: inTraining ? 'rgba(239,68,68,0.12)' : 'rgba(2,65,107,0.05)', borderRadius: '8px',
+                    border: `1px solid ${inTraining ? 'rgba(239,68,68,0.5)' : 'var(--accent)'}`, cursor: 'pointer',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: inTraining ? '#ef4444' : 'var(--accent)', boxShadow: inTraining ? '0 0 6px rgba(239,68,68,0.6)' : '0 0 6px var(--accent)' }} />
+                    <span style={{ fontWeight: 500 }}>{s.profiles?.full_name}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    {inTraining && <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.45rem', borderRadius: '100px', background: 'rgba(239,68,68,0.2)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.5)', fontWeight: 600 }}>In Training</span>}
+                    <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>{full?.role || s.role || ''}{(full?.role || s.role) ? ' · ' : ''}Since {formatMountain(s.clock_in)}</span>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  {inTraining && <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.45rem', borderRadius: '100px', background: 'rgba(239,68,68,0.2)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.5)', fontWeight: 600 }}>In Training</span>}
-                  <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>{full?.role || s.role || ''}{(full?.role || s.role) ? ' · ' : ''}Since {formatMountain(s.clock_in)}</span>
-                </div>
-              </div>
-                )
-              })()}
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
