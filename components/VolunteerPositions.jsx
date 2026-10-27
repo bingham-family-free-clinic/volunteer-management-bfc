@@ -409,7 +409,7 @@ export default function VolunteerPositions({
   onNewAddRole,
   onNewRemoveRole,
   title = 'Volunteer Positions',
-  subtitle = 'Volunteers grouped by their assigned position.',
+  subtitle = 'Volunteers grouped by the positions they are trained in.',
   loading = false,
   showEmptyPositions = false,
 }) {
