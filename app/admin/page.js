@@ -2324,7 +2324,7 @@ export default function AdminPage() {
                     }
                   }} style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOpen ? 'var(--surface)' : 'rgba(2,65,107,0.12)', color: isOpen ? 'var(--muted)' : 'var(--accent)', border: `1px solid ${isOpen ? 'var(--border)' : 'var(--accent)'}`, transition: 'all 0.2s ease' }}>{isOpen ? 'Cancel' : 'Edit'}</button>
                       </div>
-                      {entries.length > 0 && (
+                      {entries.length > 0 && !isOpen && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: isOpen ? '0.75rem' : 0 }}>
                           {entries.map(entry => {
                             const approvedCallout = callouts.find(c => c.volunteer_id === entry.volunteer_id && c.callout_date === scheduleDate && c.shift_time === scheduleShift && c.status === 'approved')
@@ -2386,32 +2386,41 @@ export default function AdminPage() {
                                           value={inTraining ? 'training' : 'trained'}
                                           onChange={async (e) => {
                                             const val = e.target.value
-                                            if (val === 'trained') {
-                                              // Add this role to trained roles
-                                              const current = wlEntry?.preferred_roles || []
-                                              if (!current.includes(entry.role)) {
-                                                const newRoles = [...current, entry.role]
-                                                if (wlEntry) {
-                                                  await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
-                                                  setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
-                                                } else {
-                                                  // Create waitlist entry if doesn't exist
-                                                  const { data } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: newRoles }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
+                                            try {
+                                              if (val === 'trained') {
+                                                const current = wlEntry?.preferred_roles || []
+                                                if (!current.includes(entry.role)) {
+                                                  const newRoles = [...current, entry.role]
+                                                  if (wlEntry) {
+                                                    const { error } = await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
+                                                    if (error) { showMessage(error.message, 'error'); return }
+                                                    setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
+                                                  } else {
+                                                    const { data, error } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: newRoles }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
+                                                    if (error) { showMessage(error.message, 'error'); return }
+                                                    if (data) setWaitlist(prev => [...prev, data])
+                                                  }
+                                                }
+                                              } else {
+                                                const current = wlEntry?.preferred_roles || []
+                                                if (current.includes(entry.role)) {
+                                                  const newRoles = current.filter(r => r !== entry.role)
+                                                  if (wlEntry) {
+                                                    const { error } = await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
+                                                    if (error) { showMessage(error.message, 'error'); return }
+                                                    setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
+                                                  }
+                                                } else if (!wlEntry) {
+                                                  // Create entry with this role NOT trained
+                                                  const { data, error } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: [] }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
+                                                  if (error) { showMessage(error.message, 'error'); return }
                                                   if (data) setWaitlist(prev => [...prev, data])
                                                 }
                                               }
-                                            } else {
-                                              // Mark as training - remove from trained roles if present
-                                              const current = wlEntry?.preferred_roles || []
-                                              if (current.includes(entry.role)) {
-                                                const newRoles = current.filter(r => r !== entry.role)
-                                                if (wlEntry) {
-                                                  await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
-                                                  setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
-                                                }
-                                              }
+                                              showMessage('Training status updated', 'success')
+                                            } catch (err) {
+                                              showMessage(err.message || 'Failed to update', 'error')
                                             }
-                                            showMessage('Training status updated', 'success')
                                           }}
                                           style={{ ...inputStyle, width: 'auto', padding: '0.4rem 1.8rem 0.4rem 0.7rem', fontSize: '0.85rem', appearance: 'none', WebkitAppearance: 'none', background: inTraining ? 'rgba(239,68,68,0.15)' : 'var(--bg)', color: inTraining ? '#ef4444' : 'var(--text)', border: inTraining ? '1px solid rgba(239,68,68,0.5)' : '1px solid var(--border)' }}
                                         >
