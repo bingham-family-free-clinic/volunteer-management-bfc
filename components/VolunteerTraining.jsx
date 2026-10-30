@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useEffect } from 'react'
-import { ROLES, AFFILIATION_LABELS } from '../lib/constants'
+import { ROLES, AFFILIATION_LABELS, TRAINING_STATUSES } from '../lib/constants'
 
 // ── Style tokens (mirrors the admin Volunteers tab) ───────────────────────────
 const card       = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
@@ -65,7 +65,7 @@ function volunteerRoleList(volunteer, roleOverrides = {}) {
     : Array.isArray(volunteer?.positions)
     ? volunteer.positions
     : volunteer?.default_role
-    ? [volunteer.default_role]
+    ? ([volunteer.default_role].map(role => ({role: role, status: 'Trained'})))
     : []
   return Array.from(new Set(raw.filter(Boolean)))
 }
@@ -73,6 +73,7 @@ function volunteerRoleList(volunteer, roleOverrides = {}) {
 // ── One volunteer row, expandable into role management ───────────────────────
 function VolunteerRow({
   volunteer,
+  // Changed format: '' -> {role: '', status ''}
   roles,
   allRoles,
   expanded,
@@ -84,15 +85,27 @@ function VolunteerRow({
   error,
 }) {
   const [selectedRole, setSelectedRole] = useState('')
+  const [selectedRoleStatus, setSelectedRoleStatus] = useState('')
   const isInactive = (volunteer.status ?? 'active') === 'inactive'
   const selectable = typeof onSelectVolunteer === 'function'
-  const availableRoles = allRoles.filter(role => !roles.includes(role))
+  const availableRoles = allRoles.filter((role) => {
+    return !roles.some(potRole => (potRole.role == role))
+  })
+  const availableStatuses = TRAINING_STATUSES
 
   async function handleAddRole() {
-    if (!selectedRole || isPending) return
-    const added = await onAddRole(volunteer, selectedRole)
-    if (added) setSelectedRole('')
+    if (!selectedRole || !selectedRoleStatus || isPending) return
+    const added = await onAddRole(volunteer, selectedRole, selectedRoleStatus)
+    if (added){ setSelectedRole(''); setSelectedRoleStatus(''); }
   }
+
+  async function handleRemoveRole (role, status) {
+    await onRemoveRole(volunteer, role, status)
+  }
+
+  const trainerRoles = roles.filter(roleInfo => roleInfo.status == 'Trainer')
+  const trainedRoles = roles.filter(roleInfo => roleInfo.status == 'Trained')
+  const trainingRoles = roles.filter(roleInfo => roleInfo.status == 'Training')
 
   return (
     <div
@@ -185,20 +198,19 @@ function VolunteerRow({
 
       {expanded && (
         <div style={{ padding: '0.85rem', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.55rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.55rem', marginTop: '0.55rem' }}>
             <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-              Trained in
+              Authorized to train
             </p>
             {isPending && <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Saving…</span>}
           </div>
-
-          {roles.length === 0 ? (
+          {trainerRoles.length === 0 ? (
             <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.82rem' }}>No roles assigned.</p>
           ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-              {roles.map(role => (
+              {trainerRoles.map(roleInfo => (
                 <span
-                  key={role}
+                  key={roleInfo.role}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -212,12 +224,62 @@ function VolunteerRow({
                     fontWeight: 500,
                   }}
                 >
-                  {role}
+                  {roleInfo.role}
                   <button
                     type="button"
-                    onClick={() => onRemoveRole(volunteer, role)}
+                    onClick={() => handleRemoveRole(roleInfo.role, roleInfo.status)}
                     disabled={isPending}
-                    aria-label={`Remove ${role} from ${volunteer.full_name || 'volunteer'}`}
+                    aria-label={`Remove ${roleInfo.role} from ${volunteer.full_name || 'volunteer'}`}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'inherit',
+                      cursor: isPending ? 'not-allowed' : 'pointer',
+                      fontSize: '0.72rem',
+                      lineHeight: 1,
+                      opacity: isPending ? 0.4 : 0.75,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.55rem', marginTop: '0.55rem' }}>
+            <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+              Trained in
+            </p>
+            {isPending && <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Saving…</span>}
+          </div>
+
+          {trainedRoles.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.82rem' }}>No roles assigned.</p>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+              {trainedRoles.map(roleInfo => (
+                <span
+                  key={roleInfo.role}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0.3rem 0.55rem',
+                    borderRadius: '100px',
+                    border: '1px solid rgba(2,65,107,0.3)',
+                    background: 'rgba(2,65,107,0.08)',
+                    color: 'var(--accent)',
+                    fontSize: '0.78rem',
+                    fontWeight: 500,
+                  }}
+                >
+                  {roleInfo.role}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveRole(roleInfo.role, roleInfo.status)}
+                    disabled={isPending}
+                    aria-label={`Remove ${roleInfo.role} from ${volunteer.full_name || 'volunteer'}`}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -236,6 +298,58 @@ function VolunteerRow({
             </div>
           )}
 
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.55rem', marginTop: '0.55rem' }}>
+            <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+              In training for
+            </p>
+            {isPending && <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Saving…</span>}
+          </div>
+
+          {trainingRoles.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.82rem' }}>No roles assigned.</p>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+              {trainingRoles.map(roleInfo => (
+                <span
+                  key={roleInfo.role}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0.3rem 0.55rem',
+                    borderRadius: '100px',
+                    border: '1px solid rgba(2,65,107,0.3)',
+                    background: 'rgba(2,65,107,0.08)',
+                    color: 'var(--accent)',
+                    fontSize: '0.78rem',
+                    fontWeight: 500,
+                  }}
+                >
+                  {roleInfo.role}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveRole(roleInfo.role, roleInfo.status)}
+                    disabled={isPending}
+                    aria-label={`Remove ${roleInfo.role} from ${volunteer.full_name || 'volunteer'}`}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'inherit',
+                      cursor: isPending ? 'not-allowed' : 'pointer',
+                      fontSize: '0.72rem',
+                      lineHeight: 1,
+                      opacity: isPending ? 0.4 : 0.75,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
             <select
               aria-label={`Add a role for ${volunteer.full_name || 'volunteer'}`}
@@ -244,9 +358,21 @@ function VolunteerRow({
               disabled={isPending || availableRoles.length === 0}
               style={{ ...inputStyle, flex: 1, minWidth: '180px', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
             >
-              <option value="">{availableRoles.length === 0 ? 'All roles assigned' : 'Select a role to add…'}</option>
+              <option key="" value="">{availableRoles.length === 0 ? 'All roles assigned' : `Select a role to add…`}</option>
               {availableRoles.map(role => (
                 <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
+            <select
+              aria-label={`Set status in ${selectedRole || 'this role'} for ${volunteer.full_name || 'volunteer'}`}
+              value={selectedRoleStatus}
+              onChange={e => setSelectedRoleStatus(e.target.value)}
+              disabled={isPending || availableRoles.length === 0}
+              style={{ ...inputStyle, flex: 1, minWidth: '180px', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
+            >
+              <option value="">{availableRoles.length === 0 ? 'No role statuses' : 'Select a role status…'}</option>
+              {availableStatuses.map(status => (
+                <option key={status} value={status}>{status}</option>
               ))}
             </select>
             <button
@@ -364,7 +490,7 @@ function PositionSection({
         <div style={{ padding: '0.75rem 1rem 1rem', background: 'var(--bg)', borderTop: '1px solid var(--border)' }}>
           {volunteers.length === 0 ? (
             <p style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.85rem' }}>
-              No volunteers assigned to this position.
+              No volunteers trained in this position.
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -399,7 +525,7 @@ function PositionSection({
 // one expandable section per position. Each volunteer row expands into a small
 // role editor; persistence is delegated to the optional onAddRole/onRemoveRole
 // callbacks supplied by the parent.
-export default function VolunteerPositions({
+export default function VolunteerTraining({
 //  volunteers = [],
   positions = ROLES,
   onSelectVolunteer,
@@ -408,7 +534,7 @@ export default function VolunteerPositions({
   // (volunteer, role, nextRoles). Return false (or throw) to roll back the UI.
   onNewAddRole,
   onNewRemoveRole,
-  title = 'Volunteer Positions',
+  title = 'Volunteer Training',
   subtitle = 'Volunteers grouped by the positions they are trained in.',
   loading = false,
   showEmptyPositions = false,
@@ -427,26 +553,25 @@ export default function VolunteerPositions({
   const [roleErrors, setRoleErrors] = useState({})
   const [loadError, setLoadError] = useState(null)
 
- async function setRoleOverridesFromSupabase(){
-  const {data, error} = await supabase
-        .from('person_role_qualifications')
-        .select()
-  if(error){
-   setLoadError(error.message)
-   return;
-  } else {
-   setLoadError(null)
+  async function setRoleOverridesFromSupabase(){
+    const {data, error} = await supabase
+          .from('person_role_qualifications')
+          .select()
+    if(error){
+      setLoadError(error.message)
+      return;
+    } else {
+      setLoadError(null)
+    }
+    const savedOverrides = {}
+    for(const row of data){
+      if(!savedOverrides[row.person_id]){
+        savedOverrides[row.person_id] = []
+      }
+      savedOverrides[row.person_id].push({role: row.role, status: row.qualification})
+    }
+    setRoleOverrides(savedOverrides)
   }
-  const savedOverrides = {}
-  for(const row of data){
-   if(row.qualification != 'Trained') continue;
-   if(!savedOverrides[row.person_id]){
-    savedOverrides[row.person_id] = []
-   }
-   savedOverrides[row.person_id].push(row.role)
-  }
-  setRoleOverrides(savedOverrides)
- }
 
   async function pullVolunteersFromSupabase(){
     const {data, error} = await supabase
@@ -471,7 +596,7 @@ export default function VolunteerPositions({
   // volunteer, so legacy/unknown roles remain removable.
   const allRoles = useMemo(() => {
     const configured = (positions || []).map(positionName).filter(Boolean)
-    const assigned = (volunteers || []).flatMap(v => volunteerRoleList(v, roleOverrides))
+    const assigned = (volunteers || []).flatMap(v => (volunteerRoleList(v, roleOverrides).map(roleInfo => roleInfo.role)))
     return Array.from(new Set([...configured, ...assigned]))
   }, [positions, volunteers, roleOverrides])
 
@@ -502,16 +627,16 @@ export default function VolunteerPositions({
         return
       }
 
-      roles.forEach(name => {
-        if (!groups.has(name)) groups.set(name, [])
-        groups.get(name).push(v)
+      roles.forEach(roleInfo => {
+        if (!groups.has(roleInfo.role)) groups.set(roleInfo.role, [])
+        groups.get(roleInfo.role).push(v)
       })
     })
 
     // Only surface "Unassigned" when someone actually belongs there.
-    if (!groups.has('Unassigned') || groups.get('Unassigned').length === 0) {
-      groups.delete('Unassigned')
-    }
+    /*    if (!groups.some(info => info.role == 'Unassigned')) {
+      groups.delete(groups.find(info => info.role == 'Unassigned'))
+    }*/
 
     const showEmptyNow = showEmpty && !query
 
@@ -524,56 +649,52 @@ export default function VolunteerPositions({
   }, [volunteers, positions, filterSearch, filterAffiliation, showInactive, showEmpty, roleOverrides])
 
   // Delete and replace for now when a role updates
-  async function onRemoveRole(v,r,nr){
-    //console.log("REMOVE ",v,r,nr);
+  async function onRemoveRole(volunteer,roleInfo,newRoles){
     const {error: deleteError} = await supabase
           .from('person_role_qualifications')
           .delete()
-          .eq('person_id', v.id)
+          .eq('person_id', volunteer.id)
     if(deleteError){
       console.warn('SUPABASE ERROR ', deleteError);
-      return;
+      return false;
     }
 
-    const newRows = nr.map((rn) => {return {person_id: v.id, role: rn, qualification: 'Trained'}})
+    const newRows = newRoles.map((info) => {return {person_id: volunteer.id, role: info.role, qualification: info.status}})
 
     const {error: insertError} = await supabase
           .from('person_role_qualifications')
           .insert(newRows)
-    onNewRemoveRole && onNewRemoveRole(v,r,nr);
 
     if(insertError){
       console.warn('SUPABASE ERROR ', insertError);
-      return;
+      return false;
     }
 
-   console.log(v,r,nr)
+    onNewRemoveRole && onNewRemoveRole(volunteer,role);
+
   }
-  async function onAddRole(v,r,nr){
+  async function onAddRole(volunteer,roleInfo,newRoles){
     const {error: deleteError} = await supabase
           .from('person_role_qualifications')
           .delete()
-          .eq('person_id', v.id)
+          .eq('person_id', volunteer.id)
     if(deleteError){
       console.warn('SUPABASE ERROR ', deleteError);
-      return;
+      return false;
     }
 
-    const newRows = nr.map((rn) => {return {person_id: v.id, role: rn, qualification: 'Trained'}})
+    const newRows = newRoles.map((curRole) => {return {person_id: volunteer.id, role: curRole.role, qualification: curRole.status}})
 
     const {error: insertError} = await supabase
           .from('person_role_qualifications')
           .insert(newRows)
-    onNewRemoveRole && onNewRemoveRole(v,r,nr);
 
     if(insertError){
       console.warn('SUPABASE ERROR ', insertError);
-      return;
+      return false;
     }
 
-   onNewAddRole && onNewAddRole(v,r,nr);
-
-   console.log(v,r,nr)
+    onNewAddRole && onNewAddRole(volunteer,roleInfo);
   }
 
   // A volunteer can appear under more than one role, so count unique people.
@@ -619,20 +740,29 @@ export default function VolunteerPositions({
     setRoleErrors(prev => (prev[volunteerId] ? { ...prev, [volunteerId]: null } : prev))
   }
 
-  async function handleAddRole(volunteer, role) {
+  async function handleAddRole(volunteer, role, roleStatus) {
     if (!volunteer || !role) return false
 
     const currentRoles = volunteerRoleList(volunteer, roleOverrides)
-    if (currentRoles.includes(role)) return true
+    if (currentRoles.some((roleInfo) => (roleInfo.role == role
+                                         && roleInfo.status == roleStatus))) return true
 
-    const nextRoles = [...currentRoles, role]
+    const nextRoles = [...currentRoles]
+
+    const foundRoleRef = currentRoles.find((roleInfo) => (roleInfo.role == role))
+    if (foundRoleRef){
+      foundRoleRef.status = roleStatus;
+    } else {
+      nextRoles.push({role: role, status: roleStatus})
+    }
+
     clearRoleError(volunteer.id)
-    setPendingRole({ volunteerId: volunteer.id, action: 'add', role })
+    setPendingRole({ volunteerId: volunteer.id, role })
     setRoleOverrides(prev => ({ ...prev, [volunteer.id]: nextRoles }))
 
     try {
       if (typeof onAddRole === 'function') {
-        const result = await onAddRole(volunteer, role, nextRoles)
+        const result = await onAddRole(volunteer, {role: role, status: roleStatus}, nextRoles)
         if (result === false) throw new Error(`Could not add ${role}.`)
       }
       return true
@@ -648,20 +778,20 @@ export default function VolunteerPositions({
     }
   }
 
-  async function handleRemoveRole(volunteer, role) {
+  async function handleRemoveRole(volunteer, role, status) {
     if (!volunteer || !role) return false
 
     const currentRoles = volunteerRoleList(volunteer, roleOverrides)
-    if (!currentRoles.includes(role)) return true
+    //if (!currentRoles.some(roleDesc => (roleDesc.role == role))) return true
 
-    const nextRoles = currentRoles.filter(existing => existing !== role)
+    const nextRoles = currentRoles.filter(existing => existing.role !== role)
     clearRoleError(volunteer.id)
-    setPendingRole({ volunteerId: volunteer.id, action: 'remove', role })
+    setPendingRole({ volunteerId: volunteer.id, role })
     setRoleOverrides(prev => ({ ...prev, [volunteer.id]: nextRoles }))
 
     try {
       if (typeof onRemoveRole === 'function') {
-        const result = await onRemoveRole(volunteer, role, nextRoles)
+        const result = await onRemoveRole(volunteer, {role: role}, nextRoles)
         if (result === false) throw new Error(`Could not remove ${role}.`)
       }
       return true
