@@ -10,7 +10,7 @@ import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotification
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
 import { MessageTab } from '../../components/MessageTab'
 import VolunteerTasks from '../../components/VolunteerTasks'
-import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
+import BiannualSurvey, { isSurveyWeek, isSurveyWeekKey } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
 import { useConfirm } from '../../lib/ConfirmDialog'
@@ -665,6 +665,7 @@ function VolunteerPageInner() {
     if (!user) return
     let cancelled = false
     async function checkTraining() {
+      if (isSurveyWeekKey(trainingWeekStart)) { setTrainingAvailable(false); return }
       const { data: trainingRow } = await supabase
         .from('weekly_trainings')
         .select('id')
@@ -672,6 +673,9 @@ function VolunteerPageInner() {
         .maybeSingle()
       if (cancelled) return
       if (!trainingRow) { setTrainingAvailable(false); return }
+      // Weekly training is not offered during the survey week, even if an
+      // admin already saved content for it.
+      if (isSurveyWeekKey(trainingWeekStart)) { setTrainingAvailable(false); return }
       setTrainingAvailable(true)
       const { data: ack } = await supabase
         .from('weekly_training_acknowledgments')

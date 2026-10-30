@@ -9,6 +9,7 @@ import {
   formatWeekRangeShort,
   TRAINING_ROLES,
 } from '../lib/trainingUtils'
+import { isSurveyWeekKey } from './BiannualSurvey'
 
 // ── Shared styles (matching admin page conventions) ───────────────────────────
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }
@@ -209,6 +210,10 @@ export default function WeeklyTraining({ supabase, profile }) {
 
   const isCurrentWeek = weekStart === currentTrainingWeekStart()
   const isNextWeek     = weekStart === nextTrainingWeekStart()
+  // Training is never published during the volunteer feedback survey week
+  const surveyBlocked      = isSurveyWeekKey(weekStart)
+  const currentIsSurvey    = isSurveyWeekKey(currentTrainingWeekStart())
+  const nextIsSurvey       = isSurveyWeekKey(nextTrainingWeekStart())
   const filledRoleCount = Object.values(roleTrainings).filter(t => t.trim()).length
 
   return (
@@ -228,7 +233,7 @@ export default function WeeklyTraining({ supabase, profile }) {
               border: isCurrentWeek ? 'none' : '1px solid var(--border)',
             }}
           >
-            This Week
+            This Week{currentIsSurvey && <span style={{ marginLeft: '0.4rem', fontSize: '0.68rem', fontWeight: 600, padding: '0.1rem 0.4rem', borderRadius: '999px', background: 'rgba(217,119,6,0.15)', color: '#b45309' }}>Survey week</span>}
           </button>
           <button
             onClick={() => setWeekStart(nextTrainingWeekStart())}
@@ -240,7 +245,7 @@ export default function WeeklyTraining({ supabase, profile }) {
               border: isNextWeek ? 'none' : '1px solid var(--border)',
             }}
           >
-            Upcoming Week
+            Upcoming Week{nextIsSurvey && <span style={{ marginLeft: '0.4rem', fontSize: '0.68rem', fontWeight: 600, padding: '0.1rem 0.4rem', borderRadius: '999px', background: 'rgba(217,119,6,0.15)', color: '#b45309' }}>Survey week</span>}
           </button>
           <input
             type="date"
@@ -255,6 +260,33 @@ export default function WeeklyTraining({ supabase, profile }) {
           <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.3rem' }}>Editing an existing training for this week.</p>
         )}
       </div>
+
+      {/* Survey-week notice */}
+      {surveyBlocked && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex', gap: '0.75rem', alignItems: 'flex-start',
+            padding: '1rem 1.1rem', borderRadius: '12px',
+            background: 'rgba(217,119,6,0.10)', border: '1px solid rgba(217,119,6,0.45)',
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b45309" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem' }}>
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <div>
+            <p style={{ fontWeight: 600, fontSize: '0.92rem', color: '#b45309', marginBottom: '0.2rem' }}>
+              This training will not be published
+            </p>
+            <p style={{ fontSize: '0.84rem', color: 'var(--text)', lineHeight: 1.5, margin: 0 }}>
+              This is the Volunteer Feedback Survey week, so volunteers will not see a weekly training for {formatWeekRangeShort(weekStart)}.
+              {recordId ? ' Anything saved here stays hidden from volunteers.' : ' You can still save content here, but it will stay hidden from volunteers.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div style={{ ...card, textAlign: 'center', color: 'var(--muted)', fontSize: '0.9rem' }}>Loading…</div>
@@ -373,7 +405,11 @@ export default function WeeklyTraining({ supabase, profile }) {
 
           {/* Error / save */}
           {error && <p style={{ fontSize: '0.85rem', color: 'var(--danger)', textAlign: 'center' }}>{error}</p>}
-          {saved && !error && <p style={{ fontSize: '0.85rem', color: 'var(--accent)', textAlign: 'center' }}>Saved — volunteers will see this when their week begins.</p>}
+          {saved && !error && (
+            surveyBlocked
+              ? <p style={{ fontSize: '0.85rem', color: '#b45309', textAlign: 'center' }}>Saved — but volunteers will not see this training because it falls in the survey week.</p>
+              : <p style={{ fontSize: '0.85rem', color: 'var(--accent)', textAlign: 'center' }}>Saved — volunteers will see this when their week begins.</p>
+          )}
 
           <button
             onClick={handleSave}
@@ -384,7 +420,11 @@ export default function WeeklyTraining({ supabase, profile }) {
               opacity: saving ? 0.7 : 1,
             }}
           >
-            {saving ? 'Saving…' : recordId ? 'Update Training' : 'Publish Training'}
+            {saving
+              ? 'Saving…'
+              : surveyBlocked
+                ? 'Save Training (Not Published — Survey Week)'
+                : recordId ? 'Update Training' : 'Publish Training'}
           </button>
         </>
       )}
