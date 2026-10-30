@@ -16,6 +16,7 @@ import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import { MessageTab } from '../../components/MessageTab'
+import VolunteerTraining from '../../components/VolunteerTraining.jsx'
 
 export const dynamic = 'force-dynamic'
 
@@ -821,6 +822,7 @@ export default function AdminPage() {
   const tabItems = isLabDirector
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+        ['volunteerTraining', 'Volunteer Training'],
       ]
     : isCredentialing
     ? [
@@ -831,21 +833,23 @@ export default function AdminPage() {
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['training', 'Weekly Training'],
+        ['training', 'Weekly Training']
       ]
     : isOSSM
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
+        ['volunteerTraining', 'Volunteer Trianing'],
       ]
     : isHR
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
+        ['volunteerTaining', 'Volunteer Training'],
       ]
     : [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
-        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'],
+        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'], ['volunteerTraining', 'Volunteer Training'],
         ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
       ]
 
@@ -2352,6 +2356,10 @@ export default function AdminPage() {
             )}
           </div>
         )}
+
+      {tab === 'volunteerTraining' && (
+              <VolunteerTraining supabase={supabase} onSelectVolunteer={(v) => openVolunteer(v)} showEmptyPositions={true}/>
+      )}
 
         {/* ── VOLUNTEERS LIST ────────────────────────────────────────────────── */}
         {tab === 'volunteers' && !selectedVolunteer && (
