@@ -833,7 +833,7 @@ export default function AdminPage() {
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['training', 'Weekly Training'], ['volunteerTraining', 'Volunteer Training'],
+        ['training', 'Weekly Training']
       ]
     : isOSSM
     ? [

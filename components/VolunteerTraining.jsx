@@ -70,6 +70,47 @@ function volunteerRoleList(volunteer, roleOverrides = {}) {
   return Array.from(new Set(raw.filter(Boolean)))
 }
 
+// ── Training-status grouping for a position ──────────────────────────────────
+// Volunteers inside a position are split into sub-sections by the status they
+// hold for that specific role (Trainer, Trained, Training, …).
+const STATUS_LABELS = {
+  Trainer: 'Trainers',
+  Trained: 'Trained',
+  Training: 'In Training',
+  'No status': 'No Status',
+}
+
+const STATUS_COLORS = {
+  Trainer: '#f59e0b',
+  Trained: '#22c55e',
+  Training: '#38bdf8',
+  'No status': '#9ca3af',
+}
+
+function statusLabel(status) {
+  return STATUS_LABELS[status] ?? status
+}
+
+function volunteerPositionStatus(volunteer, position, roleOverrides) {
+  const roleInfo = volunteerRoleList(volunteer, roleOverrides).find(info => info.role === position)
+  return roleInfo?.status || 'No status'
+}
+
+function groupByTrainingStatus(volunteers, position, roleOverrides) {
+  const buckets = new Map()
+  volunteers.forEach(volunteer => {
+    const status = volunteerPositionStatus(volunteer, position, roleOverrides)
+    if (!buckets.has(status)) buckets.set(status, [])
+    buckets.get(status).push(volunteer)
+  })
+
+  const knownOrder = [...TRAINING_STATUSES, 'No status']
+  const extraStatuses = Array.from(buckets.keys()).filter(status => !knownOrder.includes(status))
+  return [...knownOrder, ...extraStatuses]
+    .filter(status => buckets.has(status))
+    .map(status => ({ status, volunteers: buckets.get(status) }))
+}
+
 // ── One volunteer row, expandable into role management ───────────────────────
 function VolunteerRow({
   volunteer,
@@ -88,9 +129,9 @@ function VolunteerRow({
   const [selectedRoleStatus, setSelectedRoleStatus] = useState('')
   const isInactive = (volunteer.status ?? 'active') === 'inactive'
   const selectable = typeof onSelectVolunteer === 'function'
-  const availableRoles = allRoles.filter((role) => {
+  const availableRoles = allRoles/*.filter((role) => {
     return !roles.some(potRole => (potRole.role == role))
-  })
+  })*/
   const availableStatuses = TRAINING_STATUSES
 
   async function handleAddRole() {
@@ -493,25 +534,56 @@ function PositionSection({
               No volunteers trained in this position.
             </p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {volunteers.map(volunteer => {
-                const rowKey = `${name}:${volunteer.id}`
-                return (
-                  <VolunteerRow
-                    key={volunteer.id}
-                    volunteer={volunteer}
-                    roles={volunteerRoleList(volunteer, roleOverrides)}
-                    allRoles={allRoles}
-                    expanded={expandedVolunteerKeys.has(rowKey)}
-                    onToggle={() => onToggleVolunteer(rowKey)}
-                    onSelectVolunteer={onSelectVolunteer}
-                    onAddRole={onAddRole}
-                    onRemoveRole={onRemoveRole}
-                    isPending={pendingRole?.volunteerId === volunteer.id}
-                    error={roleErrors[volunteer.id]}
-                  />
-                )
-              })}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {groupByTrainingStatus(volunteers, name, roleOverrides).map(({ status, volunteers: statusVolunteers }) => (
+                <div key={status} aria-label={`${statusLabel(status)} (${statusVolunteers.length})`}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      marginBottom: '0.5rem',
+                      paddingBottom: '0.35rem',
+                      borderBottom: '1px solid var(--border)',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '0.72rem',
+                        color: 'var(--muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {statusLabel(status)}
+                    </span>
+                    <span style={{ ...badgeStyle(STATUS_COLORS[status] ?? '#9ca3af'), fontSize: '0.68rem' }}>
+                      {statusVolunteers.length}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {statusVolunteers.map(volunteer => {
+                      const rowKey = `${name}:${volunteer.id}`
+                      return (
+                        <VolunteerRow
+                          key={volunteer.id}
+                          volunteer={volunteer}
+                          roles={volunteerRoleList(volunteer, roleOverrides)}
+                          allRoles={allRoles}
+                          expanded={expandedVolunteerKeys.has(rowKey)}
+                          onToggle={() => onToggleVolunteer(rowKey)}
+                          onSelectVolunteer={onSelectVolunteer}
+                          onAddRole={onAddRole}
+                          onRemoveRole={onRemoveRole}
+                          isPending={pendingRole?.volunteerId === volunteer.id}
+                          error={roleErrors[volunteer.id]}
+                        />
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
