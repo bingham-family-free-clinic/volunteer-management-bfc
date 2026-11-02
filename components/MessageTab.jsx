@@ -478,16 +478,12 @@ function ReplyThread({
     ? <strong style={{ fontWeight: 700 }}>{previewToName}</strong>
     : previewToName
 
-  const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
   const canReply = Boolean(user?.id)
   // A thread sent to the Admins group. Reply All on it reaches the Admins
-  // audience plus the original thread sender, but is still labelled Admins.
+  // audience plus the original thread sender, while the message still reads
+  // "To: Admins".
   const isAdminThread = message.recipient_type === 'admin'
-  // A volunteer reading an admin thread is outside that message's audience.
-  // Reply All must then mean the thread's audience rather than the audience of
-  // whichever direct reply they clicked.
-  const replyingOutsideAdminAudience = isAdminThread && !isAdmin
 
   // Group chat member names (Individuals tab, 2+ people), alphabetical —
   // everyone in the group except the person viewing, so each member sees
@@ -526,15 +522,7 @@ function ReplyThread({
   // dropdown switches between those two.
   function replyDropdownActive(clicked) {
     if (!clicked) return false
-    if (isAdminThread) {
-      // In an admin thread even a direct reply can be answered for the whole
-      // Admins audience, so always offer both targets when there is somebody
-      // other than the viewer to answer.
-      return clicked.sender_id !== user?.id ||
-        (clicked.recipient_type === 'volunteer' &&
-          Boolean(clicked.recipient_volunteer_id) &&
-          clicked.recipient_volunteer_id !== user?.id)
-    }
+    // A direct message is always answered privately, in every thread type.
     return clicked.recipient_type !== 'volunteer' &&
       clicked.sender_id !== user?.id
   }
@@ -545,9 +533,8 @@ function ReplyThread({
     const clicked = clickedReplyMessage()
     if (isReplyAll) {
       // The whole audience of the message being answered. In an admin thread
-      // that is always the thread's original Admins audience, even when the
-      // Reply button was clicked on a single admin's direct reply.
-      const src = replyingOutsideAdminAudience ? message : (clicked || message)
+      // that is always the thread's original Admins audience.
+      const src = isAdminThread ? message : (clicked || message)
       return { target: {
         recipient_type: src.recipient_type,
         recipient_day: src.recipient_day,
@@ -668,10 +655,8 @@ function ReplyThread({
     setLocallyHighlightedReplies(new Set())
     replyScrollPosRef.current = window.scrollY
     setReplyToId(msg.id)
-    // Reply All is the default whenever the composer answers a crowd — and
-    // always when a non-admin replies inside an admin thread, even on one
-    // admin's direct reply.
-    setIsReplyAll(msg.recipient_type !== 'volunteer' || replyingOutsideAdminAudience)
+    // A direct message is answered privately; crowd messages default to All.
+    setIsReplyAll(msg.recipient_type !== 'volunteer')
     setTargetMenuOpen(false)
     setReplyOpen(true)
     // Switching targets mid-draft keeps the text and the caret where they were.
