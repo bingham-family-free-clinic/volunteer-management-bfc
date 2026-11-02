@@ -2340,9 +2340,12 @@ export default function AdminPage() {
                             const approvedCallout = callouts.find(c => c.volunteer_id === entry.volunteer_id && c.callout_date === scheduleDate && c.shift_time === scheduleShift && c.status === 'approved')
                             const coverShift = approvedCallout && dateCoverShifts.find(s => s.volunteer_id === approvedCallout.covered_by)
                             const coverName = coverShift ? coverShift.profiles?.full_name : null
+                            const wlEntryCollapsed = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
+                            const trainedRolesCollapsed = wlEntryCollapsed?.preferred_roles || []
+                            const inTrainingCollapsed = !trainedRolesCollapsed.includes(entry.role)
                             return (
                               <div key={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: approvedCallout ? 'rgba(96,165,250,0.08)' : 'rgba(2,65,107,0.08)', border: `1px solid ${approvedCallout ? 'rgba(96,165,250,0.4)' : 'rgba(2,65,107,0.35)'}`, color: approvedCallout ? 'var(--warn)' : 'var(--text)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: approvedCallout ? 'rgba(96,165,250,0.08)' : (inTrainingCollapsed ? 'rgba(239,68,68,0.12)' : 'rgba(2,65,107,0.08)'), border: `1px solid ${approvedCallout ? 'rgba(96,165,250,0.4)' : (inTrainingCollapsed ? 'rgba(239,68,68,0.5)' : 'rgba(2,65,107,0.35)')}`, color: approvedCallout ? 'var(--warn)' : (inTrainingCollapsed ? '#ef4444' : 'var(--text)') }}>
                                   {approvedCallout && <span style={{ fontSize: '0.7rem' }}>out</span>}
                                   <span style={{ textDecoration: approvedCallout ? 'line-through' : 'none', opacity: approvedCallout ? 0.6 : 1 }}>{entry.profiles?.full_name}</span>
                                   {entry.notes && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.notes})</span>}
