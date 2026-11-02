@@ -829,10 +829,20 @@ function VolunteerPageInner() {
   }
 
   // ── Poll unread count every 30s so the badge stays current ──
+  // Skip polling while the tab is hidden (saves egress); catch up on return.
   useEffect(() => {
     pollUnread()
-    const id = setInterval(pollUnread, 30000)
-    return () => clearInterval(id)
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') pollUnread()
+    }, 30000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') pollUnread()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [user])
 
   // ── Real-time subscription: update badge immediately when new messages arrive ──
@@ -844,7 +854,11 @@ function VolunteerPageInner() {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-      }, () => { pollUnread() })
+      }, () => {
+        // Realtime events can fire while the tab is hidden — no refetch then;
+        // the visibilitychange-driven poll catches up when visible again.
+        if (document.visibilityState === 'visible') pollUnread()
+      })
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])

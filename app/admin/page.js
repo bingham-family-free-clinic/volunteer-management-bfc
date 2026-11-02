@@ -1449,18 +1449,24 @@ export default function AdminPage() {
 
         void refreshLiveData()
 
-        // Refresh every 5 min
-        const interval = setInterval(refreshLiveData, 5 * 60 * 1000)
-
-        function handleFocus() {
+        // Refresh every 5 min, but skip ticks while the tab is hidden
+        // (saves egress); refresh on return to visibility.
+        const interval = setInterval(() => {
+            if (document.visibilityState !== 'visible') return
             void refreshLiveData()
+        }, 5 * 60 * 1000)
+
+        function handleVisibilityChange() {
+            if (document.visibilityState === 'visible') {
+                void refreshLiveData()
+            }
         }
 
-        window.addEventListener('focus', handleFocus)
+        document.addEventListener('visibilitychange', handleVisibilityChange)
 
         return () => {
             clearInterval(interval)
-            window.removeEventListener('focus', handleFocus)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
     }, [tab, loading])
 
