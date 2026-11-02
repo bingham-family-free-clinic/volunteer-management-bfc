@@ -2,16 +2,22 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const isNonProd = process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production'
-  const logo = isNonProd ? '/logo4.png' : '/logo3.png'
+  const icon192 = isNonProd ? '/logos/logo4-192.webp' : '/logos/logo3-192.webp'
+  const icon512 = isNonProd ? '/logos/logo4-512.webp' : '/logos/logo3-512.webp'
 
   const body = `
-const CACHE_NAME = 'bfc-v1'
+const CACHE_NAME = 'bfc-v2'
 const OFFLINE_URL = '/offline'
-const ICON_URL = '${logo}'
+const ICON_URL = '${icon192}'
+const LOGO_URLS = [
+  '/logos/logo2-96.webp',
+  '${icon192}',
+  '${icon512}',
+]
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll([OFFLINE_URL]))
+    caches.open(CACHE_NAME).then(cache => cache.addAll([OFFLINE_URL, ...LOGO_URLS]))
   )
   self.skipWaiting()
 })
@@ -26,6 +32,22 @@ self.addEventListener('activate', event => {
 })
 
 self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url)
+
+  if (event.request.method === 'GET' && url.origin === self.location.origin && url.pathname.startsWith('/logos/')) {
+    event.respondWith(
+      caches.match(event.request).then(cached => {
+        if (cached) return cached
+        return fetch(event.request).then(response => {
+          const copy = response.clone()
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy))
+          return response
+        })
+      })
+    )
+    return
+  }
+
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => caches.match(OFFLINE_URL))

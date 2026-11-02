@@ -45,7 +45,7 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
-      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
         {MAIN_TABS.map(([key, label]) => (
@@ -514,7 +514,7 @@ export default function CSPage() {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
+            <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
           </div>
         ) : (
           <DesktopHeader
