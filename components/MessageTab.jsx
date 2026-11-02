@@ -1465,6 +1465,26 @@ export function MessageTab({
     onUnreadCountChange?.(unreadThreadCount)
   }, [unreadThreadCount, onUnreadCountChange])
 
+
+
+  // Temporary code to find a problematic message
+
+  useEffect(() => {
+    if (!user || !readMessageIds) return
+    const visibleIds = new Set([
+      ...inboxThreads.map(t => t.id),
+      ...inboxThreads.flatMap(t => (inboxRepliesMap[t.id] || []).map(r => r.id)),
+    ])
+    const hidden = messages.filter(m =>
+      m.sender_id !== user.id && !readMessageIds.has(m.id) && !visibleIds.has(m.id))
+    console.log('unread but not shown in tab:', hidden)
+  }, [messages, readMessageIds])
+
+
+
+
+
+
   // Resolve a deep-linked message id (which may be a reply) to its thread's
   // top-level id, so notifications for replies still expand the right thread.
   const openThreadId = (() => {
