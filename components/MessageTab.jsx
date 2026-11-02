@@ -478,6 +478,10 @@ function ReplyThread({
   const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
   const canReply = Boolean(user?.id)
+  // A volunteer reading an HR/admin thread is outside that message's audience
+  // (the Admins group). In that case Reply All must mean the thread's audience
+  // rather than the audience of whichever direct reply they clicked.
+  const replyingOutsideAdminAudience = message.recipient_type === 'admin' && !isAdmin
 
   // Group chat member names (Individuals tab, 2+ people), alphabetical —
   // everyone in the group except the person viewing, so each member sees
@@ -515,8 +519,17 @@ function ReplyThread({
   // whole audience or for its sender alone; the composer's "Replying to …"
   // dropdown switches between those two.
   function replyDropdownActive(clicked) {
-    return Boolean(clicked) &&
-      clicked.recipient_type !== 'volunteer' &&
+    if (!clicked) return false
+    if (replyingOutsideAdminAudience) {
+      // Outside an admin thread even a direct reply can be answered for the
+      // whole Admins group, so always offer both targets when there is
+      // somebody other than the viewer to answer.
+      return clicked.sender_id !== user?.id ||
+        (clicked.recipient_type === 'volunteer' &&
+          Boolean(clicked.recipient_volunteer_id) &&
+          clicked.recipient_volunteer_id !== user?.id)
+    }
+    return clicked.recipient_type !== 'volunteer' &&
       clicked.sender_id !== user?.id
   }
 
@@ -525,8 +538,10 @@ function ReplyThread({
   function resolveReplyTarget() {
     const clicked = clickedReplyMessage()
     if (isReplyAll) {
-      // The whole audience of the message being answered
-      const src = clicked || message
+      // The whole audience of the message being answered. Outside an admin
+      // thread that is always the thread's original Admins audience, even
+      // when the Reply button was clicked on a single admin's direct reply.
+      const src = replyingOutsideAdminAudience ? message : (clicked || message)
       return { target: {
         recipient_type: src.recipient_type,
         recipient_day: src.recipient_day,
@@ -608,7 +623,12 @@ function ReplyThread({
   // own message can only be answered for its crowd, a direct message only for
   // the one person on the other end.
   const replyActive = replyDropdownActive(replyClicked)
-  const replyAudienceName = recipientLabel(replyClicked || message)
+  const replyAudienceLabel = recipientLabel(replyClicked || message)
+  // The audience of a reply-all in an admin thread is the thread's Admins
+  // group, not the audience of a single admin reply inside it.
+  const replyAudienceName = replyingOutsideAdminAudience
+    ? 'All'
+    : replyAudienceLabel
   const replyPersonName = replyClicked
     ? (replyClicked.sender_id !== user?.id
         ? (replyClicked.sender?.full_name ?? nameOf(replyClicked.sender_id))
@@ -617,13 +637,20 @@ function ReplyThread({
   const replyTargetName = isReplyAll ? replyAudienceName : replyPersonName
   const replyTargetOptions = replyActive
     ? [
-        { replyAll: true, label: replyAudienceName },
+        {
+          replyAll: true,
+          label: replyingOutsideAdminAudience
+            ? recipientLabel(message)
+            : replyAudienceName,
+        },
         { replyAll: false, label: replyPersonName },
       ]
     : [{ replyAll: isReplyAll, label: replyTargetName }]
   // Emphasise the crowd half of a reply the same way the "To:" line does —
   // "Replying to **Group**" against a plain "Replying to Jon Doe".
-  const audienceIsMulti = isMultiRecipient(replyClicked || message)
+  const audienceIsMulti = isMultiRecipient(
+    replyingOutsideAdminAudience ? message : (replyClicked || message)
+  )
   const boldTarget = (text, isAudience) =>
     isAudience && audienceIsMulti
       ? <strong style={{ fontWeight: 700 }}>{text}</strong>
@@ -635,7 +662,10 @@ function ReplyThread({
     setLocallyHighlightedReplies(new Set())
     replyScrollPosRef.current = window.scrollY
     setReplyToId(msg.id)
-    setIsReplyAll(msg.recipient_type !== 'volunteer')
+    // Reply All is the default whenever the composer answers a crowd — and
+    // always when a non-admin replies inside an admin thread, even on one
+    // admin's direct reply.
+    setIsReplyAll(msg.recipient_type !== 'volunteer' || replyingOutsideAdminAudience)
     setTargetMenuOpen(false)
     setReplyOpen(true)
     // Switching targets mid-draft keeps the text and the caret where they were.
