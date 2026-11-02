@@ -1061,6 +1061,10 @@ export function MessageTab({
   const [allUsers, setAllUsers]               = useState(allUsersProp)
   const [lightboxUrl, setLightboxUrl]         = useState(null)
   const [inboxFilter, setInboxFilter] = useState('all')
+  // Thread ids that were unread when the Unread filter was applied. Reading a
+  // thread while the filter is active must not make it vanish mid-view, so the
+  // filter unions this frozen set with whatever is still currently unread.
+  const [unreadFilterSnapshot, setUnreadFilterSnapshot] = useState(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const filterRef = useRef(null)
   const [inboxSearch, setInboxSearch] = useState('')
@@ -1408,7 +1412,23 @@ export function MessageTab({
     return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
   })
 
+  // A thread is unread when its root or any reply hasn't been read yet.
+  function isThreadUnread(m) {
+    if (!readMessageIds) return false
+    const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
+    const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
+      r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
+    )
+    return isUnreadMsg || hasUnreadReplies
+  }
+
   const filteredInboxThreads = inboxThreads.filter(m => {
+    if (inboxFilter === 'unread') {
+      // Keep threads that were unread when the filter was applied even after
+      // they're read, plus anything that is unread right now.
+      return isThreadUnread(m) || (unreadFilterSnapshot?.has(m.id) ?? false)
+    }
+
     if (inboxFilter === 'hr') {
       return m.recipient_type === 'admin'
     }
@@ -1445,13 +1465,9 @@ export function MessageTab({
   })
 
   // Unread count across all inbox threads (for tab badge and parent notification)
-  const unreadThreadCount = readMessageIds ? inboxThreads.filter(m => {
-    const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
-    const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
-      r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
-    )
-    return isUnreadMsg || hasUnreadReplies
-  }).length : 0
+  const unreadThreadCount = readMessageIds
+    ? inboxThreads.filter(isThreadUnread).length
+    : 0
 
   // Notify parent whenever unread count changes so the Messages tab badge stays in sync
   useEffect(() => {
@@ -1699,12 +1715,42 @@ export function MessageTab({
   // ── Inbox filter dropdown ──────────────────────────────────────────────────
   const inboxFilterOptions = [
     ['all', 'All'],
+    ['unread', 'Unread'],
     ['direct', 'Directly to me'],
     ...(isAdmin ? [['hr', 'HR']] : []),
     ['role', 'My Role'],
     ['everyone', 'Everyone'],
   ]
   const activeFilterLabel = (inboxFilterOptions.find(([key]) => key === inboxFilter) ?? inboxFilterOptions[0])[1]
+
+  // Applying (or re-applying) the Unread filter freezes the current unread
+  // threads so reading them in place doesn't make them disappear.
+  function applyInboxFilter(key) {
+    if (key === 'unread') {
+      setUnreadFilterSnapshot(new Set(inboxThreads.filter(isThreadUnread).map(m => m.id)))
+    } else {
+      setUnreadFilterSnapshot(null)
+    }
+    setInboxFilter(key)
+    setFilterOpen(false)
+  }
+
+  // While the Unread filter is active, remember every thread that becomes
+  // unread so it survives being read (and collapsed) until the filter is
+  // re-applied or the page is reloaded.
+  useEffect(() => {
+    if (inboxFilter !== 'unread') return
+    const unreadIds = inboxThreads.filter(isThreadUnread).map(m => m.id)
+    if (unreadIds.length === 0) return
+    setUnreadFilterSnapshot(prev => {
+      const next = new Set(prev ?? [])
+      let changed = false
+      unreadIds.forEach(id => {
+        if (!next.has(id)) { next.add(id); changed = true }
+      })
+      return changed ? next : prev
+    })
+  }, [inboxFilter, readMessageIds, inboxThreads])
 
   // Inbox text search — matches sender name, recipient, or message body across
   // the whole thread (top-level + replies). Plain substring, re-run on every
@@ -1883,7 +1929,7 @@ export function MessageTab({
                         type="button"
                         role="option"
                         aria-selected={isActive}
-                        onClick={() => { setInboxFilter(key); setFilterOpen(false) }}
+                        onClick={() => applyInboxFilter(key)}
                         onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
                         onMouseLeave={e => { e.currentTarget.style.background = isActive ? '#0369a1' + '18' : 'transparent' }}
                         style={{
