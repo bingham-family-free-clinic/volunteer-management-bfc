@@ -802,7 +802,9 @@ function VolunteerPageInner() {
   const onboardingAffiliation = onboardingApp?.onboard_affiliation || null
   const onboardingRole        = onboardingApp?.onboard_default_role || null
   const onboardingPrefsSaved  = hasSavedOnboardingPrefs(onboardingAffiliation, onboardingRole)
-  const onboardingRequiredKeys = getRequiredDocKeys(onboardingAffiliation, onboardingRole)
+  const onboardingRequiredKeys = onboardingPrefsSaved
+    ? getRequiredDocKeys(onboardingAffiliation, onboardingRole)
+    : []
   const onboardingApprovedRequired = onboardingRequiredKeys.filter(key => {
     const doc = VOLUNTEER_UPLOAD_DOCS.find(d => d.key === key)
     return onboardingChecklist?.[key] === true && !!onboardingChecklist?.[doc?.urlKey]
@@ -1654,8 +1656,10 @@ function VolunteerPageInner() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                   {VOLUNTEER_UPLOAD_DOCS.map(item => {
                     const approved       = onboardingChecklist?.[item.key] === true
+                    const isRequired     = onboardingRequiredKeys.includes(item.key)
+                    const isOptional     = onboardingPrefsSaved && item.key === 'licenses_certifications'
                     // An admin checking a document overrides the position-based
-                    // "not needed" state — they want that file.
+                    // "not needed" state �?" they want that file.
                     const notNeeded      = !approved && isDocNotNeeded(item.key, onboardingAffiliation, onboardingRole)
                     const hasFile        = !!onboardingChecklist?.[item.urlKey]
                     const uploading      = onboardingUploadingKey === item.key
@@ -1692,7 +1696,15 @@ function VolunteerPageInner() {
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.9rem', fontWeight: blueCard ? 600 : 500 }}>{item.label}</span>
+                          <span style={{ fontSize: '0.9rem', fontWeight: blueCard ? 600 : 500 }}>
+                            {item.label}
+                            {isRequired && <span style={{ color: '#0369a1', fontWeight: 700 }}> *</span>}
+                          </span>
+                          {isOptional && (
+                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
+                              Optional
+                            </span>
+                          )}
                           {locked && (
                             <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.08)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.25)' }}>
                               admin approved
