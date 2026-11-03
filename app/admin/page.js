@@ -2029,7 +2029,7 @@ export default function AdminPage() {
       bls_exp: isProvider ? (editForm.bls_exp || null) : null,
       dea_exp: isProvider ? (editForm.dea_exp || null) : null,
       ftca_exp: isProvider ? (editForm.ftca_exp || null) : null,
-      tb_exp: isProvider ? (editForm.tb_exp || null) : null,
+      tb_exp: editForm.tb_exp || null,
 
       default_role: editForm.default_role || null,
       end_date: editForm.end_date || null,
@@ -2742,7 +2742,8 @@ export default function AdminPage() {
                     { label: 'First Shift', value: loadingFirstShift ? 'Loading…' : (firstShiftDate ? new Date(firstShiftDate).toLocaleDateString('en-US', { timeZone: 'America/Denver', year: 'numeric', month: 'short', day: 'numeric' }) : null) },
                     ...(selectedVolunteer.affiliation === 'missionary' ? [{ label: 'SMA Name', value: selectedVolunteer.sma_name }, { label: 'SMA Contact', value: selectedVolunteer.sma_contact }] : []),
                     ...(selectedVolunteer.affiliation === 'intern' ? [{ label: 'Advisor Name', value: selectedVolunteer.advisor_name }, { label: 'Advisor Contact', value: selectedVolunteer.advisor_contact }, { label: 'School', value: selectedVolunteer.intern_school }, { label: 'Dept / Company', value: selectedVolunteer.intern_department }] : []),
-                    ...(selectedVolunteer.affiliation === 'student' ? [{ label: 'School', value: selectedVolunteer.school }, { label: 'Major', value: selectedVolunteer.major }] : [])
+                    ...(selectedVolunteer.affiliation === 'student' ? [{ label: 'School', value: selectedVolunteer.school }, { label: 'Major', value: selectedVolunteer.major }] : []),
+                    ...(selectedVolunteer.affiliation !== 'provider' ? [{ label: 'TB Expiration', value: selectedVolunteer.tb_exp }] : [])
                   ].map(({ label, value }) => (
                     <div key={label} style={{ padding: '0.75rem 1rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
                       <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>{label}</p>
@@ -2848,6 +2849,12 @@ export default function AdminPage() {
                     </div>
                   )}
                   <div><label style={labelStyle}>Default Position</label><select value={editForm.default_role} onChange={e => setEditForm({...editForm, default_role: e.target.value})} style={inputStyle}><option value="">— None —</option>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+                  {editForm.affiliation !== 'provider' && (
+                    <div>
+                      <label style={labelStyle}>TB Expiration</label>
+                      <input value={editForm.tb_exp || ''} onChange={e => setEditForm({ ...editForm, tb_exp: e.target.value })} placeholder="Expiration Date" style={inputStyle} />
+                    </div>
+                  )}
                   <div>
                     <label style={labelStyle}>End Date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(auto-deactivates on this date)</span></label>
                     <input type="date" value={editForm.end_date || ''} onChange={e => setEditForm({ ...editForm, end_date: e.target.value })} style={inputStyle} />

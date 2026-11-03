@@ -648,6 +648,7 @@ function VolunteerPageInner() {
   const [editingCreds, setEditingCreds]         = useState(false)
   const [credForm, setCredForm]                 = useState({})
   const [savingCreds, setSavingCreds]           = useState(false)
+  const [tbExpDraft, setTbExpDraft]             = useState('')
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [toast, setToast]         = useState(null)
@@ -902,6 +903,7 @@ function VolunteerPageInner() {
       .eq('id', user.id)
       .single()
     setProfile(profileData)
+    setTbExpDraft(profileData?.tb_exp || '')
 
     if (profileData?.affiliation === 'provider') {
       setCredForm({
@@ -1307,6 +1309,22 @@ function VolunteerPageInner() {
     if (error) showToast(error.message, 'error')
     else { showToast('Cover request submitted!', 'success'); setMyCoverRequests(prev => [...prev, { callout_id: calloutId, status: 'pending' }]) }
     setRequestingCoverId(null)
+  }
+
+  async function handleSaveTbExp(value) {
+    if (!user) return
+    const notNeeded = isDocNotNeeded('tb_test', onboardingAffiliation, onboardingRole)
+    const cleaned = (value || '').trim()
+    const nextValue = cleaned || (notNeeded ? 'N/A' : null)
+    if ((profile?.tb_exp || null) === nextValue) return
+    const { error } = await supabase.from('profiles').update({ tb_exp: nextValue }).eq('id', user.id)
+    if (error) {
+      showToast(error.message, 'error')
+      return
+    }
+    setProfile(prev => prev ? { ...prev, tb_exp: nextValue || '' } : prev)
+    setTbExpDraft(nextValue || '')
+    showToast('TB expiration updated!', 'success')
   }
 
   async function handleSaveCreds(e) {
@@ -1729,6 +1747,30 @@ function VolunteerPageInner() {
                             {buttonLabel}
                           </button>
                           <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.7 }}>PDF or JPG/PNG</span>
+                          {item.key === 'tb_test' && (
+                            <input
+                              value={tbExpDraft || (notNeeded ? 'N/A' : '')}
+                              onChange={e => setTbExpDraft(e.target.value)}
+                              onBlur={e => handleSaveTbExp(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                              disabled={disabled}
+                              placeholder="Expiration Date"
+                              style={{
+                                width: '140px',
+                                padding: '0.35rem 0.6rem',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontFamily: 'DM Sans, sans-serif',
+                                background: 'var(--bg)',
+                                color: 'var(--text)',
+                                border: '1px solid var(--border)',
+                                outline: 'none',
+                                boxSizing: 'border-box',
+                                cursor: disabled ? 'not-allowed' : 'text',
+                                opacity: disabled ? 0.6 : 1,
+                              }}
+                            />
+                          )}
                         </div>
                       </div>
                     )

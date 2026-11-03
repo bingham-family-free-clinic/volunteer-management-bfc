@@ -138,6 +138,12 @@ const DEFAULT_REQUIRED = ['background_check', 'id_check', 'immunization', 'tb_te
 const NON_PATIENT_ROLES_REQUIRED = ['background_check', 'id_check']
 const MISSIONARY_REQUIRED = ['id_check']
 
+function tbTestRequired(affiliation, defaultRole) {
+  if (affiliation === 'missionary') return false
+  if (NON_PATIENT_ROLES.includes(defaultRole)) return false
+  return true
+}
+
 const TOTAL_STEPS = 3
 
 // ─── Preparedness scoring ─────────────────────────────────────────────────────
@@ -2532,7 +2538,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       bls_exp:     isProvider ? (form.bls_exp     || null) : null,
       dea_exp:     isProvider ? (form.dea_exp     || null) : null,
       ftca_exp:    isProvider ? (form.ftca_exp    || null) : null,
-      tb_exp:      isProvider ? (form.tb_exp      || null) : null,
+      tb_exp:      form.tb_exp || (tbTestRequired(affil, form.default_role) ? null : 'N/A'),
       admin_notes: [notesDraft || applicant.notes || null, extraInfo || null].filter(Boolean).join('\n\n') || null,
     }
   }
@@ -2619,6 +2625,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     // the application itself (School/Program), so nobody has to re-ask a
     // question already answered.
     const affiliData = applicant.onboard_affil_data || {}
+    let profileTbExp = ''
+    if (applicant.stage === 'onboarding' && applicant.volunteer_id) {
+      const { data: profileRow } = await supabase
+        .from('profiles')
+        .select('tb_exp')
+        .eq('id', applicant.volunteer_id)
+        .maybeSingle()
+      profileTbExp = profileRow?.tb_exp || ''
+    }
     setOnboardForm({
       affiliation:   applicant.onboard_affiliation   || '',
       default_role:  applicant.onboard_default_role  || '',
@@ -2637,7 +2652,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       bls_exp:           affiliData.bls_exp            || '',
       dea_exp:           affiliData.dea_exp            || '',
       ftca_exp:          affiliData.ftca_exp           || '',
-      tb_exp:            affiliData.tb_exp             || '',
+      tb_exp:            profileTbExp                   || affiliData.tb_exp || '',
     })
 
     // Always re-read the checklist when opening an applicant so the file
@@ -2803,7 +2818,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const volunteerUploaded = (checklist.volunteer_uploads || []).includes(item.key)
     if (!item.bucket || !item.urlKey) return null
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
         <input ref={ref}
                type="file"
                multiple
@@ -2827,6 +2842,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           : <button onClick={() => ref.current?.click()} disabled={uploading} style={{ padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: uploading ? 0.5 : 1 }}>{uploading ? 'Uploading...' : '+ Attach File'}</button>
         }
         <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.6, fontFamily: 'DM Mono, monospace' }}>PDF or JPG/PNG</span>
+        {item.key === 'tb_test' && (
+          <input
+            value={onboardForm.tb_exp || ''}
+            onChange={e => setOnboardForm(f => ({ ...f, tb_exp: e.target.value }))}
+            placeholder="Expiration Date"
+            style={{ width: '140px', padding: '0.25rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }}
+          />
+        )}
       </div>
     )
   }
