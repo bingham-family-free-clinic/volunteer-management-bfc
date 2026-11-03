@@ -2404,10 +2404,23 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         throw new Error('Uploaded archive metadata did not match')
       }
 
+      console.info('[offload] OneDrive upload complete', {
+        applicantId: applicant.id,
+        itemId: result.id,
+        filename: result.name,
+        size: result.size,
+        webUrl: result.webUrl || null,
+        driveId: result.parentReference?.driveId || null,
+        path: result.parentReference?.path || null,
+      })
+
       return {
         itemId: result.id,
         filename: result.name,
-        size: result.size
+        size: result.size,
+        webUrl: result.webUrl || null,
+        driveId: result.parentReference?.driveId || null,
+        path: result.parentReference?.path || null,
       }
     }
 
@@ -2420,7 +2433,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         {
           body: {
             applicantId: applicant.id,
-            archive: oneDriveArchive,
+            archive: oneDriveArchive ? {
+              itemId:   oneDriveArchive.itemId,
+              filename: oneDriveArchive.filename,
+              size:     oneDriveArchive.size,
+            } : null,
             files: applicantZip.urls.map(({ bucket, path }) => ({
               bucket,
               path
@@ -2454,7 +2471,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
     const confirmed = window.confirm(
         `Offload documents for ${applicant.full_name}?\n\n` +
-        `This will archive their documents to OneDrive and ` +
+        `This will archive any documents they have to OneDrive and ` +
         `permanently delete the originals from the portal, ` +
         `once the archive has been verified.\n\n` +
         `This action cannot be undone.`
@@ -2471,16 +2488,42 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setOffloadingId(applicant.id)
 
     let oneDriveArchive = null
+    let collectedFiles = []
     const wasRejected = applicant.stage === 'rejected'
 
     try {
       const applicantZip = await makeApplicantZip(applicant)
+      const files = applicantZip.urls || []
+      const fileNames = files.map(f => f.filename)
+      const fileLabels = files.map(f => f.label)
+      collectedFiles = fileLabels
 
-      if (applicantZip.zip) {
+      console.info('[offload] documents collected', {
+        applicantId: applicant.id,
+        name: applicant.full_name,
+        fileCount: files.length,
+        files: files.map(f => ({ label: f.label, filename: f.filename, bucket: f.bucket, path: f.path })),
+      })
+
+      if (files.length === 0) {
+        console.warn('[offload] no documents found — OneDrive upload skipped', {
+          applicantId: applicant.id,
+          name: applicant.full_name,
+        })
+      } else if (applicantZip.zip) {
         oneDriveArchive = await uploadToOneDrive(applicant, applicantZip.zip)
       }
 
       const cleanupResult = await cleanupOffload(applicant, applicantZip, oneDriveArchive)
+      const deletedFiles = cleanupResult?.deletedFiles ?? files.length
+
+      console.info('[offload] complete', {
+        applicantId: applicant.id,
+        name: applicant.full_name,
+        offloadedFiles: fileNames,
+        archive: oneDriveArchive,
+        deletedFiles,
+      })
 
       // Keep rejected applicants visible (name only) in the Rejected view.
       if (wasRejected) {
@@ -2490,19 +2533,33 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         if (keepErr) msg(`Offloaded, but could not keep the name in the Rejected list: ${keepErr.message}`, 'error')
       }
 
+      const archiveDetails = files.length === 0
+        ? 'no documents found — nothing archived to OneDrive'
+        : `archived ${files.length} file${files.length !== 1 ? 's' : ''} to OneDrive (${fileNames.join(', ')})` +
+          (oneDriveArchive?.webUrl ? ` at ${oneDriveArchive.webUrl}` : '')
+
       await audit(
           'applicant_offloaded',
           'applicant',
           applicant.id,
           applicant.full_name,
-          `${cleanupResult.deletedFiles} files removed from Supabase Storage`
+          `${archiveDetails}; ${deletedFiles} original${deletedFiles === 1 ? '' : 's'} removed from Supabase Storage`
       )
 
       await loadAll() // we don't want to offload someone twice
 
-      msg(`Successfully offloaded ${applicant.full_name}`)
+      msg(files.length === 0
+        ? `Offloaded ${applicant.full_name}: no documents found — nothing archived`
+        : `Offloaded ${applicant.full_name}: ${files.length} file${files.length !== 1 ? 's' : ''} archived (${fileLabels.join(', ')})`)
 
     } catch (error) {
+      console.error('[offload] failed', {
+        applicantId: applicant.id,
+        name: applicant.full_name,
+        collectedFiles,
+        archive: oneDriveArchive,
+        error,
+      })
       msg(`Offload failed: "${error.message}"` + (oneDriveArchive ? "(OneDrive archive successfully created)" : ""), 'error')
     } finally {
       setOffloadingId(null)
