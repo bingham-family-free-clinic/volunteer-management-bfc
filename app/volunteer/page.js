@@ -1329,6 +1329,21 @@ function VolunteerPageInner() {
     showToast('TB expiration updated!', 'success')
   }
 
+  useEffect(() => {
+    if (!user || !profile) return
+    if (onboardingApp?.stage !== 'onboarding') return
+    if (!isDocNotNeeded('tb_test', onboardingAffiliation, onboardingRole)) return
+    if (profile.tb_exp === 'N/A') return
+    let cancelled = false
+    ;(async () => {
+      const { error } = await supabase.from('profiles').update({ tb_exp: 'N/A' }).eq('id', user.id)
+      if (cancelled || error) return
+      setProfile(prev => prev ? { ...prev, tb_exp: 'N/A' } : prev)
+      setTbExpDraft('N/A')
+    })()
+    return () => { cancelled = true }
+  }, [user, profile?.tb_exp, onboardingApp?.stage, onboardingAffiliation, onboardingRole])
+
   async function handleSaveCreds(e) {
     e.preventDefault()
     setSavingCreds(true)
@@ -1682,6 +1697,7 @@ function VolunteerPageInner() {
                     const tbDateValue    = tbExpDraft && tbExpDraft !== 'N/A' && tbExpDraft !== 'expired'
                       ? tbExpDraft
                       : ''
+                    const tbNotNeeded    = isDocNotNeeded('tb_test', onboardingAffiliation, onboardingRole)
 
                     return (
                       <div
@@ -1701,7 +1717,7 @@ function VolunteerPageInner() {
                             {isRequired && <span style={{ color: '#0369a1', fontWeight: 700 }}> *</span>}
                           </span>
                           {isOptional && (
-                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
+                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
                               Optional
                             </span>
                           )}
@@ -1761,31 +1777,40 @@ function VolunteerPageInner() {
                           >
                             {buttonLabel}
                           </button>
-                          <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.7 }}>PDF or JPG/PNG</span>
+                          <span style={{ fontSize: '0.67rem', color: item.key === 'tb_test' ? 'var(--text)' : 'var(--muted)', opacity: item.key === 'tb_test' ? 1 : 0.7 }}>PDF or JPG/PNG</span>
                           {item.key === 'tb_test' && (
-                            <input
-                              type="date"
-                              value={tbDateValue}
-                              onChange={e => setTbExpDraft(e.target.value)}
-                              onBlur={e => handleSaveTbExp(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                              disabled={disabled}
-                              title="Expiration Date"
-                              style={{
-                                width: '140px',
-                                padding: '0.35rem 0.6rem',
-                                borderRadius: '6px',
-                                fontSize: '0.75rem',
-                                fontFamily: 'DM Sans, sans-serif',
-                                background: 'var(--bg)',
-                                color: 'var(--text)',
-                                border: '1px solid var(--border)',
-                                outline: 'none',
-                                boxSizing: 'border-box',
-                                cursor: disabled ? 'not-allowed' : 'text',
-                                opacity: disabled ? 0.6 : 1,
-                              }}
-                            />
+                            <>
+                              <span style={{ fontSize: '0.67rem', color: 'var(--muted)' }}>Expiration Date:</span>
+                              {tbNotNeeded ? (
+                                <span style={{ width: '140px', padding: '0.35rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)', boxSizing: 'border-box' }}>
+                                  N/A
+                                </span>
+                              ) : (
+                                <input
+                                  type="date"
+                                  value={tbDateValue}
+                                  onChange={e => setTbExpDraft(e.target.value)}
+                                  onBlur={e => handleSaveTbExp(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                  disabled={disabled}
+                                  title="Expiration Date"
+                                  style={{
+                                    width: '140px',
+                                    padding: '0.35rem 0.6rem',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontFamily: 'DM Sans, sans-serif',
+                                    background: 'var(--bg)',
+                                    color: 'var(--text)',
+                                    border: '1px solid var(--border)',
+                                    outline: 'none',
+                                    boxSizing: 'border-box',
+                                    cursor: disabled ? 'not-allowed' : 'text',
+                                    opacity: disabled ? 0.6 : 1,
+                                  }}
+                                />
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
