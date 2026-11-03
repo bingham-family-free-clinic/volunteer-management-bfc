@@ -3863,6 +3863,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         {a.stage === 'applied' && <StaffingNeedBadge applicant={a} />}
                         <StagePill stage={a.stage} />
+                        {a.stage === 'rejected' && (() => {
+                          const isOffloading = offloadingId === a.id
+                          return (
+                            <button
+                              onClick={e => { e.stopPropagation(); handleOffload(a) }}
+                              disabled={offloadingId !== null}
+                              style={{ padding: '0.35rem 0.85rem', borderRadius: '7px', fontSize: '0.75rem', fontWeight: 600, cursor: offloadingId !== null ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOffloading ? 'var(--surface)' : C.primary + '12', color: isOffloading ? 'var(--muted)' : C.primary, border: `1px solid ${C.primary}${isOffloading ? '22' : '55'}`, opacity: offloadingId !== null ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                            >
+                              {isOffloading
+                                ? <><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.primary}`, borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} /> Offloading...</>
+                                : 'OFFLOAD'
+                              }
+                            </button>
+                          )
+                        })()}
                         {a.created_at && <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{new Date(a.created_at).toLocaleDateString()}</span>}
                         <span style={{ color: 'var(--muted)' }}>›</span>
                       </div>
