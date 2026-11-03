@@ -173,6 +173,9 @@ function ReplyThread({
       const ids = target.recipient_volunteer_ids
       return Array.isArray(ids) && ids.length ? ids : []
     }
+    // Admin replies also name the original sender, but the audience is still
+    // the whole thread, so let every subscriber see the indicator.
+    if (target.recipient_type === 'admin') return null
     if (target.recipient_volunteer_id) return [target.recipient_volunteer_id]
     return null
   }
@@ -475,9 +478,12 @@ function ReplyThread({
     ? <strong style={{ fontWeight: 700 }}>{previewToName}</strong>
     : previewToName
 
-  const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
   const canReply = Boolean(user?.id)
+  // A thread sent to the Admins group. Reply All on it reaches the Admins
+  // audience plus the original thread sender, while the message still reads
+  // "To: Admins".
+  const isAdminThread = message.recipient_type === 'admin'
 
   // Group chat member names (Individuals tab, 2+ people), alphabetical —
   // everyone in the group except the person viewing, so each member sees
@@ -515,8 +521,9 @@ function ReplyThread({
   // whole audience or for its sender alone; the composer's "Replying to …"
   // dropdown switches between those two.
   function replyDropdownActive(clicked) {
-    return Boolean(clicked) &&
-      clicked.recipient_type !== 'volunteer' &&
+    if (!clicked) return false
+    // A direct message is always answered privately, in every thread type.
+    return clicked.recipient_type !== 'volunteer' &&
       clicked.sender_id !== user?.id
   }
 
@@ -525,14 +532,20 @@ function ReplyThread({
   function resolveReplyTarget() {
     const clicked = clickedReplyMessage()
     if (isReplyAll) {
-      // The whole audience of the message being answered
-      const src = clicked || message
+      // The whole audience of the message being answered. In an admin thread
+      // that is always the thread's original Admins audience.
+      const src = isAdminThread ? message : (clicked || message)
       return { target: {
         recipient_type: src.recipient_type,
         recipient_day: src.recipient_day,
         recipient_shift: src.recipient_shift,
         recipient_role: src.recipient_role,
-        recipient_volunteer_id: src.recipient_volunteer_id,
+        // Admin replies still show "To: Admins", but the original thread
+        // sender is included as an additional recipient so they can follow the
+        // conversation. The server treats this as "Admins + this volunteer".
+        recipient_volunteer_id: isAdminThread
+          ? message.sender_id
+          : src.recipient_volunteer_id,
         // Group threads store members as JSON — the API requires the id
         // array, to forward it explicitly. The source sender is unioned in
         // because stored lists predate full membership (composers excluded
@@ -608,7 +621,12 @@ function ReplyThread({
   // own message can only be answered for its crowd, a direct message only for
   // the one person on the other end.
   const replyActive = replyDropdownActive(replyClicked)
-  const replyAudienceName = recipientLabel(replyClicked || message)
+  // In an admin thread the group reply is called "All" because it reaches the
+  // Admins audience plus the original sender. Every other thread keeps the
+  // audience's own name.
+  const replyAudienceName = isAdminThread
+    ? 'All'
+    : recipientLabel(replyClicked || message)
   const replyPersonName = replyClicked
     ? (replyClicked.sender_id !== user?.id
         ? (replyClicked.sender?.full_name ?? nameOf(replyClicked.sender_id))
@@ -623,7 +641,9 @@ function ReplyThread({
     : [{ replyAll: isReplyAll, label: replyTargetName }]
   // Emphasise the crowd half of a reply the same way the "To:" line does —
   // "Replying to **Group**" against a plain "Replying to Jon Doe".
-  const audienceIsMulti = isMultiRecipient(replyClicked || message)
+  const audienceIsMulti = isMultiRecipient(
+    isAdminThread ? message : (replyClicked || message)
+  )
   const boldTarget = (text, isAudience) =>
     isAudience && audienceIsMulti
       ? <strong style={{ fontWeight: 700 }}>{text}</strong>
@@ -635,6 +655,7 @@ function ReplyThread({
     setLocallyHighlightedReplies(new Set())
     replyScrollPosRef.current = window.scrollY
     setReplyToId(msg.id)
+    // A direct message is answered privately; crowd messages default to All.
     setIsReplyAll(msg.recipient_type !== 'volunteer')
     setTargetMenuOpen(false)
     setReplyOpen(true)
@@ -1031,6 +1052,10 @@ export function MessageTab({
   const [allUsers, setAllUsers]               = useState(allUsersProp)
   const [lightboxUrl, setLightboxUrl]         = useState(null)
   const [inboxFilter, setInboxFilter] = useState('all')
+  // Thread ids that were unread when the Unread filter was applied. Reading a
+  // thread while the filter is active must not make it vanish mid-view, so the
+  // filter unions this frozen set with whatever is still currently unread.
+  const [unreadFilterSnapshot, setUnreadFilterSnapshot] = useState(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const filterRef = useRef(null)
   const [inboxSearch, setInboxSearch] = useState('')
@@ -1390,7 +1415,23 @@ export function MessageTab({
     return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
   })
 
+  // A thread is unread when its root or any reply hasn't been read yet.
+  function isThreadUnread(m) {
+    if (!readMessageIds) return false
+    const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
+    const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
+      r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
+    )
+    return isUnreadMsg || hasUnreadReplies
+  }
+
   const filteredInboxThreads = inboxThreads.filter(m => {
+    if (inboxFilter === 'unread') {
+      // Keep threads that were unread when the filter was applied even after
+      // they're read, plus anything that is unread right now.
+      return isThreadUnread(m) || (unreadFilterSnapshot?.has(m.id) ?? false)
+    }
+
     if (inboxFilter === 'hr') {
       return m.recipient_type === 'admin'
     }
@@ -1427,13 +1468,9 @@ export function MessageTab({
   })
 
   // Unread count across all inbox threads (for tab badge and parent notification)
-  const unreadThreadCount = readMessageIds ? inboxThreads.filter(m => {
-    const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
-    const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
-      r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
-    )
-    return isUnreadMsg || hasUnreadReplies
-  }).length : 0
+  const unreadThreadCount = readMessageIds
+    ? inboxThreads.filter(isThreadUnread).length
+    : 0
 
   // Notify parent whenever unread count changes so the Messages tab badge stays in sync
   useEffect(() => {
@@ -1681,12 +1718,42 @@ export function MessageTab({
   // ── Inbox filter dropdown ──────────────────────────────────────────────────
   const inboxFilterOptions = [
     ['all', 'All'],
+    ['unread', 'Unread'],
     ['direct', 'Directly to me'],
     ...(isAdmin ? [['hr', 'HR']] : []),
     ['role', 'My Role'],
     ['everyone', 'Everyone'],
   ]
   const activeFilterLabel = (inboxFilterOptions.find(([key]) => key === inboxFilter) ?? inboxFilterOptions[0])[1]
+
+  // Applying (or re-applying) the Unread filter freezes the current unread
+  // threads so reading them in place doesn't make them disappear.
+  function applyInboxFilter(key) {
+    if (key === 'unread') {
+      setUnreadFilterSnapshot(new Set(inboxThreads.filter(isThreadUnread).map(m => m.id)))
+    } else {
+      setUnreadFilterSnapshot(null)
+    }
+    setInboxFilter(key)
+    setFilterOpen(false)
+  }
+
+  // While the Unread filter is active, remember every thread that becomes
+  // unread so it survives being read (and collapsed) until the filter is
+  // re-applied or the page is reloaded.
+  useEffect(() => {
+    if (inboxFilter !== 'unread') return
+    const unreadIds = inboxThreads.filter(isThreadUnread).map(m => m.id)
+    if (unreadIds.length === 0) return
+    setUnreadFilterSnapshot(prev => {
+      const next = new Set(prev ?? [])
+      let changed = false
+      unreadIds.forEach(id => {
+        if (!next.has(id)) { next.add(id); changed = true }
+      })
+      return changed ? next : prev
+    })
+  }, [inboxFilter, readMessageIds, inboxThreads])
 
   // Inbox text search — matches sender name, recipient, or message body across
   // the whole thread (top-level + replies). Plain substring, re-run on every
@@ -1865,7 +1932,7 @@ export function MessageTab({
                         type="button"
                         role="option"
                         aria-selected={isActive}
-                        onClick={() => { setInboxFilter(key); setFilterOpen(false) }}
+                        onClick={() => applyInboxFilter(key)}
                         onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
                         onMouseLeave={e => { e.currentTarget.style.background = isActive ? '#0369a1' + '18' : 'transparent' }}
                         style={{
