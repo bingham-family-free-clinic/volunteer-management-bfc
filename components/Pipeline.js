@@ -62,6 +62,7 @@ function formatReference(name, contact) {
 }
 
 const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
+const OFFLOADED_REJECTED_STAGE = 'rejected_offloaded'
 const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', training: 'Training', rejected: 'Rejected' }
 
 // ── Blue-only palette ─────────────────────────────────────────────────────────
@@ -1380,6 +1381,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // Pipeline state
   const [applicants,      setApplicants]      = useState([])
+  const [offloadedRejected, setOffloadedRejected] = useState([])  // name-only rows
   const [completed,       setCompleted]       = useState([])
   const [loading,         setLoading]         = useState(true)
   const [loadError,       setLoadError]       = useState(null)
@@ -1641,6 +1643,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       setCompleted(completedApps)
       if (completedApps.length > 0) await loadRecentChecklists(completedApps.map(a => a.id))
     }
+    await loadOffloadedRejected()
     setLoading(false)
   }
 
@@ -1649,6 +1652,17 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       .from('volunteer_applications').select('*').in('stage', STAGES).order('created_at', { ascending: false })
     if (error) { setLoadError(error.message); setApplicants([]) }
     else setApplicants(data || [])
+  }
+
+  // Name-only query on purpose: nothing but id/name/date is ever pulled for
+  // offloaded rejections, so no other PII reaches the client.
+  async function loadOffloadedRejected() {
+    const { data, error } = await supabase
+      .from('volunteer_applications')
+      .select('id, full_name, stage_updated_at')
+      .eq('stage', OFFLOADED_REJECTED_STAGE)
+    if (error) { console.error('load offloaded rejections failed:', error); return }
+    setOffloadedRejected((data || []).map(r => ({ ...r, stage: OFFLOADED_REJECTED_STAGE, _offloaded: true })))
   }
 
   // Clinic schedule + waitlist rows feeding the Applied-stage "Staffing Need"
@@ -2252,131 +2266,307 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setUploadingApplicantPhoto(false)
   }
 
-  // ─── Offload ──────────────────────────────────────────────────────────────
-  // Downloads each file locally, then deletes it from Supabase Storage —
-  // only for files that actually finished downloading, so a failed download
-  // never causes data loss. DB references to deleted files are cleared too,
-  // so nothing in the app points at a file that no longer exists.
+  async function makeApplicantZip(applicant) {
+    const { data: cl, error } = await supabase
+        .from('onboarding_checklists')
+        .select('*')
+        .eq('applicant_id', applicant.id)
+        .maybeSingle()
+    const fileUrls = []
+
+    if (error) {
+      throw new Error(`Could not find applicant onboarding checklist: ${error.message}`)
+    }
+
+    if (applicant.resume_url) {
+      const {
+        data: rData,
+        error: rErr
+      } = await supabase.storage.from('resumes').createSignedUrl(applicant.resume_url, 300)
+      if (!rErr && rData?.signedUrl) {
+        const ext = applicant.resume_url.split('.').pop()
+        fileUrls.push({
+          label: 'Resume',
+          url: rData.signedUrl,
+          filename: `resume.${ext}`,
+          bucket: 'resumes',
+          path: applicant.resume_url
+        })
+      } else {
+        throw new Error(`Supabase URL signing for resume failed (${rErr?.message || "No URL provided"}), try again later or contact IS`)
+      }
+    }
+
+    for (const item of FILE_CHECKLIST_ITEMS) {
+      const storagePath = cl?.[item.urlKey]
+      if (!storagePath) continue
+      const { data, error } = await supabase.storage.from(item.bucket).createSignedUrl(storagePath, 300)
+      if (!error && data?.signedUrl) {
+        fileUrls.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}`, bucket: item.bucket, path: storagePath, urlKey: item.urlKey, itemKey: item.key })
+      } else {
+        throw new Error(`Could not access ${item.label}: ${error?.message || 'No signed URL returned'}`)
+      }
+    }
+
+    if (fileUrls.length === 0) {
+      return {
+        zip: null,
+        urls: []
+      }
+    }
+
+    const zip = new JSZip()
+
+    const newFolder = zip.folder(applicant.full_name.replace(/\s+/g, '_'))
+    for (const entry of fileUrls) {
+      const res = await fetch(entry.url)
+
+      if (!res.ok) throw new Error(`Could not fetch ${entry.label}`)
+
+      newFolder.file(entry.filename, await res.blob())
+    }
+
+    const newZip = await zip.generateAsync({ type : "blob"})
+
+    return {
+      zip: newZip,
+      urls: fileUrls
+    }
+  }
+
+
+  async function uploadToOneDrive(applicant, applicantZip) {
+    if (!applicantZip || applicantZip.size === 0) {
+      throw new Error('Cannot upload an empty ZIP')
+    }
+
+    const { data, error } = await supabase.functions.invoke(
+        'offload-create-upload-session',
+        {
+          body: { applicantId: applicant.id }
+        }
+    )
+
+    if (error) {
+      let details = error.message
+
+      if (error.context instanceof Response) {
+        const status = error.context.status
+        const body = await error.context.json().catch(() => null)
+
+        details = `HTTP ${status}: ${body?.error || body?.message || error.message}`
+      }
+
+      throw new Error(`Could not create upload session: ${details}`)
+    }
+
+    if (!data?.uploadUrl) {
+      throw new Error('No upload URL returned')
+    }
+
+    const totalSize = applicantZip.size
+    const chunkSize = 5 * 1024 * 1024 // microsoft requires chunk sizes to be multiples of 320 KiB
+                                              // Chunking is probably overkill since simple uploads work for up
+                                              // to 250 MiB, but this makes it more bulletproof
+
+    for (let start = 0; start < totalSize; start += chunkSize) {
+      const end = Math.min(start + chunkSize, totalSize) - 1
+
+      const response = await fetch(data.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/${totalSize}`
+        },
+        body: applicantZip.slice(start, end + 1)
+      })
+
+      if (!response.ok) {
+        throw new Error(`OneDrive upload failed (HTTP ${response.status})`)
+      }
+
+      const result = await response.json()
+
+      if (end < totalSize - 1) {
+        if (response.status !== 202) {
+          throw new Error('Unexpected response during OneDrive upload')
+        }
+
+        continue
+      }
+
+      if (![200, 201].includes(response.status)) {
+        throw new Error('Microsoft did not confirm upload completion')
+      }
+
+      if (
+          !result.id ||
+          result.size !== totalSize ||
+          result.name !== data.filename
+      ) {
+        throw new Error('Uploaded archive metadata did not match')
+      }
+
+      console.info('[offload] OneDrive upload complete', {
+        applicantId: applicant.id,
+        itemId: result.id,
+        filename: result.name,
+        size: result.size,
+        webUrl: result.webUrl || null,
+        driveId: result.parentReference?.driveId || null,
+        path: result.parentReference?.path || null,
+      })
+
+      return {
+        itemId: result.id,
+        filename: result.name,
+        size: result.size,
+        webUrl: result.webUrl || null,
+        driveId: result.parentReference?.driveId || null,
+        path: result.parentReference?.path || null,
+      }
+    }
+
+    throw new Error('Upload did not complete')
+  }
+
+  async function cleanupOffload(applicant, applicantZip, oneDriveArchive) {
+    const { data, error } = await supabase.functions.invoke(
+        'offload-cleanup',
+        {
+          body: {
+            applicantId: applicant.id,
+            archive: oneDriveArchive ? {
+              itemId:   oneDriveArchive.itemId,
+              filename: oneDriveArchive.filename,
+              size:     oneDriveArchive.size,
+            } : null,
+            files: applicantZip.urls.map(({ bucket, path }) => ({
+              bucket,
+              path
+            }))
+          }
+        }
+    )
+
+    if (error) {
+      let details = error.message
+
+      if (error.context instanceof Response) {
+        const status = error.context.status
+        const body = await error.context.json().catch(() => null)
+        details = `HTTP ${status}: ${body?.error || body?.message || error.message}`
+      }
+
+      throw new Error(`Cleanup failed: ${details}`)
+    }
+
+    if (!data?.success || data.stage !== 'offloaded') {
+      throw new Error('Cleanup did not confirm successful offloading')
+    }
+
+    return data
+  }
+
+  const offloadingRef = useRef(false) // better than offloadingId I suppose
 
   async function handleOffload(applicant) {
+
+    const confirmed = window.confirm(
+        `Offload documents for ${applicant.full_name}?\n\n` +
+        `This will archive any documents they have to OneDrive and ` +
+        `permanently delete the originals from the portal, ` +
+        `once the archive has been verified.\n\n` +
+        `This action cannot be undone.`
+    )
+
+    if (!confirmed) return
+
+    // multiple offloads at the same time could be a bit dangerous, so we should
+    // probably wait for the current one to finish
+    if (offloadingRef.current) return
+
+    offloadingRef.current = true
+
     setOffloadingId(applicant.id)
+
+    let oneDriveArchive = null
+    let collectedFiles = []
+    const wasRejected = applicant.stage === 'rejected'
+
     try {
-      const cl = recentChecklist[applicant.id] || {}
-      const fileEntries = []
+      const applicantZip = await makeApplicantZip(applicant)
+      const files = applicantZip.urls || []
+      const fileNames = files.map(f => f.filename)
+      const fileLabels = files.map(f => f.label)
+      collectedFiles = fileLabels
 
-      if (applicant.resume_url) {
-        const { data: rData, error: rErr } = await supabase.storage.from('resumes').createSignedUrl(applicant.resume_url, 300)
-        if (!rErr && rData?.signedUrl) {
-          const ext = applicant.resume_url.split('.').pop()
-          fileEntries.push({ label: 'Resume', url: rData.signedUrl, filename: `resume.${ext}`, bucket: 'resumes', path: applicant.resume_url })
-        } else if (rErr) {
-          console.warn('Could not sign resume URL:', rErr.message)
-        }
+      console.info('[offload] documents collected', {
+        applicantId: applicant.id,
+        name: applicant.full_name,
+        fileCount: files.length,
+        files: files.map(f => ({ label: f.label, filename: f.filename, bucket: f.bucket, path: f.path })),
+      })
+
+      if (files.length === 0) {
+        console.warn('[offload] no documents found — OneDrive upload skipped', {
+          applicantId: applicant.id,
+          name: applicant.full_name,
+        })
+      } else if (applicantZip.zip) {
+        oneDriveArchive = await uploadToOneDrive(applicant, applicantZip.zip)
       }
 
-      const unavailable = []
-      for (const item of FILE_CHECKLIST_ITEMS) {
-        const storagePath = cl[item.urlKey]
-        if (!storagePath) continue
-        const { data, error } = await supabase.storage.from(item.bucket).createSignedUrl(storagePath, 300)
-        if (!error && data?.signedUrl) {
-          fileEntries.push({ label: item.label, url: data.signedUrl, filename: `${item.key}.${storagePath.split('.').pop()}`, bucket: item.bucket, path: storagePath, urlKey: item.urlKey, itemKey: item.key })
-        } else {
-          unavailable.push(item.label)
-          console.warn(`Could not sign URL for ${item.label} (bucket: ${item.bucket}):`, error?.message)
-        }
-      }
-      if (unavailable.length > 0) {
-        msg(`Skipped (couldn't access in Storage): ${unavailable.join(', ')} — check console`, 'error')
-      }
+      const cleanupResult = await cleanupOffload(applicant, applicantZip, oneDriveArchive)
+      const deletedFiles = cleanupResult?.deletedFiles ?? files.length
 
-      // Only files that are confirmed downloaded end up here — this is what
-      // actually gets deleted from Supabase Storage afterward.
-      const downloaded = []
+      console.info('[offload] complete', {
+        applicantId: applicant.id,
+        name: applicant.full_name,
+        offloadedFiles: fileNames,
+        archive: oneDriveArchive,
+        deletedFiles,
+      })
 
-      if (fileEntries.length === 0) {
-        msg('No files to download — marking as offloaded', 'success')
-      } else {
-
-        if (JSZip) {
-          const zip    = new JSZip()
-
-          const folder = zip.folder(applicant.full_name.replace(/\s+/g, '_'))
-          for (const entry of fileEntries) {
-            try {
-              const res = await fetch(entry.url)
-              if (!res.ok) throw new Error(`HTTP ${res.status}`)
-              folder.file(entry.filename, await res.blob())
-              downloaded.push(entry)
-            } catch (e) {
-              console.warn(`Could not fetch ${entry.label}:`, e)
-            }
-          }
-          if (downloaded.length > 0) {
-            const zipBlob = await zip.generateAsync({ type: 'blob' })
-            const link = document.createElement('a')
-            link.href = URL.createObjectURL(zipBlob)
-            link.download = `${applicant.full_name.replace(/\s+/g, '_')}_files.zip`
-            link.click()
-            URL.revokeObjectURL(link.href)
-          }
-        } else {
-          // No JSZip available — fall back to individual downloads. We can't
-          // verify these actually saved (browser download, not a fetch), so
-          // we assume success, same as the app's prior behavior.
-          for (const entry of fileEntries) {
-            const link = document.createElement('a')
-            link.href = entry.url; link.download = entry.filename; link.target = '_blank'
-            document.body.appendChild(link); link.click(); document.body.removeChild(link)
-            await new Promise(r => setTimeout(r, 400))
-            downloaded.push(entry)
-          }
-        }
+      // Keep rejected applicants visible (name only) in the Rejected view.
+      if (wasRejected) {
+        const { error: keepErr } = await supabase.from('volunteer_applications')
+          .update({ stage: OFFLOADED_REJECTED_STAGE })
+          .eq('id', applicant.id)
+        if (keepErr) msg(`Offloaded, but could not keep the name in the Rejected list: ${keepErr.message}`, 'error')
       }
 
-      // Delete only the files that were actually downloaded, grouped by
-      // bucket since storage.remove() takes a list of paths per bucket.
-      const failedDeletes = []
-      const byBucket = downloaded.reduce((acc, e) => {
-        (acc[e.bucket] ||= []).push(e)
-        return acc
-      }, {})
-      for (const [bucket, entries] of Object.entries(byBucket)) {
-        const { error: delErr } = await supabase.storage.from(bucket).remove(entries.map(e => e.path))
-        if (delErr) { failedDeletes.push(...entries.map(e => e.label)); console.warn(`Could not delete from ${bucket}:`, delErr) }
-      }
+      const archiveDetails = files.length === 0
+        ? 'no documents found — nothing archived to OneDrive'
+        : `archived ${files.length} file${files.length !== 1 ? 's' : ''} to OneDrive (${fileNames.join(', ')})` +
+          (oneDriveArchive?.webUrl ? ` at ${oneDriveArchive.webUrl}` : '')
 
-      // Clear DB references to whatever was actually deleted, so nothing in
-      // the app still points at a file that no longer exists in Storage.
-      const successfullyDeleted = downloaded.filter(e => !failedDeletes.includes(e.label))
-      const resumeDeleted = successfullyDeleted.some(e => e.bucket === 'resumes')
-      const checklistClears = successfullyDeleted.filter(e => e.urlKey)
+      await audit(
+          'applicant_offloaded',
+          'applicant',
+          applicant.id,
+          applicant.full_name,
+          `${archiveDetails}; ${deletedFiles} original${deletedFiles === 1 ? '' : 's'} removed from Supabase Storage`
+      )
 
-      if (resumeDeleted) {
-        await supabase.from('volunteer_applications').update({ resume_url: null }).eq('id', applicant.id)
-      }
-      if (checklistClears.length > 0) {
-        const clearPatch = {}
-        for (const e of checklistClears) { clearPatch[e.urlKey] = null }
-        await supabase.from('onboarding_checklists').update(clearPatch).eq('applicant_id', applicant.id)
-      }
+      await loadAll() // we don't want to offload someone twice
 
-      await supabase.from('volunteer_applications')
-        .update({ stage: 'offloaded', offloaded_at: new Date().toISOString() }).eq('id', applicant.id)
+      msg(files.length === 0
+        ? `Offloaded ${applicant.full_name}: no documents found — nothing archived`
+        : `Offloaded ${applicant.full_name}: ${files.length} file${files.length !== 1 ? 's' : ''} archived (${fileLabels.join(', ')})`)
 
-      if (failedDeletes.length > 0) {
-        msg(`${applicant.full_name} offloaded, but ${failedDeletes.length} file(s) could not be removed from storage — check console`, 'error')
-      } else {
-        msg(`${applicant.full_name} offloaded — files downloaded and removed from Supabase`)
-      }
-      await audit('offloaded_volunteer', 'volunteer', applicant.id, applicant.full_name,
-        `files downloaded, ${successfullyDeleted.length} removed from storage${failedDeletes.length ? `, ${failedDeletes.length} failed to delete` : ''}`)
-      setCompleted(prev => prev.filter(a => a.id !== applicant.id))
-      setRecentChecklist(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
-    } catch (e) {
-      msg(e.message || 'Offload failed', 'error')
+    } catch (error) {
+      console.error('[offload] failed', {
+        applicantId: applicant.id,
+        name: applicant.full_name,
+        collectedFiles,
+        archive: oneDriveArchive,
+        error,
+      })
+      msg(`Offload failed: "${error.message}"` + (oneDriveArchive ? "(OneDrive archive successfully created)" : ""), 'error')
+    } finally {
+      setOffloadingId(null)
+      offloadingRef.current = false
     }
-    setOffloadingId(null)
   }
 
   // ─── Create volunteer profile ──────────────────────────────────────────────
@@ -2583,13 +2773,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       return [...withDate, ...withoutDate]
     }
     if (stageFilter === 'rejected') {
-      // Alphabetical by full name.
-      return [...base].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+      // Alphabetical by full name; offloaded rejections are included (name only).
+      return [...base, ...offloadedRejected]
+        .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
     }
     // Default (applied): preserve existing order (created_at desc from DB)
     return base
   })()
   const stageCounts        = STAGES.reduce((acc, s) => { acc[s] = applicants.filter(a => a.stage === s).length; return acc }, {})
+  stageCounts.rejected += offloadedRejected.length
 
   // ─── Non-missionary, Information Systems, and Communications document validation ────────────────────────────────────
 
@@ -3191,12 +3383,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   </button>
                   <button
                     onClick={() => handleOffload(a)}
-                    disabled={isOffloading}
+                    disabled={offloadingId !== null}
                     style={{ padding: '0.35rem 0.85rem', borderRadius: '7px', fontSize: '0.75rem', fontWeight: 600, cursor: isOffloading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOffloading ? 'var(--surface)' : C.primary + '12', color: isOffloading ? 'var(--muted)' : C.primary, border: `1px solid ${C.primary}${isOffloading ? '22' : '55'}`, opacity: isOffloading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '0.35rem' }}
                   >
                     {isOffloading
                       ? <><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.primary}`, borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} /> Offloading...</>
-                      : 'Do not click this button.'
+                      : 'OFFLOAD'
                     }
                   </button>
                 </div>
@@ -3764,6 +3956,20 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                 {filteredApplicants.map(a => {
+                  if (a._offloaded) {
+                    return (
+                      <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)', cursor: 'default' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.primary + '14', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: C.blue, fontSize: '0.95rem', flexShrink: 0 }}>{a.full_name?.charAt(0)}</div>
+                          <p style={{ fontWeight: 500, fontSize: '0.9rem' }}>{a.full_name}</p>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <StagePill stage="rejected" />
+                          <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.muted + '18', color: 'var(--muted)', border: `1px solid ${C.muted}44`, fontWeight: 600 }}>offloaded</span>
+                        </div>
+                      </div>
+                    )
+                  }
                   return (
                     <div key={a.id} onClick={() => selectApplicant(a)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)', cursor: 'pointer', transition: 'border-color 0.15s' }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -3787,6 +3993,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         {a.stage === 'applied' && <StaffingNeedBadge applicant={a} />}
                         <StagePill stage={a.stage} />
+                        {a.stage === 'rejected' && (() => {
+                          const isOffloading = offloadingId === a.id
+                          return (
+                            <button
+                              onClick={e => { e.stopPropagation(); handleOffload(a) }}
+                              disabled={offloadingId !== null}
+                              style={{ padding: '0.35rem 0.85rem', borderRadius: '7px', fontSize: '0.75rem', fontWeight: 600, cursor: offloadingId !== null ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOffloading ? 'var(--surface)' : C.primary + '12', color: isOffloading ? 'var(--muted)' : C.primary, border: `1px solid ${C.primary}${isOffloading ? '22' : '55'}`, opacity: offloadingId !== null ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                            >
+                              {isOffloading
+                                ? <><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.primary}`, borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite' }} /> Offloading...</>
+                                : 'OFFLOAD'
+                              }
+                            </button>
+                          )
+                        })()}
                         {a.created_at && <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{new Date(a.created_at).toLocaleDateString()}</span>}
                         <span style={{ color: 'var(--muted)' }}>›</span>
                       </div>
