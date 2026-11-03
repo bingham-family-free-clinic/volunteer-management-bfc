@@ -2108,17 +2108,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   async function toggleChecklistItem(applicantId, key, value) {
-    if (value) {
-      const item = CHECKLIST_ITEMS.find(i => i.key === key)
-      if (item?.urlKey && !checklist[item.urlKey]) {
-        msg('Upload a file before approving this document.', 'error')
-        return
-      }
-      if (key === 'tb_test' && !(onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired')) {
-        msg('Select an expiration date before approving the TB test.', 'error')
-        return
-      }
-    }
     setSavingChecklist(true)
     const prev = checklist
     setChecklist({ ...prev, [key]: value })
@@ -2565,7 +2554,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   ]
 
   // Final onboarding gate: moves the selected applicant to training. Requires
-  // the complete file (affiliation + position + required docs — the same
+  // the complete file (affiliation + position + required approvals — the same
   // allStepsValid check as the UI). Creates the profile first when the
   // applicant doesn't have one yet, syncs the finalized info onto it, then
   // moves the application to training.
@@ -2573,8 +2562,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const applicant = selected
     if (!applicant) return
     if (!allStepsValid) {
-      const missing = !step1Valid() ? 'affiliation details' : !step2Valid ? 'default position' : `required documents (${missingRequiredDocs.join(', ')})`
-      msg(`Cannot move to training yet — missing ${missing}.`, 'error')
+      const missing = !step1Valid() ? 'affiliation details' : !step2Valid ? 'default position' : `required approvals (${missingRequiredDocs.join(', ')})`
+      msg(`Missing required: ${missing}.`, 'error')
       if (!step1Valid()) setOnboardStep(1)
       else if (!step2Valid) setOnboardStep(2)
       else setOnboardStep(3)
@@ -2732,12 +2721,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   function getMissingRequiredDocs() {
     const requiredChecks = getRequiredChecks()
-    return requiredChecks.filter(key => {
-      if (!checklist[key]) return true
-      const item = CHECKLIST_ITEMS.find(i => i.key === key)
-      if (item?.urlKey && !checklist[item.urlKey]) return true
-      return false
-    }).map(key => CHECKLIST_ITEMS.find(i => i.key === key)?.label ?? key)
+    return requiredChecks
+      .filter(key => !checklist[key])
+      .map(key => CHECKLIST_ITEMS.find(i => i.key === key)?.label ?? key)
   }
 
   const requiredChecks         = getRequiredChecks()
@@ -3731,27 +3717,22 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                     .filter(item => item.key !== 'parking_pass' && item.key !== 'confidentiality_agreement')
                     .map(item => {
                       const checked = checklist[item.key]
-                      const hasFile = !!checklist[item.urlKey]
-                      const requiresDate = item.key === 'tb_test'
-                      const hasDate = !!(onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired')
-                      const canApprove = hasFile && (!requiresDate || hasDate)
-                      const approvalBlocked = !checked && !canApprove
+                      const isRequired = requiredChecks.includes(item.key)
                       return (
                         <div key={item.key} style={{ padding: '0.85rem 1rem', borderRadius: '10px', border: `1px solid ${checked ? C.blue + '55' : 'var(--border)'}`, background: checked ? C.blue + '08' : 'var(--bg)', transition: 'all 0.15s' }}>
-                          <div onClick={() => { if (!savingChecklist && !approvalBlocked) toggleChecklistItem(applicant.id, item.key, !checked) }} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', cursor: approvalBlocked ? 'not-allowed' : 'pointer', opacity: approvalBlocked ? 0.55 : 1 }}>
+                          <div onClick={() => !savingChecklist && toggleChecklistItem(applicant.id, item.key, !checked)} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', cursor: 'pointer' }}>
+                            <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontWeight: 600 }}>Approve:</span>
                             <div style={{ width: 20, height: 20, borderRadius: '5px', flexShrink: 0, border: `2px solid ${checked ? C.blue : 'var(--border)'}`, background: checked ? C.blue : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
                               {checked && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7L10 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                             </div>
                             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                              <span style={{ fontSize: '0.9rem', fontWeight: checked ? 600 : 400, color: checked ? 'var(--text)' : 'var(--muted)', transition: 'color 0.15s' }}>{item.label}</span>
+                              <span style={{ fontSize: '0.9rem', fontWeight: checked ? 600 : 400, color: checked ? 'var(--text)' : 'var(--muted)', transition: 'color 0.15s' }}>
+                                {item.label}
+                                {isRequired && <span style={{ color: C.blue, fontWeight: 700 }}> *</span>}
+                              </span>
                             </div>
                             {checked && <span style={{ fontSize: '0.72rem', color: C.blue, fontWeight: 600, flexShrink: 0 }}>Complete</span>}
                           </div>
-                          {approvalBlocked && (
-                            <p style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.35rem' }}>
-                              Upload a file{requiresDate ? ' and select an expiration date' : ''} to approve.
-                            </p>
-                          )}
                           {item.bucket && <FileRow item={item} applicantId={applicant.id} />}
                         </div>
                       )
@@ -3761,8 +3742,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
                 {onboardForm.affiliation && missingRequiredDocs.length > 0 && (
                   <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', background: C.danger + '08', border: `1px solid ${C.danger}44`, fontSize: '0.83rem', color: C.danger, fontWeight: 500, lineHeight: 1.6 }}>
-                    <span style={{ fontWeight: 700 }}>Cannot move to training yet.</span>{' '}
-                    Missing: <span style={{ fontWeight: 700 }}>{missingRequiredDocs.join(', ')}</span>.
+                    <span style={{ fontWeight: 700 }}>Missing required:</span>{' '}
+                    <span style={{ fontWeight: 700 }}>{missingRequiredDocs.join(', ')}</span>.
                   </div>
                 )}
 
