@@ -1675,6 +1675,9 @@ function VolunteerPageInner() {
                     const buttonLabel    = uploading
                       ? 'Uploading...'
                       : locked ? 'Approved' : hasFile ? 'Change File' : 'Attach File'
+                    const tbDateValue    = tbExpDraft && tbExpDraft !== 'N/A' && tbExpDraft !== 'expired'
+                      ? tbExpDraft
+                      : ''
 
                     return (
                       <div
@@ -1749,12 +1752,13 @@ function VolunteerPageInner() {
                           <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.7 }}>PDF or JPG/PNG</span>
                           {item.key === 'tb_test' && (
                             <input
-                              value={tbExpDraft || (notNeeded ? 'N/A' : '')}
+                              type="date"
+                              value={tbDateValue}
                               onChange={e => setTbExpDraft(e.target.value)}
                               onBlur={e => handleSaveTbExp(e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
                               disabled={disabled}
-                              placeholder="Expiration Date"
+                              title="Expiration Date"
                               style={{
                                 width: '140px',
                                 padding: '0.35rem 0.6rem',

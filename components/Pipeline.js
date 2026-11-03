@@ -2108,6 +2108,17 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   async function toggleChecklistItem(applicantId, key, value) {
+    if (value) {
+      const item = CHECKLIST_ITEMS.find(i => i.key === key)
+      if (item?.urlKey && !checklist[item.urlKey]) {
+        msg('Upload a file before approving this document.', 'error')
+        return
+      }
+      if (key === 'tb_test' && !(onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired')) {
+        msg('Select an expiration date before approving the TB test.', 'error')
+        return
+      }
+    }
     setSavingChecklist(true)
     const prev = checklist
     setChecklist({ ...prev, [key]: value })
@@ -2844,9 +2855,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.6, fontFamily: 'DM Mono, monospace' }}>PDF or JPG/PNG</span>
         {item.key === 'tb_test' && (
           <input
-            value={onboardForm.tb_exp || ''}
+            type="date"
+            value={onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired' ? onboardForm.tb_exp : ''}
             onChange={e => setOnboardForm(f => ({ ...f, tb_exp: e.target.value }))}
-            placeholder="Expiration Date"
+            title="Expiration Date"
             style={{ width: '140px', padding: '0.25rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }}
           />
         )}
@@ -3715,9 +3727,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                     .filter(item => item.key !== 'parking_pass' && item.key !== 'confidentiality_agreement')
                     .map(item => {
                       const checked = checklist[item.key]
+                      const hasFile = !!checklist[item.urlKey]
+                      const requiresDate = item.key === 'tb_test'
+                      const hasDate = !!(onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired')
+                      const canApprove = hasFile && (!requiresDate || hasDate)
+                      const approvalBlocked = !checked && !canApprove
                       return (
                         <div key={item.key} style={{ padding: '0.85rem 1rem', borderRadius: '10px', border: `1px solid ${checked ? C.blue + '55' : 'var(--border)'}`, background: checked ? C.blue + '08' : 'var(--bg)', transition: 'all 0.15s' }}>
-                          <div onClick={() => !savingChecklist && toggleChecklistItem(applicant.id, item.key, !checked)} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', cursor: 'pointer' }}>
+                          <div onClick={() => { if (!savingChecklist && !approvalBlocked) toggleChecklistItem(applicant.id, item.key, !checked) }} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', cursor: approvalBlocked ? 'not-allowed' : 'pointer', opacity: approvalBlocked ? 0.55 : 1 }}>
                             <div style={{ width: 20, height: 20, borderRadius: '5px', flexShrink: 0, border: `2px solid ${checked ? C.blue : 'var(--border)'}`, background: checked ? C.blue : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
                               {checked && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7L10 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                             </div>
@@ -3726,6 +3743,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                             </div>
                             {checked && <span style={{ fontSize: '0.72rem', color: C.blue, fontWeight: 600, flexShrink: 0 }}>Complete</span>}
                           </div>
+                          {approvalBlocked && (
+                            <p style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.35rem' }}>
+                              Upload a file{requiresDate ? ' and select an expiration date' : ''} to approve.
+                            </p>
+                          )}
                           {item.bucket && <FileRow item={item} applicantId={applicant.id} />}
                         </div>
                       )
