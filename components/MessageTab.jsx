@@ -1100,8 +1100,17 @@ export function MessageTab({
   // even when the messages tab is not open ──
   useEffect(() => {
     if (!user) return
-    const id = setInterval(fetchMessages, 30000)
-    return () => clearInterval(id)
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchMessages()
+    }, 30000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') fetchMessages()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [user])
 
   // ── Unlock pinch-to-zoom when lightbox is open on mobile ───────────────────
@@ -1167,6 +1176,9 @@ export function MessageTab({
     let timer = null
     const scheduleRefetch = () => {
       if (timer) return
+      // Realtime can fire while the tab is hidden — don't refetch then;
+      // the visibilitychange-driven poll catches up once visible again.
+      if (document.visibilityState !== 'visible') return
       timer = setTimeout(() => { timer = null; fetchMessages() }, 500)
     }
     const channel = supabase

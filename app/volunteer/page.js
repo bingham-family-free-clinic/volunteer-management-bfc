@@ -431,7 +431,7 @@ function DesktopHeader({ activeTab, onSelectTab, otherItems, otherOpen, onToggle
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
-      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
         {mainTabs.map(t => (
@@ -829,10 +829,20 @@ function VolunteerPageInner() {
   }
 
   // ── Poll unread count every 30s so the badge stays current ──
+  // Skip polling while the tab is hidden (saves egress); catch up on return.
   useEffect(() => {
     pollUnread()
-    const id = setInterval(pollUnread, 30000)
-    return () => clearInterval(id)
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') pollUnread()
+    }, 30000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') pollUnread()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [user])
 
   // ── Real-time subscription: update badge immediately when new messages arrive ──
@@ -844,7 +854,11 @@ function VolunteerPageInner() {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-      }, () => { pollUnread() })
+      }, () => {
+        // Realtime events can fire while the tab is hidden — no refetch then;
+        // the visibilitychange-driven poll catches up when visible again.
+        if (document.visibilityState === 'visible') pollUnread()
+      })
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])
@@ -1427,7 +1441,7 @@ function VolunteerPageInner() {
               }}
             >
               <img
-                src="/logo2.png"
+                src="/logos/logo2-96.webp"
                 alt="Account"
                 style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
               />

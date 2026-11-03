@@ -81,7 +81,7 @@ export default function ResetPasswordPage() {
       }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <img
-            src="/logo3.png"
+            src="/logos/logo3-256.webp"
             alt="Logo"
             style={{ width: '120px', height: 'auto', display: 'block', margin: '0 auto 1rem', borderRadius: '12px' }}
           />

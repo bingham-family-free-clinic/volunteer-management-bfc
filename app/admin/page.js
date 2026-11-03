@@ -378,7 +378,7 @@ function AdminDesktopHeader({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', padding: '0.5rem 0' }}>
-      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
         {showVolunteers && (
@@ -1449,18 +1449,24 @@ export default function AdminPage() {
 
         void refreshLiveData()
 
-        // Refresh every 5 min
-        const interval = setInterval(refreshLiveData, 5 * 60 * 1000)
-
-        function handleFocus() {
+        // Refresh every 5 min, but skip ticks while the tab is hidden
+        // (saves egress); refresh on return to visibility.
+        const interval = setInterval(() => {
+            if (document.visibilityState !== 'visible') return
             void refreshLiveData()
+        }, 5 * 60 * 1000)
+
+        function handleVisibilityChange() {
+            if (document.visibilityState === 'visible') {
+                void refreshLiveData()
+            }
         }
 
-        window.addEventListener('focus', handleFocus)
+        document.addEventListener('visibilitychange', handleVisibilityChange)
 
         return () => {
             clearInterval(interval)
-            window.removeEventListener('focus', handleFocus)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
     }, [tab, loading])
 
@@ -2205,7 +2211,7 @@ export default function AdminPage() {
               <span style={{ width: '26px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
             </button>
             <img
-              src="/logo2.png"
+              src="/logos/logo2-96.webp"
               alt="Logo"
               style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
             />

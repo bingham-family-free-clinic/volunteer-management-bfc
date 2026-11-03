@@ -1,6 +1,7 @@
 export default function manifest() {
   const isNonProd = process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production'
-  const logo = isNonProd ? '/logo4.png' : '/logo3.png'
+  const icon192 = isNonProd ? '/logos/logo4-192.webp' : '/logos/logo3-192.webp'
+  const icon512 = isNonProd ? '/logos/logo4-512.webp' : '/logos/logo3-512.webp'
 
   return {
     name: 'BFC Volunteer Portal',
@@ -12,8 +13,8 @@ export default function manifest() {
     theme_color: '#02416b',
     orientation: 'portrait',
     icons: [
-      { src: logo, sizes: '192x192', type: 'image/png' },
-      { src: logo, sizes: '512x512', type: 'image/png' },
+      { src: icon192, sizes: '192x192', type: 'image/webp' },
+      { src: icon512, sizes: '512x512', type: 'image/webp' },
     ],
   }
 }
