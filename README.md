@@ -89,7 +89,7 @@ npm start      # Run production build locally
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Client + server | Push subscription; `web-push` on server |
 | `VAPID_PRIVATE_KEY` | Server only | Push delivery |
 | `VAPID_EMAIL` | Server only | VAPID contact email for `web-push` |
-| `VERCEL_ENV` | Server (automatic on Vercel) | Switches app icon between production (`logo3.png`) and non-production (`logo4.png`) |
+| `VERCEL_ENV` | Server (automatic on Vercel) | Switches app icon between production (`logo3*.webp`) and non-production (`logo4*.webp`) |
 
 There is no `.env.example` file in the repository. Obtain values from the project maintainer or your Supabase/Vercel dashboard.
 
@@ -184,9 +184,15 @@ Next.js API Routes:
 |   |-- interview-schedule.js        # Interview slot formatting (sync with Edge Function)
 |   `-- ConfirmDialog.js             # Shared confirm dialog provider + hook
 |-- public/
-|   |-- logo2.png                    # Clinical Supervisor header logo
-|   |-- logo3.png                    # Production app icon
-|   |-- logo4.png                    # Non-production app icon
+|   |-- logos/                       # Optimized, downsized WebP logo variants (immutable browser cache)
+|   |   |-- logo2-96.webp            # Header / account logo
+|   |   |-- logo3-192.webp           # Production PWA icon (192)
+|   |   |-- logo3-256.webp           # Production login / guest-hours logo
+|   |   |-- logo3-512.webp           # Production PWA icon (512)
+|   |   |-- logo3-180.png            # Production apple-touch-icon fallback
+|   |   |-- logo4-192.webp           # Non-production PWA icon (192)
+|   |   |-- logo4-512.webp           # Non-production PWA icon (512)
+|   |   `-- logo4-180.png            # Non-production apple-touch-icon fallback
 |   |-- newrelic-production.js       # New Relic error tracking (production)
 |   |-- newrelic-staging.js          # New Relic error tracking (non-production)
 |   |-- manifest.js                  # PWA manifest export

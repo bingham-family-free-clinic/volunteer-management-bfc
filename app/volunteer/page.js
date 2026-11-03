@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } f
 import { supabase } from '../../lib/supabase'
 import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE, TASK_TEAMS } from '../../lib/constants'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
-import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
+import { getInboxMessages, parseGroupMemberIds, countUnreadThreads } from '../../lib/messageUtils'
 import { MessageCard } from '../../components/MessageCard'
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotifications.js'
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
@@ -431,7 +431,7 @@ function DesktopHeader({ activeTab, onSelectTab, otherItems, otherOpen, onToggle
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
-      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
         {mainTabs.map(t => (
@@ -571,6 +571,8 @@ function VolunteerPageInner() {
   // ── Core auth/profile state (loaded immediately) ─────────────────────────
    const [user, setUser]       = useState(null)
    const [profile, setProfile] = useState(null)
+   const profileRef = useRef(null)
+   profileRef.current = profile
    const [loading, setLoading] = useState(true)
    const [tab, setTab]         = useState('clock')
    const [messageId, setMessageId] = useState(null)
@@ -800,39 +802,45 @@ function VolunteerPageInner() {
   }, [])
 
   // ── Unread count fetcher ────────────────────────────────────────
-  async function pollUnread() {
-    if (!user) return
+  // Uses countUnreadThreads so the badge follows exactly the same visibility
+  // rules as MessageTab (which overwrites this count once it mounts).
+  async function loadUnreadCount(u, p) {
+    if (!u) return
     try {
       const [{ data: msgs }, { data: reads }] = await Promise.all([
         supabase.from('messages')
           .select('id, sender_id, recipient_type, recipient_role, recipient_volunteer_id, parent_message_id')
           .order('created_at', { ascending: false })
-          .limit(10 * 5),
-        supabase.from('message_reads').select('message_id').eq('user_id', user.id),
+          .limit(MSG_PAGE_SIZE * 5), // same window MessageTab fetches
+        supabase.from('message_reads').select('message_id').eq('user_id', u.id),
       ])
-      const fetched = msgs || []
       const readSet = new Set((reads || []).map(r => r.message_id))
-      const topLevel = fetched.filter(m => !m.parent_message_id)
-      const repliesMap = {}
-      fetched.filter(m => m.parent_message_id).forEach(r => {
-        if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
-        repliesMap[r.parent_message_id].push(r)
-      })
-      const count = topLevel.filter(m => {
-        if (m.recipient_type === 'group' && m.sender_id !== user.id && !parseGroupMemberIds(m).includes(user.id)) return false
-        const isUnreadMsg = m.sender_id !== user.id && !readSet.has(m.id)
-        const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
-        return isUnreadMsg || hasUnreadReplies
-      }).length
-      setUnreadCount(count)
+      setUnreadCount(countUnreadThreads(msgs || [], readSet, u, p))
     } catch (e) { /* ignore */ }
   }
+  // Timers/subscriptions outlive renders, so read the latest profile via ref.
+  function pollUnread() { return loadUnreadCount(user, profileRef.current) }
+
+  // Recount once the profile arrives (visibility rules depend on its role).
+  useEffect(() => {
+    if (user && profile) loadUnreadCount(user, profile)
+  }, [user, profile?.default_role, profile?.affiliation])
 
   // ── Poll unread count every 30s so the badge stays current ──
+  // Skip polling while the tab is hidden (saves egress); catch up on return.
   useEffect(() => {
     pollUnread()
-    const id = setInterval(pollUnread, 30000)
-    return () => clearInterval(id)
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') pollUnread()
+    }, 30000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') pollUnread()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [user])
 
   // ── Real-time subscription: update badge immediately when new messages arrive ──
@@ -844,7 +852,11 @@ function VolunteerPageInner() {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-      }, () => { pollUnread() })
+      }, () => {
+        // Realtime events can fire while the tab is hidden — no refetch then;
+        // the visibilitychange-driven poll catches up when visible again.
+        if (document.visibilityState === 'visible') pollUnread()
+      })
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])
@@ -892,31 +904,7 @@ function VolunteerPageInner() {
      setLoading(false)
 
     // Seed the unread message count badge immediately on load
-    const { data: allMsgs } = await supabase
-      .from('messages')
-      .select('id, sender_id, recipient_type, recipient_role, recipient_volunteer_id, parent_message_id')
-      .order('created_at', { ascending: false })
-      .limit(MSG_PAGE_SIZE * 2)
-    const { data: reads } = await supabase
-      .from('message_reads')
-      .select('message_id')
-      .eq('user_id', user.id)
-    const readSet = new Set((reads || []).map(r => r.message_id))
-    const msgs = allMsgs || []
-    // Count top-level threads where there's at least one unread message from someone else
-    const topLevel = msgs.filter(m => !m.parent_message_id)
-    const repliesMap = {}
-    msgs.filter(m => m.parent_message_id).forEach(r => {
-      if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
-      repliesMap[r.parent_message_id].push(r)
-    })
-    const count = topLevel.filter(m => {
-      if (m.recipient_type === 'group' && m.sender_id !== user.id && !parseGroupMemberIds(m).includes(user.id)) return false
-      const isUnreadMsg = m.sender_id !== user.id && !readSet.has(m.id)
-      const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== user.id)
-      return isUnreadMsg || hasUnreadReplies
-    }).length
-    setUnreadCount(count)
+    loadUnreadCount(user, profileData)
 
     /*const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
     const { data: lunch } = await supabase
@@ -1427,7 +1415,7 @@ function VolunteerPageInner() {
               }}
             >
               <img
-                src="/logo2.png"
+                src="/logos/logo2-96.webp"
                 alt="Account"
                 style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
               />

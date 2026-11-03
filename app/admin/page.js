@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
-import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
+import { getInboxMessages, parseGroupMemberIds, countUnreadThreads } from '../../lib/messageUtils'
 import DataDashboard from '../../components/DataDashboard'
 import ClinicOpenings from '../../components/ClinicOpenings'
 import Pipeline from '../../components/Pipeline'
@@ -378,7 +378,7 @@ function AdminDesktopHeader({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', padding: '0.5rem 0' }}>
-      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
         {showVolunteers && (
@@ -619,6 +619,8 @@ function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitc
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const [profile, setProfile] = useState(null)
+  const profileRef = useRef(null)
+  profileRef.current = profile
   const [user, setUser] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
 
@@ -1364,7 +1366,7 @@ export default function AdminPage() {
        setProfile(p)
        if (p?.default_role === 'Credentialing') setTab('providers')
        await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
-       fetchMessages(user.id)
+       fetchMessages(user.id, p)
        // Guest orgs load best-effort (tables may not exist until migrations run).
       loadGuestOrgs()
       loadGuestHoursTotals()
@@ -1376,7 +1378,7 @@ export default function AdminPage() {
   }, [])
 
   // ── Messages data fetcher ───────────────────────────────────────────
-  async function fetchMessages(userId) {
+  async function fetchMessages(userId, prof = profileRef.current) {
     if (!userId) return
     const [{ data: msgs }, { data: reads }, { data: usersData }] = await Promise.all([
       supabase.from('messages')
@@ -1393,19 +1395,8 @@ export default function AdminPage() {
     ])
     const fetched = msgs || []
     const readSet = new Set((reads || []).map(r => r.message_id))
-    const topLevel = fetched.filter(m => !m.parent_message_id)
-    const repliesMap = {}
-    fetched.filter(m => m.parent_message_id).forEach(r => {
-      if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
-      repliesMap[r.parent_message_id].push(r)
-    })
-    const count = topLevel.filter(m => {
-      if (m.recipient_type === 'group' && m.sender_id !== userId && !parseGroupMemberIds(m).includes(userId)) return false
-      const isUnreadMsg = m.sender_id !== userId && !readSet.has(m.id)
-      const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== userId)
-      return isUnreadMsg || hasUnreadReplies
-    }).length
-    setUnreadCount(count)
+    // Same visibility rules as MessageTab, so the badge matches the tab.
+    setUnreadCount(countUnreadThreads(fetched, readSet, { id: userId }, prof))
   }
 
   // ── Real-time subscription: update badge immediately when new messages arrive ──
@@ -1449,18 +1440,24 @@ export default function AdminPage() {
 
         void refreshLiveData()
 
-        // Refresh every 5 min
-        const interval = setInterval(refreshLiveData, 5 * 60 * 1000)
-
-        function handleFocus() {
+        // Refresh every 5 min, but skip ticks while the tab is hidden
+        // (saves egress); refresh on return to visibility.
+        const interval = setInterval(() => {
+            if (document.visibilityState !== 'visible') return
             void refreshLiveData()
+        }, 5 * 60 * 1000)
+
+        function handleVisibilityChange() {
+            if (document.visibilityState === 'visible') {
+                void refreshLiveData()
+            }
         }
 
-        window.addEventListener('focus', handleFocus)
+        document.addEventListener('visibilitychange', handleVisibilityChange)
 
         return () => {
             clearInterval(interval)
-            window.removeEventListener('focus', handleFocus)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
     }, [tab, loading])
 
@@ -2205,7 +2202,7 @@ export default function AdminPage() {
               <span style={{ width: '26px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
             </button>
             <img
-              src="/logo2.png"
+              src="/logos/logo2-96.webp"
               alt="Logo"
               style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
             />
