@@ -2852,10 +2852,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           ? <><button onClick={() => openFile(item.bucket, checklist[item.urlKey])} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>{volunteerUploaded ? 'Download' : 'View File'}</button><button onClick={() => ref.current?.click()} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Replace</button></>
           : <button onClick={() => ref.current?.click()} disabled={uploading} style={{ padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: uploading ? 0.5 : 1 }}>{uploading ? 'Uploading...' : '+ Attach File'}</button>
         }
-        <span style={{ fontSize: '0.67rem', color: item.key === 'tb_test' ? 'var(--text)' : 'var(--muted)', opacity: item.key === 'tb_test' ? 1 : 0.6, fontFamily: 'DM Mono, monospace' }}>PDF or JPG/PNG</span>
+        <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: item.key === 'tb_test' ? 1 : 0.6, fontFamily: 'DM Mono, monospace' }}>PDF or JPG/PNG</span>
         {item.key === 'tb_test' && (
           <>
-            <span style={{ fontSize: '0.67rem', color: 'var(--muted)', fontFamily: 'DM Sans, sans-serif' }}>Expiration Date:</span>
+            <span style={{ fontSize: '0.67rem', color: 'var(--muted)', fontFamily: 'DM Sans, sans-serif' }}> | Expiration Date:</span>
             <input
               type="date"
               value={onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired' ? onboardForm.tb_exp : ''}
