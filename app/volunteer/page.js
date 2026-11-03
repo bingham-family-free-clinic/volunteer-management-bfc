@@ -1777,9 +1777,10 @@ function VolunteerPageInner() {
                           >
                             {buttonLabel}
                           </button>
-                          <span style={{ fontSize: '0.67rem', color: item.key === 'tb_test' ? 'var(--text)' : 'var(--muted)', opacity: item.key === 'tb_test' ? 1 : 0.7 }}>PDF or JPG/PNG</span>
+                          <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.7 }}>PDF or JPG/PNG</span>
                           {item.key === 'tb_test' && (
                             <>
+                              <span style={{ fontSize: '0.67rem', color: 'var(--muted)', opacity: 0.7 }}>|</span>
                               <span style={{ fontSize: '0.67rem', color: 'var(--muted)' }}>Expiration Date:</span>
                               {tbNotNeeded ? (
                                 <span style={{ width: '140px', padding: '0.35rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)', boxSizing: 'border-box' }}>
