@@ -62,6 +62,7 @@ function formatReference(name, contact) {
 }
 
 const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
+const OFFLOADED_REJECTED_STAGE = 'rejected_offloaded'
 const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', training: 'Training', rejected: 'Rejected' }
 
 // ── Blue-only palette ─────────────────────────────────────────────────────────
@@ -1386,6 +1387,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // Pipeline state
   const [applicants,      setApplicants]      = useState([])
+  const [offloadedRejected, setOffloadedRejected] = useState([])  // name-only rows
   const [completed,       setCompleted]       = useState([])
   const [loading,         setLoading]         = useState(true)
   const [loadError,       setLoadError]       = useState(null)
@@ -1649,6 +1651,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       setCompleted(completedApps)
       if (completedApps.length > 0) await loadRecentChecklists(completedApps.map(a => a.id))
     }
+    await loadOffloadedRejected()
     setLoading(false)
   }
 
@@ -1657,6 +1660,17 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       .from('volunteer_applications').select('*').in('stage', STAGES).order('created_at', { ascending: false })
     if (error) { setLoadError(error.message); setApplicants([]) }
     else setApplicants(data || [])
+  }
+
+  // Name-only query on purpose: nothing but id/name/date is ever pulled for
+  // offloaded rejections, so no other PII reaches the client.
+  async function loadOffloadedRejected() {
+    const { data, error } = await supabase
+      .from('volunteer_applications')
+      .select('id, full_name, stage_updated_at')
+      .eq('stage', OFFLOADED_REJECTED_STAGE)
+    if (error) { console.error('load offloaded rejections failed:', error); return }
+    setOffloadedRejected((data || []).map(r => ({ ...r, stage: OFFLOADED_REJECTED_STAGE, _offloaded: true })))
   }
 
   // Clinic schedule + waitlist rows feeding the Applied-stage "Staffing Need"
@@ -2457,6 +2471,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setOffloadingId(applicant.id)
 
     let oneDriveArchive = null
+    const wasRejected = applicant.stage === 'rejected'
 
     try {
       const applicantZip = await makeApplicantZip(applicant)
@@ -2466,6 +2481,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       }
 
       const cleanupResult = await cleanupOffload(applicant, applicantZip, oneDriveArchive)
+
+      // Keep rejected applicants visible (name only) in the Rejected view.
+      if (wasRejected) {
+        const { error: keepErr } = await supabase.from('volunteer_applications')
+          .update({ stage: OFFLOADED_REJECTED_STAGE })
+          .eq('id', applicant.id)
+        if (keepErr) msg(`Offloaded, but could not keep the name in the Rejected list: ${keepErr.message}`, 'error')
+      }
 
       await audit(
           'applicant_offloaded',
@@ -2661,13 +2684,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       return [...withDate, ...withoutDate]
     }
     if (stageFilter === 'rejected') {
-      // Alphabetical by full name.
-      return [...base].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+      // Alphabetical by full name; offloaded rejections are included (name only).
+      return [...base, ...offloadedRejected]
+        .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
     }
     // Default (applied): preserve existing order (created_at desc from DB)
     return base
   })()
   const stageCounts        = STAGES.reduce((acc, s) => { acc[s] = applicants.filter(a => a.stage === s).length; return acc }, {})
+  stageCounts.rejected += offloadedRejected.length
 
   // ─── Non-missionary, Information Systems, and Communications document validation ────────────────────────────────────
 
@@ -3840,6 +3865,20 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                 {filteredApplicants.map(a => {
+                  if (a._offloaded) {
+                    return (
+                      <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)', cursor: 'default' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.primary + '14', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: C.blue, fontSize: '0.95rem', flexShrink: 0 }}>{a.full_name?.charAt(0)}</div>
+                          <p style={{ fontWeight: 500, fontSize: '0.9rem' }}>{a.full_name}</p>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <StagePill stage="rejected" />
+                          <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem', borderRadius: '100px', background: C.muted + '18', color: 'var(--muted)', border: `1px solid ${C.muted}44`, fontWeight: 600 }}>offloaded</span>
+                        </div>
+                      </div>
+                    )
+                  }
                   return (
                     <div key={a.id} onClick={() => selectApplicant(a)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)', cursor: 'pointer', transition: 'border-color 0.15s' }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
