@@ -21,8 +21,10 @@ export default function ClinicOpenings({ onClose }) {
   const [error,   setError]   = useState(null)
   const [filter,  setFilter]  = useState('all') // 'all' | day name | shift string
   const [roleFilter, setRoleFilter] = useState('all') // 'all' | Role name
+  const todayStr = () => new Date().toISOString().split('T')[0]
+  const [asOfDate, setAsOfDate] = useState(todayStr()) // defaults to today
 
-  useEffect(() => { fetchOpenings() }, [])
+  useEffect(() => { fetchOpenings() }, [asOfDate])
   
   async function fetchOpenings() {
     setLoading(true); setError(null)
@@ -32,9 +34,10 @@ export default function ClinicOpenings({ onClose }) {
         .select('day_of_week, shift_time, role, volunteer_id, end_date, week_pattern')
       if (err) throw err
 
-      const today = new Date().toISOString().split('T')[0]
+      // Entries still active after the selected date (defaults to today)
+      const asOf = asOfDate || todayStr()
       const activeRows = (rows || []).filter(r =>
-        (r.end_date == null || r.end_date > today)
+        (r.end_date == null || r.end_date > asOf)
       )
       
       const results = []
@@ -110,9 +113,14 @@ export default function ClinicOpenings({ onClose }) {
               </span>
             )}
           </div>
-          <p style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>Roles with unfilled recurring schedule slots</p>
+          <p style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>Roles with unfilled recurring schedule slots after {asOfDate === todayStr() ? 'today' : asOfDate}</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open after</label>
+          <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value || todayStr())} style={{ padding: '0.35rem 0.6rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontFamily: 'DM Sans, sans-serif', fontSize: '0.82rem' }} />
+          {asOfDate !== todayStr() && (
+            <button onClick={() => setAsOfDate(todayStr())} style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)' }}>Today</button>
+          )}
           <button onClick={fetchOpenings} style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)' }}>↻ Refresh</button>
           {onClose && (
             <button onClick={onClose} style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--muted)' }}>✕ Close</button>
