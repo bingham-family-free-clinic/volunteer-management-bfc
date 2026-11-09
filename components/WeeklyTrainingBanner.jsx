@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { TRAINING_ROLES, NO_ROLE_TRAINING_TEXT, formatWeekRange } from '../lib/trainingUtils'
 
@@ -20,6 +20,98 @@ const S = {
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
   },
+}
+
+// ── Linkify ──────────────────────────────────────────────────────────────────
+// Turns plain text into text with clickable links. Used by the volunteer-facing
+// weekly training so admins can paste links into the editor and volunteers can
+// tap them.
+//
+// Supported (all opened in a new tab):
+//   • Markdown-style links:  [Sign-in sheet](https://example.com/sheet)
+//   • Bare URLs:             https://example.com/page   or   www.example.com
+//   • Email addresses:       volunteers@example.org  (opens a mailto: link)
+//
+// Only http(s) and mailto links are ever rendered as anchors, so text like
+// "javascript:..." can never become a clickable link. Line breaks and spacing
+// are preserved by the parent's `whiteSpace: 'pre-wrap'`.
+
+const TOKEN_RE = new RegExp(
+  [
+    '\\[([^\\]\\n]+)\\]\\(((?:https?:\\/\\/|mailto:)[^\\s)]+)\\)', // 1,2: [label](url)
+    '((?:https?:\\/\\/|www\\.)[^\\s<]+)',                          // 3: bare URL
+    '([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})',           // 4: email
+  ].join('|'),
+  'g'
+)
+
+const linkStyle = {
+  color: 'var(--accent)',
+  textDecoration: 'underline',
+  textUnderlineOffset: '2px',
+  wordBreak: 'break-word',
+  overflowWrap: 'anywhere',
+}
+
+// Bare URLs often swallow sentence punctuation, e.g. "see https://x.com/a)."
+// Peel off trailing punctuation (and unbalanced closing parens) back to text.
+function splitTrailingPunctuation(url) {
+  let trailing = ''
+  while (url.length) {
+    const last = url[url.length - 1]
+    if (/[.,;:!?'"”’]/.test(last)) {
+      trailing = last + trailing
+      url = url.slice(0, -1)
+    } else if (last === ')' && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) {
+      trailing = last + trailing
+      url = url.slice(0, -1)
+    } else {
+      break
+    }
+  }
+  return [url, trailing]
+}
+
+function Anchor({ href, children }) {
+  const external = /^https?:/i.test(href)
+  return (
+    <a
+      href={href}
+      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      style={linkStyle}
+    >
+      {children}
+    </a>
+  )
+}
+
+function Linkify({ text }) {
+  if (!text) return null
+  const str = String(text)
+  const out = []
+  let lastIndex = 0
+  let key = 0
+  TOKEN_RE.lastIndex = 0
+
+  let m
+  while ((m = TOKEN_RE.exec(str)) !== null) {
+    if (m.index > lastIndex) out.push(str.slice(lastIndex, m.index))
+
+    if (m[1] && m[2]) {
+      out.push(<Anchor key={key++} href={m[2]}>{m[1]}</Anchor>)
+    } else if (m[3]) {
+      const [url, trailing] = splitTrailingPunctuation(m[3])
+      const href = /^www\./i.test(url) ? `https://${url}` : url
+      out.push(<Anchor key={key++} href={href}>{url}</Anchor>)
+      if (trailing) out.push(trailing)
+    } else if (m[4]) {
+      out.push(<Anchor key={key++} href={`mailto:${m[4]}`}>{m[4]}</Anchor>)
+    }
+    lastIndex = m.index + m[0].length
+  }
+  if (lastIndex < str.length) out.push(str.slice(lastIndex))
+
+  return out.map((part, i) => <Fragment key={i}>{part}</Fragment>)
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -132,7 +224,7 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
             {announcements.map((a, idx) => (
               <div key={idx} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
                 <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.9rem', color: 'var(--accent)', lineHeight: 1.5, flexShrink: 0 }}>–</span>
-                <p style={{ fontSize: '0.92rem', color: 'var(--text)', lineHeight: 1.5, margin: 0 }}>{a}</p>
+                <p style={{ fontSize: '0.92rem', color: 'var(--text)', lineHeight: 1.5, margin: 0 }}><Linkify text={a} /></p>
               </div>
             ))}
           </div>
@@ -144,7 +236,7 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
         <div style={S.card}>
           <p style={{ ...S.label, marginBottom: '0.75rem' }}>General Training</p>
           <p style={{ fontSize: '0.92rem', color: 'var(--text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-            {training.general_training}
+            <Linkify text={training.general_training} />
           </p>
         </div>
       )}
@@ -153,7 +245,7 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
       {training.weekly_goal && (
         <div style={S.card}>
           <p style={{ ...S.label, marginBottom: '0.5rem' }}>Weekly Goal</p>
-          <p style={{ fontSize: '0.92rem', color: 'var(--text)', lineHeight: 1.55 }}>{training.weekly_goal}</p>
+          <p style={{ fontSize: '0.92rem', color: 'var(--text)', lineHeight: 1.55 }}><Linkify text={training.weekly_goal} /></p>
         </div>
       )}
 
@@ -162,7 +254,7 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
         <div style={S.card}>
           <p style={{ ...S.label, marginBottom: '0.5rem' }}>Result of Last Week's Goal</p>
           <p style={{ fontSize: '0.92rem', color: 'var(--text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-            {training.last_week_goal_result}
+            <Linkify text={training.last_week_goal_result} />
           </p>
         </div>
       )}
@@ -202,7 +294,7 @@ export default function WeeklyTrainingBanner({ userId, roles = [], weekStart, on
                 {open && (
                   <div style={{ padding: '0 0.9rem 0.9rem' }}>
                     <p style={{ fontSize: '0.88rem', color: text ? 'var(--text)' : 'var(--muted)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-                      {text || NO_ROLE_TRAINING_TEXT}
+                      {text ? <Linkify text={text} /> : NO_ROLE_TRAINING_TEXT}
                     </p>
                   </div>
                 )}
