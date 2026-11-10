@@ -377,3 +377,67 @@ begin
   end if;
 end
 $$;
+
+-- ─── 5. Retire the "training" pipeline stage ─────────────────────────────────
+-- The Training stage was removed from the admin pipeline. Anyone still sitting
+-- in it is added to the waitlist and their application is marked completed.
+--
+-- Rules:
+--   * Only applicants with an existing volunteer profile are added to the
+--     waitlist (training-stage rows should always have one).
+--   * An existing waitlist entry is never duplicated; the applicant is just
+--     moved to completed.
+--   * Availability/roles come from the onboarding columns and default to empty
+--     arrays, matching the app's waitlist hand-off behaviour.
+--
+-- Safe to re-run: once no rows remain in 'training', this is a no-op.
+
+do $$
+declare
+  r record;
+begin
+  for r in
+    select va.id,
+           va.volunteer_id,
+           coalesce(va.onboard_preferred_slots, '{}'::text[]) as preferred_slots,
+           coalesce(va.onboard_preferred_roles, '{}'::text[]) as preferred_roles
+      from public.volunteer_applications va
+     where va.stage = 'training'
+  loop
+    if r.volunteer_id is not null
+       and exists (
+         select 1 from public.profiles p where p.id = r.volunteer_id
+       )
+       and not exists (
+         select 1 from public.waitlist w where w.volunteer_id = r.volunteer_id
+       )
+    then
+      insert into public.waitlist (
+        volunteer_id,
+        preferred_slots,
+        preferred_roles,
+        source,
+        added_by
+      )
+      values (
+        r.volunteer_id,
+        r.preferred_slots,
+        r.preferred_roles,
+        'pipeline',
+        coalesce(
+          (select p.id from public.profiles p
+            where p.role = 'admin'
+            order by p.id
+            limit 1),
+          r.volunteer_id
+        )
+      );
+    end if;
+
+    update public.volunteer_applications
+       set stage = 'completed',
+           stage_updated_at = now()
+     where id = r.id;
+  end loop;
+end
+$$;
