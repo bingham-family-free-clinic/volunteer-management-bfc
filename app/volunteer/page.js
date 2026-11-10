@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } from 'react'
 import { supabase } from '../../lib/supabase'
-import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE, TASK_TEAMS } from '../../lib/constants'
+import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE, TASK_TEAMS, ROLE_SUGGESTIONS, getRoleCapacity } from '../../lib/constants'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds, countUnreadThreads } from '../../lib/messageUtils'
 import { createUnreadBadgeLoader } from '../../lib/messageSync'
@@ -15,6 +15,7 @@ import BiannualSurvey, { isSurveyWeek, isSurveyWeekKey } from '../../components/
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
 import { useConfirm } from '../../lib/ConfirmDialog'
+import { isActiveThisWeek } from '../../components/Live'
 
 
 export const dynamic = 'force-dynamic'
@@ -1012,21 +1013,102 @@ function VolunteerPageInner() {
     setMyCoverRequests([])
 
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
-    const [{ data: openSubs }, { data: myCoverReqs }] = await Promise.all([
-      supabase
-        .from('callouts')
-        .select('id, callout_date, day_of_week, shift_time, role, volunteer:profiles!callouts_volunteer_id_fkey(full_name)')
-        .eq('status', 'approved')
-        .is('covered_by', null)
-        .gte('callout_date', today)
-        .order('callout_date', { ascending: true }),
-      supabase
-        .from('shift_cover_requests')
-        .select('callout_id, status')
-        .eq('volunteer_id', user.id),
-    ])
+      const [
+          { data: openSubs },
+          { data: myCoverReqs },
+          { data: allSchedule },
+          { data: approvedClinicCovers },
+      ] = await Promise.all([
+          // Existing approved call-outs
+          supabase
+              .from('callouts')
+              .select('id, callout_date, day_of_week, shift_time, role, volunteer:profiles!callouts_volunteer_id_fkey(full_name)')
+              .eq('status', 'approved')
+              .is('covered_by', null)
+              .gte('callout_date', today)
+              .order('callout_date', { ascending: true }),
 
-    setOpenShifts((openSubs || []).map(c => ({ ...c, profiles: c.volunteer })))
+          // Current volunteer's requests
+          supabase
+              .from('shift_cover_requests')
+              .select('callout_id, shift_date, shift_time, role, status')
+              .eq('volunteer_id', user.id),
+
+          // Recurring staffing used to calculate openings
+          supabase
+              .from('schedule')
+              .select('volunteer_id, day_of_week, shift_time, role, start_date, end_date, week_pattern'),
+
+          // One-time Clinic Openings already approved
+          supabase
+              .from('shift_cover_requests')
+              .select('volunteer_id, shift_date, shift_time, role')
+              .is('callout_id', null)
+              .eq('status', 'approved'),
+      ])
+
+      const [year, month, day] = today.split('-').map(Number)
+      const todayUtc = new Date(Date.UTC(year, month - 1, day))
+      const possibleOpenings = []
+
+      for (let offset = 0; offset <= 7; offset++) {
+          const date = new Date(todayUtc)
+          date.setUTCDate(todayUtc.getUTCDate() + offset)
+
+          const weekday = date.getUTCDay()
+          if (weekday < 1 || weekday > 5) continue
+
+          possibleOpenings.push({
+              date: date.toISOString().slice(0, 10),
+              day: DAYS[weekday - 1].toLowerCase(),
+          })
+      }
+
+      const clinicOpenings = []
+
+      for (const { date, day } of possibleOpenings) {
+          for (const shift of SHIFTS) {
+              for (const role of Object.keys(ROLE_SUGGESTIONS)) {
+                  const capacity = getRoleCapacity(day, shift, role)
+                  if (!capacity) continue
+
+                  const scheduledCount = (allSchedule || []).filter(s =>
+                      s.day_of_week === day &&
+                      s.shift_time === shift &&
+                      s.role === role &&
+                      (!s.start_date || s.start_date <= date) &&
+                      (!s.end_date || s.end_date >= date) &&
+                      isActiveThisWeek(date, s.week_pattern)
+                  ).length
+
+                  const approvedCoverCount = (approvedClinicCovers || []).filter(r =>
+                      r.shift_date === date &&
+                      r.shift_time === shift &&
+                      r.role === role
+                  ).length
+
+                  const openings = Math.max(
+                      capacity - scheduledCount - approvedCoverCount,
+                      0
+                  )
+
+                  if (openings > 0) {
+                      clinicOpenings.push({
+                          source: 'clinic_opening',
+                          callout_date: date,
+                          day_of_week: day,
+                          shift_time: shift,
+                          role,
+                          openings,
+                      })
+                  }
+              }
+          }
+      }
+
+      console.table(clinicOpenings)
+
+      setOpenShifts((openSubs || []).map(c => ({ ...c, profiles: c.volunteer })))
     setMyCoverRequests(myCoverReqs || [])
 
     setCalloutLoading(false)
