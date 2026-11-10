@@ -901,7 +901,7 @@ function VolunteerPageInner() {
 
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('id, full_name, role, default_role, affiliation, team, license_exp, bls_exp, dea_exp, tb_exp')
+      .select('id, full_name, role, default_role, affiliation, team, license_exp, bls_exp, dea_exp, tb_exp, trained_roles')
       .eq('id', user.id)
       .single()
     setProfile(profileData)
@@ -1858,7 +1858,7 @@ function VolunteerPageInner() {
                             return shiftEntries.map(entry => (
                               <div key={entry.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
                                 <div>
-                                  <span style={{ fontSize: '0.9rem' }}>{entry.role}</span>
+                                  <span style={{ fontSize: '0.9rem' }}>{entry.role}{profile?.trained_roles && !profile.trained_roles.includes(entry.role) && <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}> (In Training)</span>}</span>
                                   {entry.week_pattern && entry.week_pattern !== 'every' && (
                                     <span style={{ marginLeft: '0.4rem', fontSize: '0.72rem', background: 'rgba(96,165,250,0.12)', color: '#60a5fa', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>
                                       {entry.week_pattern === 'odd' ? '1st & 3rd week' : '2nd & 4th week'}

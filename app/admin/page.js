@@ -2340,7 +2340,6 @@ export default function AdminPage() {
                                   {approvedCallout && <span style={{ fontSize: '0.7rem' }}>out</span>}
                                   <span style={{ textDecoration: approvedCallout ? 'line-through' : 'none', opacity: approvedCallout ? 0.6 : 1 }}>{entry.profiles?.full_name}</span>
                                   {entry.notes && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.notes})</span>}
-                                  {(entry.start_date || entry.end_date) && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.start_date ?? '...'} → {entry.end_date ?? '...'})</span>}
                                   {entry.week_pattern && entry.week_pattern !== 'every' && <span style={{ ...biweeklyBadge, fontSize: '0.65rem', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>{entry.week_pattern === 'odd' ? '1st&3rd' : '2nd&4th'}</span>}
                                 </div>
                                 {coverName && <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.6rem 0.25rem 0.75rem', borderRadius: '100px', fontSize: '0.82rem', background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.35)', color: '#60a5fa', marginLeft: '0.5rem' }}><span style={{ fontSize: '0.7rem' }}>cover</span><span>{coverName}</span></div>}
@@ -2378,7 +2377,7 @@ export default function AdminPage() {
                                         {entry.week_pattern && entry.week_pattern !== 'every' && <span style={{ ...biweeklyBadge, fontSize: '0.65rem', borderRadius: '4px', padding: '0.1rem 0.35rem', color: '#1e3a8a' }}>{entry.week_pattern === 'odd' ? '1st & 3rd' : '2nd & 4th'}</span>}
                                         <span>{entry.day_of_week ? entry.day_of_week.charAt(0).toUpperCase() + entry.day_of_week.slice(1) : scheduleDay.charAt(0).toUpperCase() + scheduleDay.slice(1)} {entry.shift_time || scheduleShift} Shift</span>
                                         {entry.notes && <span style={{ fontStyle: 'italic' }}>({entry.notes})</span>}
-                                        {(entry.start_date || entry.end_date) && <span style={{ fontStyle: 'italic' }}>({entry.start_date ?? '...'} → {entry.end_date ?? '...'})</span>}
+                                        {(entry.start_date || entry.end_date) && <span style={{ fontStyle: 'italic' }}>({entry.start_date && entry.end_date ? `Start date: ${entry.start_date}, end date: ${entry.end_date}` : entry.start_date ? `Start date: ${entry.start_date}` : `End date: ${entry.end_date}`})</span>}
                                       </div>
                                       {coverName && <div style={{ fontSize: '0.8rem', color: '#60a5fa' }}>Cover: {coverName}</div>}
                                     </div>
