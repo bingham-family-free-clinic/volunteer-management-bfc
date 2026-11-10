@@ -34,7 +34,7 @@ export function isActiveThisWeek(dateStr, week_pattern) {
  * Compute which volunteers are expected right now but haven't clocked in.
  * Extracted so both the stats banner and Live tab use identical logic.
  */
-export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers, waitlist = [] }) {
+export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers }) {
   const todayMtnStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
   const mtnNow      = getMountainNow()
   const dayIndex    = mtnNow.getDay()
@@ -78,8 +78,7 @@ export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, 
       const vol   = volunteers.find(v => v.id === id)
       const entry = scheduled.find(s => s.volunteer_id === id)
       if (!vol) return null
-      const wlEntry = waitlist?.find(w => w.volunteer_id === id)
-      const trainedRoles = wlEntry?.preferred_roles || []
+      const trainedRoles = entry?.profiles?.trained_roles || []
       const inTraining = !trainedRoles.includes(entry?.role)
       return { ...vol, role: entry?.role || '—', notes: entry?.notes || null, training_status: inTraining ? 'training' : 'trained' }
     })
@@ -90,12 +89,12 @@ export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, 
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function Live({ schedule, callouts, activeShifts, volunteers, onOpenVolunteer, waitlist = [] }) {
+export default function Live({ schedule, callouts, activeShifts, volunteers, onOpenVolunteer }) {
   const todayMtn = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
   const mtnNow   = getMountainNow()
 
   const { list: expectedVols, currentDay, currentShift, isWeekday } =
-    computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers, waitlist })
+    computeExpectedNotClockedIn({ schedule, callouts, activeShifts, volunteers })
 
   const card = {
     background: 'var(--surface)',
@@ -160,8 +159,7 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
               const id = s.volunteer_id ?? s.profiles?.id
               const full = volunteers.find(v => v.id === id)
               const entry = schedule?.find(x => x.volunteer_id === id)
-              const wlEntry = waitlist?.find(w => w.volunteer_id === id)
-              const trainedRoles = wlEntry?.preferred_roles || []
+              const trainedRoles = entry?.profiles?.trained_roles || []
               const inTraining = !trainedRoles.includes(entry?.role)
               return (
                 <div

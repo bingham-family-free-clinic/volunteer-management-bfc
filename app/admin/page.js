@@ -634,7 +634,6 @@ export default function AdminPage() {
   const [activeShifts, setActiveShifts] = useState([])
   const [callouts, setCallouts]         = useState([])
   const [schedule, setSchedule]         = useState([])
-  const [waitlist, setWaitlist]         = useState([])
   const [tab, setTab]                   = useState('dashboard')
   const [loading, setLoading]           = useState(true)
   const [toast, setToast]               = useState(null)
@@ -1051,14 +1050,9 @@ export default function AdminPage() {
   async function loadSchedule() {
     const { data } = await supabase
        .from('schedule')
-       .select('id,volunteer_id,day_of_week,shift_time,role,start_date,end_date,week_pattern,notes,profiles(id,full_name)')
+       .select('id,volunteer_id,day_of_week,shift_time,role,start_date,end_date,week_pattern,notes,profiles(id,full_name,trained_roles)')
        .order('role')
      setSchedule(data || [])
-   }
-
-   async function loadWaitlistData() {
-     const { data } = await supabase.from('waitlist').select('id,volunteer_id,preferred_roles,preferred_slots,notes').order('added_at', { ascending: true })
-     setWaitlist(data || [])
    }
 
   async function loadCoverRequests() {
@@ -1349,7 +1343,6 @@ export default function AdminPage() {
     if (key === 'audit')  loadAuditFirstPage()
     if (key === 'volunteers') { loadGuestOrgs(); loadGuestHoursTotals() }
     if (key === 'messages') fetchMessages(user?.id)
-    loadWaitlistData()
   }
   }
 
@@ -1374,7 +1367,7 @@ export default function AdminPage() {
       }
        setProfile(p)
        if (p?.default_role === 'Credentialing') setTab('providers')
-       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests(), loadWaitlistData()])
+       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
        fetchMessages(user.id)
        // Guest orgs load best-effort (tables may not exist until migrations run).
       loadGuestOrgs()
@@ -1796,7 +1789,7 @@ export default function AdminPage() {
         notes: addNotes || null,
       })
       .select(
-        'id, volunteer_id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, profiles(id, full_name)'
+        'id, volunteer_id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, profiles(id, full_name, trained_roles)'
       )
       .single();
 
@@ -2277,7 +2270,6 @@ export default function AdminPage() {
             activeShifts={visibleActiveShifts}
             volunteers={visibleVolunteers}
             onOpenVolunteer={openVolunteer}
-            waitlist={waitlist}
           />
         )}
 
@@ -2340,8 +2332,7 @@ export default function AdminPage() {
                             const approvedCallout = callouts.find(c => c.volunteer_id === entry.volunteer_id && c.callout_date === scheduleDate && c.shift_time === scheduleShift && c.status === 'approved')
                             const coverShift = approvedCallout && dateCoverShifts.find(s => s.volunteer_id === approvedCallout.covered_by)
                             const coverName = coverShift ? coverShift.profiles?.full_name : null
-                            const wlEntryCollapsed = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
-                            const trainedRolesCollapsed = wlEntryCollapsed?.preferred_roles || []
+                            const trainedRolesCollapsed = entry.profiles?.trained_roles || []
                             const inTrainingCollapsed = !trainedRolesCollapsed.includes(entry.role)
                             return (
                               <div key={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -2366,8 +2357,7 @@ export default function AdminPage() {
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                               {[...entries].sort((a, b) => {
                                 const getInTraining = (entry) => {
-                                  const wlEntry = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
-                                  const trainedRoles = wlEntry?.preferred_roles || []
+                                  const trainedRoles = entry.profiles?.trained_roles || []
                                   return !trainedRoles.includes(entry.role)
                                 }
                                 return (getInTraining(b) ? 1 : 0) - (getInTraining(a) ? 1 : 0)
@@ -2375,8 +2365,7 @@ export default function AdminPage() {
                                 const approvedCallout = callouts.find(c => c.volunteer_id === entry.volunteer_id && c.callout_date === scheduleDate && c.shift_time === scheduleShift && c.status === 'approved')
                                 const coverShift = approvedCallout && dateCoverShifts.find(s => s.volunteer_id === approvedCallout.covered_by)
                                 const coverName = coverShift ? coverShift.profiles?.full_name : null
-                                const wlEntry = waitlist?.find(w => w.volunteer_id === entry.volunteer_id)
-                                const trainedRoles = wlEntry?.preferred_roles || []
+                                const trainedRoles = entry.profiles?.trained_roles || []
                                 const inTraining = !trainedRoles.includes(entry.role)
                                 return (
                                   <div key={entry.id} style={{ width: '100%', padding: '0.9rem 1rem', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
@@ -2462,38 +2451,26 @@ export default function AdminPage() {
                                                   type="button"
                                                   role="option"
                                                   aria-selected={selected}
-                                                  onClick={async () => {
-                                                    const val = opt.value
-                                                    try {
-                                                      const current = wlEntry?.preferred_roles || []
-                                                      if (val === 'trained') {
-                                                        if (!current.includes(entry.role)) {
-                                                          const newRoles = [...current, entry.role]
-                                                          if (wlEntry) {
-                                                            const { error } = await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
-                                                            if (error) { showMessage(error.message, 'error'); return }
-                                                            setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
+                                                      onClick={async () => {
+                                                        const val = opt.value
+                                                        try {
+                                                          const current = entry.profiles?.trained_roles || []
+                                                          if (val === 'trained') {
+                                                            if (!current.includes(entry.role)) {
+                                                              const newRoles = [...current, entry.role]
+                                                              const { error } = await supabase.from('profiles').update({ trained_roles: newRoles }).eq('id', entry.volunteer_id)
+                                                              if (error) { showMessage(error.message, 'error'); return }
+                                                              setSchedule(prev => prev.map(s => s.id === entry.id ? { ...s, profiles: { ...s.profiles, trained_roles: newRoles } } : s))
+                                                            }
                                                           } else {
-                                                            const { data, error } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: newRoles }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
-                                                            if (error) { showMessage(error.message, 'error'); return }
-                                                            if (data) setWaitlist(prev => [...prev, data])
+                                                            if (current.includes(entry.role)) {
+                                                              const newRoles = current.filter(r => r !== entry.role)
+                                                              const { error } = await supabase.from('profiles').update({ trained_roles: newRoles }).eq('id', entry.volunteer_id)
+                                                              if (error) { showMessage(error.message, 'error'); return }
+                                                              setSchedule(prev => prev.map(s => s.id === entry.id ? { ...s, profiles: { ...s.profiles, trained_roles: newRoles } } : s))
+                                                            }
                                                           }
-                                                        }
-                                                      } else {
-                                                        if (current.includes(entry.role)) {
-                                                          const newRoles = current.filter(r => r !== entry.role)
-                                                          if (wlEntry) {
-                                                            const { error } = await supabase.from('waitlist').update({ preferred_roles: newRoles }).eq('id', wlEntry.id)
-                                                            if (error) { showMessage(error.message, 'error'); return }
-                                                            setWaitlist(prev => prev.map(w => w.id === wlEntry.id ? { ...w, preferred_roles: newRoles } : w))
-                                                          } else {
-                                                            const { data, error } = await supabase.from('waitlist').insert({ volunteer_id: entry.volunteer_id, preferred_roles: newRoles }).select('id,volunteer_id,preferred_roles,preferred_slots,notes').single()
-                                                            if (error) { showMessage(error.message, 'error'); return }
-                                                            if (data) setWaitlist(prev => [...prev, data])
-                                                          }
-                                                        }
-                                                      }
-                                                      showMessage('Training status updated', 'success')
+                                                          showMessage('Training status updated', 'success')
                                                     } catch (err) {
                                                       showMessage(err.message || 'Failed to update', 'error')
                                                     }

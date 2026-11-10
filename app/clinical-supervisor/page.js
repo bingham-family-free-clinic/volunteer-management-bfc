@@ -336,7 +336,7 @@ export default function CSPage() {
   async function loadData(userId) {
     const [shiftsRes, schedRes, volsRes, mySchedRes] = await Promise.all([
       supabase.from('shifts').select('id, volunteer_id, clock_in, profiles(id, full_name)').is('clock_out', null),
-      supabase.from('schedule').select('*, profiles(id, full_name)').order('role'),
+      supabase.from('schedule').select('*, profiles(id, full_name, trained_roles)').order('role'),
       supabase.from('profiles').select('id, full_name, phone, languages, role, default_role, affiliation, email, status'),
       supabase.from('schedule').select('*').eq('volunteer_id', userId),
     ])

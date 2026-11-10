@@ -441,3 +441,17 @@ begin
   end loop;
 end
 $$;
+
+-- ─── 6. Trained roles on profiles ────────────────────────────────────────────
+-- Splits "trained roles" out of waitlist.preferred_roles (which now means the
+-- roles a volunteer *wants* to work). profiles.trained_roles records the roles
+-- a volunteer has actually been trained in.
+--
+-- Safe to re-run: the column is only added when missing, and existing rows are
+-- back-filled with the default empty array ('{}' = []).
+
+alter table public.profiles
+  add column if not exists trained_roles text[] not null default '{}';
+
+comment on column public.profiles.trained_roles is
+  'Roles this volunteer has been trained in. Empty array = no trained roles yet.';
