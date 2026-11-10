@@ -120,13 +120,13 @@ const PROVIDER_CRED_FIELDS = [
 ]
 
 const CHECKLIST_ITEMS = [
-  { key: 'background_check',          label: 'Background Check',          mandatory: true,  bucket: 'onboarding-background-checks', urlKey: 'background_check_url'  },
-  { key: 'id_check',                  label: 'ID',                        mandatory: true,  bucket: 'onboarding-ids',               urlKey: 'id_check_url'          },
-  { key: 'immunization',              label: 'Immunization',              mandatory: true,  bucket: 'onboarding-immunizations',     urlKey: 'immunization_url'      },
-  { key: 'tb_test',                   label: 'TB Test',                   mandatory: true,  bucket: 'onboarding-tb-tests',          urlKey: 'tb_test_url'           },
-  { key: 'licenses_certifications',   label: 'Licenses & Certifications', mandatory: false, bucket: 'onboarding-licenses',           urlKey: 'licenses_url'          },
-  { key: 'confidentiality_agreement', label: 'Confidentiality Agreement', mandatory: false, bucket: 'onboarding-confidentiality',   urlKey: 'confidentiality_url'   },
-  { key: 'parking_pass',              label: 'Parking Pass',              mandatory: false, bucket: 'onboarding-parking-passes',    urlKey: 'parking_pass_url'      },
+  { key: 'background_check',          label: 'Background Check',          bucket: 'onboarding-background-checks', urlKey: 'background_check_url'  },
+  { key: 'id_check',                  label: 'ID',                        bucket: 'onboarding-ids',               urlKey: 'id_check_url'          },
+  { key: 'immunization',              label: 'Immunization',              bucket: 'onboarding-immunizations',     urlKey: 'immunization_url'      },
+  { key: 'tb_test',                   label: 'TB Test',                   bucket: 'onboarding-tb-tests',          urlKey: 'tb_test_url'           },
+  { key: 'licenses_certifications',   label: 'Licenses & Certifications', bucket: 'onboarding-licenses',           urlKey: 'licenses_url'          },
+  { key: 'confidentiality_agreement', label: 'Confidentiality Agreement', bucket: 'onboarding-confidentiality',   urlKey: 'confidentiality_url'   },
+  { key: 'parking_pass',              label: 'Parking Pass',              bucket: 'onboarding-parking-passes',    urlKey: 'parking_pass_url'      },
 ]
 
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
@@ -1573,7 +1573,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       if (!e.data || e.data.type !== 'parking_pass_pdf') return
       if (!parkingPassModal) return
 
-      const { base64, volunteer_name, pass_number, date_issued } = e.data
+      const { base64, volunteer_name, date_issued } = e.data
       const { applicantId, isRecent } = parkingPassModal
 
       setParkingPassSaving(true)
@@ -1610,7 +1610,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         }
 
         await audit('parking_pass_generated', 'applicant', applicantId, volunteer_name,
-          `Pass #${pass_number || '—'}, issued ${date_issued}`)
+          `Issued ${date_issued}`)
 
         parkingPassIframeRef.current?.contentWindow?.postMessage({ type: 'parking_pass_saved' }, '*')
         msg('Parking pass PDF saved')

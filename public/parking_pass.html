@@ -74,93 +74,6 @@
       font-style: italic;
     }
 
-    /* Pass number badge */
-    .pass-badge {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.75rem;
-      margin: 1.5rem 0 1.75rem;
-    }
-    .pass-badge-label {
-      font-family: 'Libre Baskerville', serif;
-      font-size: 8.5pt;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-
-    .pass-badge-number {
-    height: 52px;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    overflow: visible;
-    }
-    .pass-badge-number input {
-    appearance: none;
-    -webkit-appearance: none;
-
-    font-family: 'Libre Baskerville', serif;
-    font-size: 32px;
-    font-weight: 700;
-    line-height: 1;
-
-    color: var(--navy);
-    background: transparent;
-    border: none;
-    outline: none;
-
-    width: 120px;
-    height: 40px;
-
-    text-align: center;
-    letter-spacing: 0.08em;
-
-    padding: 0;
-    margin: 0;
-
-    position: relative;
-    top: 6px;
-    }
-
-    .pass-badge-number input {
-      font-family: 'Libre Baskerville', serif;
-      font-size: 22pt;
-      font-weight: 700;
-      color: var(--navy);
-      background: transparent;
-      border: none;
-      outline: none;
-      width: 120px;
-      text-align: center;
-      letter-spacing: 0.08em;
-    }
-    .pass-badge-number input::placeholder { color: var(--rule); font-weight: 400; }
-    
-    #pass-number-render {
-        display: none;
-
-        font-family: 'Libre Baskerville', serif;
-        font-size: 32px;
-        font-weight: 700;
-        color: var(--navy);
-
-        line-height: 1;
-        text-align: center;
-    }
-
-    body.capturing #pass-number {
-        display: none;
-    }
-
-    body.capturing #pass-number-render {
-        display: block;
-    }
-
     /* Section title */
     .section-title {
       font-family: 'Libre Baskerville', serif;
@@ -289,23 +202,6 @@
     <div class="doc-subtitle">Authorized clinic parking permit</div>
   </div>
 
-  <!-- Pass number -->
-    <div class="pass-badge">
-    <span class="pass-badge-label">Pass No.</span>
-
-    <div class="pass-badge-number">
-        <input
-        type="text"
-        id="pass-number"
-        name="pass_number"
-        placeholder="—"
-        maxlength="8"
-        />
-
-        <span id="pass-number-render"></span>
-    </div>
-    </div>
-
   <!-- Receipt acknowledgment -->
   <div class="agreement">
     <p>By printing my name below, I acknowledge I received a parking pass, and agree to return it upon the conclusion of my service with the clinic.</p>
@@ -363,11 +259,9 @@
   (function prefill() {
     const p    = new URLSearchParams(window.location.search)
     const name = p.get('name')
-    const num  = p.get('pass_number')
     const date = p.get('date') || new Date().toISOString().slice(0, 10)
     // intentionally disabled.
     // if (name) document.getElementById('volunteer-name').value = name
-    if (num)  document.getElementById('pass-number').value    = num
     if (date) document.getElementById('date-issued').value    = date
   })()
 
@@ -386,9 +280,6 @@
   async function generatePdfBase64() {
     const { jsPDF } = window.jspdf
     const pageEl = document.getElementById('pass-page')
-
-    document.getElementById('pass-number-render').textContent =
-        document.getElementById('pass-number').value || '—'
 
     document.body.classList.add('capturing')
 
@@ -437,7 +328,6 @@
         type:           'parking_pass_pdf',
         base64:         base64,
         volunteer_name: document.getElementById('volunteer-name').value.trim(),
-        pass_number:    document.getElementById('pass-number').value.trim(),
         date_issued:    document.getElementById('date-issued').value,
       }, '*')
 
@@ -454,7 +344,6 @@
     if (!e.data) return
     if (e.data.type === 'parking_pass_reset') {
       document.getElementById('volunteer-name').value = e.data.name || ''
-      document.getElementById('pass-number').value    = e.data.pass_number || ''
       document.getElementById('date-issued').value    = new Date().toISOString().slice(0, 10)
       setStatus('')
       document.getElementById('submit-btn').disabled = false
