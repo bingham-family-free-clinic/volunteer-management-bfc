@@ -27,10 +27,10 @@ function parseSlotKey(key) {
 // ── Application shift-availability helpers ────────────────────────────────
 // The volunteer application form stores each shift as its own boolean
 // column (e.g. shift_mon_10_2, shift_tue_2_6 — abbreviated day + shift with
-// underscores), while the Training-stage SlotPicker/onboard_preferred_slots
+// underscores), while the waitlist's preferred_slots/onboard_preferred_slots
 // use "monday-10-2" style keys (full day name + shift). These helpers
 // translate between the two so an applicant's stated availability can be
-// displayed and used to pre-fill the SlotPicker.
+// displayed and used to pre-fill those slots.
 function shiftColumnKey(day, shift) {
   return `shift_${day.slice(0, 3)}_${shift.replace(/-/g, '_')}`
 }
@@ -61,8 +61,8 @@ function formatReference(name, contact) {
   return name || contact
 }
 
-const STAGES       = ['applied', 'interview', 'onboarding', 'training', 'rejected']
-const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', training: 'Training', rejected: 'Rejected' }
+const STAGES       = ['applied', 'interview', 'onboarding', 'rejected']
+const STAGE_LABELS = { applied: 'Applied', interview: 'Interview', onboarding: 'Onboarding', rejected: 'Rejected' }
 
 // Onboarding is expected to be finished within four weeks. Applicants still
 // sitting in the onboarding stage after that are flagged as past deadline.
@@ -84,7 +84,6 @@ const C = {
   warn:     '#0284c7',
   danger:   '#1e40af',
   success:  '#0369a1',
-  training: '#0c4a6e',
 }
 
 const STAGE_COLORS = {
@@ -92,7 +91,6 @@ const STAGE_COLORS = {
   interview:             C.warn,
   onboarding:            C.blue,
   onboarding_missionary: C.primary,
-  training:              C.training,
   rejected:              C.danger,
 }
 
@@ -1465,13 +1463,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [affiliationPick,  setAffiliationPick]  = useState('')      // value chosen in modal
   const [rejectModal,      setRejectModal]      = useState(null)   // { applicant } | null — choose notify-email vs silent reject
 
-  // Training stage — availability & roles-trained-in are collected here
-  // (post-onboarding) instead of during the onboarding wizard. Keyed by
-  // applicant id so edits on one card don't leak into another.
-  const [trainingSaving,       setTrainingSaving]       = useState({}) // { [applicantId]: boolean }
-  const [trainingDrafts,       setTrainingDrafts]       = useState({}) // { [applicantId]: { preferred_slots, preferred_roles } }
+  // Waitlist hand-off (onboarding final step)
   const [movingToWaitlistId,   setMovingToWaitlistId]   = useState(null)
-  const [rejectingTrainingId,  setRejectingTrainingId]  = useState(null)
 
   // templates shape: { interview: { subject, body }, onboarding: { ... }, rejected: { ... } }
   const [templates,        setTemplates]        = useState({})
@@ -1704,10 +1697,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setLoading(true); setLoadError(null)
     const [appRes, compRes] = await Promise.all([
       supabase.from('volunteer_applications').select('*').in('stage', STAGES).order('created_at', { ascending: false }),
-      // Recently Added shows anyone who has finished onboarding: those currently
-      // in training (just onboarded) as well as those who finished training
-      // (moved to the waitlist, or rejected out of training).
-      supabase.from('volunteer_applications').select('*').in('stage', ['training', 'completed']).order('stage_updated_at', { ascending: false }),
+      // Recently Added shows anyone who has finished onboarding (moved to the
+      // waitlist, or rejected out of onboarding).
+      supabase.from('volunteer_applications').select('*').in('stage', ['completed']).order('stage_updated_at', { ascending: false }),
     ])
     if (appRes.error)  { setLoadError(appRes.error.message); setApplicants([]) }
     else setApplicants(appRes.data || [])
@@ -1739,7 +1731,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   async function loadCompleted() {
     const { data, error } = await supabase
-      .from('volunteer_applications').select('*').in('stage', ['training', 'completed']).order('stage_updated_at', { ascending: false })
+      .from('volunteer_applications').select('*').in('stage', ['completed']).order('stage_updated_at', { ascending: false })
     if (!error && data) {
       setCompleted(data)
       if (data.length > 0) {
@@ -1950,7 +1942,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // Interview "Create Volunteer Profile" confirm: creates the account with
   // just the picked affiliation (no position/docs checks), moves the
   // applicant to onboarding, and sends the onboarding email for that
-  // affiliation. Full validation happens later at the Move To Training gate.
+  // affiliation. Full validation happens later at the Move to Waitlist gate.
   async function confirmCreateAtInterview() {
     if (!affiliationModal) return
     const { applicant } = affiliationModal
@@ -1999,45 +1991,21 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setAffiliationModal(null)
   }
 
-  // ─── Training stage: availability & trained-roles editing, waitlist/reject ─
+  // ─── Waitlist hand-off (onboarding final step) ────────────────────────────
 
-  // The applicant/onboarding row stores these under the onboard_-prefixed
-  // column names; the waitlist table (and the rest of this component) uses
-  // the shorter preferred_slots/preferred_roles names, so this maps between
-  // the two wherever we read from or write to volunteer_applications.
-  const TRAINING_FIELD_COLUMN = {
-    preferred_slots: 'onboard_preferred_slots',
-    preferred_roles: 'onboard_preferred_roles',
-  }
-
-  // Merges any in-progress local edits for this applicant with what's already
-  // saved on their application row, so callers always see the latest values
-  // regardless of whether a given field has been touched yet.
-  function getTrainingDraft(applicant) {
+  // Falls back to what the applicant said on their application when staff
+  // haven't set/overridden availability, instead of starting blank.
+  function getWaitlistDraft(applicant) {
     const savedSlots = applicant.onboard_preferred_slots
     const statedSlots = getStatedAvailability(applicant).map(s => s.key)
     return {
-      // Fall back to what the applicant said on their application if staff
-      // haven't set/overridden availability yet, instead of starting blank.
-      preferred_slots: trainingDrafts[applicant.id]?.preferred_slots ?? (savedSlots?.length ? savedSlots : statedSlots),
-      preferred_roles: trainingDrafts[applicant.id]?.preferred_roles ?? applicant.onboard_preferred_roles ?? [],
+      preferred_slots: savedSlots?.length ? savedSlots : statedSlots,
+      preferred_roles: applicant.onboard_preferred_roles ?? [],
     }
   }
 
-  async function updateTrainingField(applicantId, field, value) {
-    setTrainingDrafts(prev => ({
-      ...prev,
-      [applicantId]: { ...(prev[applicantId] || {}), [field]: value },
-    }))
-    setTrainingSaving(prev => ({ ...prev, [applicantId]: true }))
-    const column = TRAINING_FIELD_COLUMN[field]
-    const { error } = await supabase.from('volunteer_applications').update({ [column]: value }).eq('id', applicantId)
-    if (error) msg(`Failed to save ${field === 'preferred_slots' ? 'availability' : 'trained roles'}: ${error.message}`, 'error')
-    setTrainingSaving(prev => ({ ...prev, [applicantId]: false }))
-  }
-
   async function moveToWaitlist(applicant) {
-    const { preferred_slots, preferred_roles } = getTrainingDraft(applicant)
+    const { preferred_slots, preferred_roles } = getWaitlistDraft(applicant)
     setMovingToWaitlistId(applicant.id)
 
     const { error: waitlistErr } = await supabase.from('waitlist').insert({
@@ -2049,7 +2017,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     })
     // If the insert fails — most commonly because this volunteer was already
     // added to the waitlist manually, outside this flow — don't leave them
-    // stuck in Training. Fall through to the stage update either way, and
+    // stuck in onboarding. Fall through to the stage update either way, and
     // just flag that the waitlist insert didn't go through so staff can
     // confirm the existing waitlist entry looks right.
     if (waitlistErr) {
@@ -2074,37 +2042,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     )
     if (!waitlistErr) msg(`${applicant.full_name} moved to the waitlist`)
 
-    setTrainingDrafts(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
     setSelected(null)
     await loadAll()
     setActiveTab('recent')
     setMovingToWaitlistId(null)
-  }
-
-  // Removes the volunteer from the active pipeline without touching their
-  // account — they keep their profile/login, they're just not moving into
-  // active service right now. Distinct from the pre-profile "Reject
-  // Application" flow (openRejectModal/confirmReject), which sends a
-  // rejection email and never created an account in the first place.
-  async function rejectFromTraining(applicant) {
-    setRejectingTrainingId(applicant.id)
-    const { error } = await supabase.from('volunteer_applications')
-      .update({ stage: 'completed', stage_updated_at: new Date().toISOString() })
-      .eq('id', applicant.id)
-    if (error) {
-      msg(error.message, 'error')
-      setRejectingTrainingId(null)
-      return
-    }
-    await audit('rejected_from_training', 'volunteer', applicant.volunteer_id, applicant.full_name,
-      'moved to Recently Added — account kept active')
-    msg(`${applicant.full_name} moved to Recently Added`)
-
-    setTrainingDrafts(prev => { const next = { ...prev }; delete next[applicant.id]; return next })
-    setSelected(null)
-    await loadAll()
-    setActiveTab('recent')
-    setRejectingTrainingId(null)
   }
 
   async function toggleChecklistItem(applicantId, key, value) {
@@ -2481,7 +2422,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // ─── Create volunteer profile ──────────────────────────────────────────────
   // Account creation is intentionally guard-free: affiliation, position, and
   // required docs are enforced later — by the onboarding steps and the gated
-  // "Move To Training" action — instead of blocking creation.
+  // "Move to Waitlist" action — instead of blocking creation.
 
   // Shared account-creation core for the interview and onboarding entry
   // points. Creates the auth user + profiles row. Returns the new profile id,
@@ -2501,8 +2442,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     return fnData.user.id
   }
 
-  // Full profiles-row mapping used at creation. The training-gate sync reuses
-  // this and keeps only the onboarding-owned columns (see SYNC_COLUMNS):
+  // Full profiles-row mapping used at creation. The onboarding-final sync
+  // reuses this and keeps only the onboarding-owned columns (see SYNC_COLUMNS):
   // identity/contact columns are set once here, and the avatar only exists
   // at creation time.
   function buildProfileInsert(uid, applicant, affil, form) {
@@ -2553,12 +2494,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     'admin_notes',
   ]
 
-  // Final onboarding gate: moves the selected applicant to training. Requires
-  // the complete file (affiliation + position + required approvals — the same
-  // allStepsValid check as the UI). Creates the profile first when the
-  // applicant doesn't have one yet, syncs the finalized info onto it, then
-  // moves the application to training.
-  async function finalizeOnboardingMoveToTraining() {
+  // Final onboarding gate: moves the selected applicant to the waitlist.
+  // Requires the complete file (affiliation + position + required approvals —
+  // the same allStepsValid check as the UI). Creates the profile first when
+  // the applicant doesn't have one yet, syncs the finalized info onto it, then
+  // moves the application to completed and adds them to the waitlist.
+  async function finalizeOnboardingMoveToWaitlist() {
     const applicant = selected
     if (!applicant) return
     if (!allStepsValid) {
@@ -2582,15 +2523,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     if (syncErr) { msg(`Profile sync failed: ${syncErr.message}`, 'error'); setMovingStage(false); return }
 
     const { error: appErr } = await supabase.from('volunteer_applications')
-      .update({ stage: 'training', volunteer_id: uid, stage_updated_at: new Date().toISOString() })
+      .update({ volunteer_id: uid, stage_updated_at: new Date().toISOString() })
       .eq('id', applicant.id)
-    if (appErr) { msg(`Failed to move to training: ${appErr.message}`, 'error'); setMovingStage(false); return }
+    if (appErr) { msg(`Failed to update application: ${appErr.message}`, 'error'); setMovingStage(false); return }
 
-    await audit('pipeline_training', 'volunteer', uid, applicant.full_name, 'onboarding complete — moved to training')
-    msg(`${applicant.full_name} moved to training`)
+    await audit('onboarding_complete', 'volunteer', uid, applicant.full_name, 'onboarding complete — moved to waitlist')
     if (onVolunteerCreated) onVolunteerCreated()
-    setSelected(prev => prev?.id === applicant.id ? { ...prev, stage: 'training', volunteer_id: uid } : prev)
-    await loadAll()
+    const updated = { ...applicant, volunteer_id: uid }
+    setSelected(prev => prev?.id === applicant.id ? updated : prev)
+    await moveToWaitlist(updated)
     setMovingStage(false)
   }
 
@@ -3471,9 +3412,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const isApplied    = applicant.stage === 'applied'
     const isInterview  = applicant.stage === 'interview'
     const isOnboarding = applicant.stage === 'onboarding'
-    const isTraining   = applicant.stage === 'training'
     const isRejected   = applicant.stage === 'rejected'
-    const trainingDraft = isTraining ? getTrainingDraft(applicant) : null
 
     const schoolProgram = [applicant.school, applicant.program].filter(Boolean).join(' — ')
     const languagesStr  = joinWithOther(applicant.languages_spoken, applicant.languages_other)
@@ -3600,9 +3539,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           <div style={{ ...card, padding: '1rem 1.25rem', borderColor: C.warn + '55', background: C.warn + '06' }}>
             <p style={{ ...secLabel, color: C.warn }}>Review</p>
             <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>Review this application and decide whether to schedule an interview or reject it.</p>
-            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <button onClick={() => moveToStage(applicant, 'interview')} disabled={movingStage} style={outlineBtn(C.warn)}>Move to Interview</button>
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: `1px solid ${C.warn}22`, display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>Reject Application</button>
+              <button onClick={() => moveToStage(applicant, 'interview')} disabled={movingStage} style={solidBtn(C.warn, movingStage)}>Move to Interview</button>
             </div>
           </div>
         )}
@@ -3627,11 +3566,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <button onClick={() => openAffiliationModal(applicant)} disabled={movingStage || !applicant.interview_scheduled_at} style={outlineBtn(applicant.interview_scheduled_at ? C.blue : C.muted)}>
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: `1px solid ${C.warn}22`, display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>Reject Application</button>
+              <button onClick={() => openAffiliationModal(applicant)} disabled={movingStage || !applicant.interview_scheduled_at} style={solidBtn(C.blue, movingStage || !applicant.interview_scheduled_at)}>
                 Create Volunteer Profile
               </button>
-              <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>Reject Application</button>
             </div>
           </div>
         )}
@@ -3747,9 +3686,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   <button onClick={() => setOnboardStep(2)} style={ghostBtn()}>Back</button>
-                  <button onClick={finalizeOnboardingMoveToTraining} disabled={movingStage || !allStepsValid} style={solidBtn(C.primary, movingStage || !allStepsValid)}>
-                    {movingStage ? 'Moving...' : 'Move To Training'}
-                  </button>
                 </div>
 
                 {allStepsValid && !movingStage && (
@@ -3761,82 +3697,25 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                         <div style={{ padding: '0.3rem 0.75rem', borderRadius: '100px', background: C.blue + '10', border: `1px solid ${C.blue}35`, fontSize: '0.78rem' }}><span style={{ color: 'var(--muted)', fontWeight: 500 }}>Password: </span><span style={{ fontFamily: 'DM Mono, monospace', color: C.blue, fontWeight: 600 }}>BFC2025!</span></div>
                       )}
                     </div>
-                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Moving to Training will sync this info to their volunteer profile, where availability and trained roles are set before joining the waitlist.</p>
+                    <p style={{ fontSize: '0.8rem', color: C.light, fontWeight: 500, marginTop: '0.6rem' }}>✓ Moving to Waitlist will sync this info to their volunteer profile before joining the waitlist.</p>
                   </div>
-                )}
-
-                {!allStepsValid && (
-                  <p style={{ fontSize: '0.82rem', color: C.warn, fontWeight: 500 }}>
-                    {!step1Valid() && 'Affiliation details required. '}
-                    {!step2Valid && 'Default position required. '}
-                  </p>
                 )}
               </div>
             )}
 
-            {/* Reject — always visible in onboarding, separated from step content */}
-            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: `1px solid ${C.danger}22`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <p style={{ fontSize: '0.78rem', color: 'var(--muted)', fontStyle: 'italic' }}>Need to remove this applicant from onboarding?</p>
-              <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>
+            {/* Actions — always visible in onboarding, bottom-right like the other stages */}
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: `1px solid ${C.blue}22`, display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button onClick={() => openRejectModal(applicant)} disabled={movingStage || movingToWaitlistId === applicant.id} style={outlineBtn(C.danger)}>
                 Reject Application
               </button>
+              <button onClick={finalizeOnboardingMoveToWaitlist} disabled={movingStage || movingToWaitlistId === applicant.id || !allStepsValid} style={solidBtn(C.primary, movingStage || movingToWaitlistId === applicant.id || !allStepsValid)}>
+                {movingStage || movingToWaitlistId === applicant.id ? 'Moving…' : 'Move to Waitlist'}
+              </button>
             </div>
           </div>
         )}
 
-        {/* Training — availability & trained roles are set here, post-onboarding */}
-        {isTraining && (
-          <div style={{ ...card, padding: '1rem 1.25rem', borderColor: C.training + '55', background: C.training + '08' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <p style={{ ...secLabel, color: C.training, marginBottom: 0 }}>Training</p>
-              <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: trainingSaving[applicant.id] ? 'italic' : 'normal' }}>
-                {trainingSaving[applicant.id] ? 'saving…' : '✓ saved'}
-              </span>
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1.25rem', lineHeight: 1.5 }}>
-              Set <strong>{applicant.full_name}</strong>'s availability and the roles they've been trained in, then move them to the waitlist.
-            </p>
-
-            <div style={{ marginBottom: '1.5rem' }}>
-              <p style={{ ...secLabel, marginBottom: '0.65rem' }}>Availability</p>
-              <SlotPicker
-                selected={trainingDraft.preferred_slots}
-                onChange={slots => updateTrainingField(applicant.id, 'preferred_slots', slots)}
-              />
-            </div>
-
-            <div style={{ marginBottom: '0.5rem' }}>
-              <p style={{ ...secLabel, marginBottom: '0.65rem' }}>Trained Roles</p>
-              <RolePicker
-                selected={trainingDraft.preferred_roles}
-                onChange={roles => updateTrainingField(applicant.id, 'preferred_roles', roles)}
-              />
-            </div>
-
-            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: `1px solid ${C.training}22`, display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => rejectFromTraining(applicant)}
-                disabled={movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id}
-                style={outlineBtn(C.danger)}
-              >
-                {rejectingTrainingId === applicant.id ? 'Rejecting…' : 'Reject'}
-              </button>
-              <button
-                onClick={() => moveToWaitlist(applicant)}
-                disabled={movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id || trainingDraft.preferred_roles.length === 0}
-                style={solidBtn(C.training, movingToWaitlistId === applicant.id || rejectingTrainingId === applicant.id || trainingDraft.preferred_roles.length === 0)}
-              >
-                {movingToWaitlistId === applicant.id ? 'Moving…' : 'Move to Waitlist'}
-              </button>
-            </div>
-            {trainingDraft.preferred_roles.length === 0 && (
-              <p style={{ fontSize: '0.78rem', color: C.warn, fontWeight: 500, textAlign: 'right', marginTop: '0.5rem' }}>
-                Select at least one trained role before moving to the waitlist.
-              </p>
-            )}
-          </div>
-        )}
-        {(isOnboarding || isTraining) && (
+        {(isOnboarding) && (
           <div style={{ ...card, padding: '1rem 1.25rem', background: 'var(--bg)', border: `1px solid ${C.blue}2a` }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
               <p style={{ ...secLabel, color: C.blue, marginBottom: 0 }}>Admin Notes</p>
