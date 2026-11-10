@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE, TASK_TEAMS } from '../../lib/constants'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds, countUnreadThreads } from '../../lib/messageUtils'
+import { createUnreadBadgeLoader } from '../../lib/messageSync'
 import { MessageCard } from '../../components/MessageCard'
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/pushNotifications.js'
 import { SubmitHoursPanel } from '../../components/SubmitHoursPanel'
@@ -801,30 +802,44 @@ function VolunteerPageInner() {
     initCriticalPath()
   }, [])
 
-  // ── Unread count fetcher ────────────────────────────────────────
+  // ── Unread count (badge) ────────────────────────────────────────────────────
   // Uses countUnreadThreads so the badge follows exactly the same visibility
   // rules as MessageTab (which overwrites this count once it mounts).
-  async function loadUnreadCount(u, p) {
+  // The loader keeps a light copy of recent messages and only asks the database
+  // for rows newer than what it already has, so each 30s poll is ~free.
+  const badgeLoaderRef = useRef(null)
+  if (!badgeLoaderRef.current) badgeLoaderRef.current = createUnreadBadgeLoader(supabase, countUnreadThreads)
+  const tabRef = useRef('clock')
+  tabRef.current = tab
+
+  async function loadUnreadCount(u, p, opts) {
     if (!u) return
-    try {
-      const [{ data: msgs }, { data: reads }] = await Promise.all([
-        supabase.from('messages')
-          .select('id, sender_id, recipient_type, recipient_role, recipient_volunteer_id, parent_message_id')
-          .order('created_at', { ascending: false })
-          .limit(MSG_PAGE_SIZE * 5), // same window MessageTab fetches
-        supabase.from('message_reads').select('message_id').eq('user_id', u.id),
-      ])
-      const readSet = new Set((reads || []).map(r => r.message_id))
-      setUnreadCount(countUnreadThreads(msgs || [], readSet, u, p))
-    } catch (e) { /* ignore */ }
+    const count = await badgeLoaderRef.current.load(u, p, opts)
+    if (count != null) setUnreadCount(count)
   }
   // Timers/subscriptions outlive renders, so read the latest profile via ref.
-  function pollUnread() { return loadUnreadCount(user, profileRef.current) }
+  // While the Messages tab is open, MessageTab does its own syncing and reports
+  // the count, so the page stays out of the way (no duplicate queries).
+  function pollUnread() {
+    if (tabRef.current === 'messages') return Promise.resolve()
+    return loadUnreadCount(user, profileRef.current)
+  }
 
   // Recount once the profile arrives (visibility rules depend on its role).
   useEffect(() => {
     if (user && profile) loadUnreadCount(user, profile)
   }, [user, profile?.default_role, profile?.affiliation])
+
+  // Leaving the Messages tab: reads were just made there, so re-verify them
+  // once and recount.
+  const prevTabRef = useRef(tab)
+  useEffect(() => {
+    const was = prevTabRef.current
+    prevTabRef.current = tab
+    if (was === 'messages' && tab !== 'messages' && user) {
+      loadUnreadCount(user, profileRef.current, { forceReads: true })
+    }
+  }, [tab])
 
   // ── Poll unread count every 30s so the badge stays current ──
   // Skip polling while the tab is hidden (saves egress); catch up on return.
@@ -844,6 +859,9 @@ function VolunteerPageInner() {
   }, [user])
 
   // ── Real-time subscription: update badge immediately when new messages arrive ──
+  // The INSERT payload already contains the row, so it is folded into the loader
+  // directly (no query). Read receipts for this user (e.g. read on another
+  // device) are applied the same way.
   useEffect(() => {
     if (!user) return
     const channel = supabase
@@ -852,10 +870,20 @@ function VolunteerPageInner() {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-      }, () => {
-        // Realtime events can fire while the tab is hidden — no refetch then;
-        // the visibilitychange-driven poll catches up when visible again.
-        if (document.visibilityState === 'visible') pollUnread()
+      }, (payload) => {
+        if (tabRef.current === 'messages') return // MessageTab handles it
+        const count = badgeLoaderRef.current.ingest(payload?.new, user, profileRef.current)
+        if (count != null) setUnreadCount(count)
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'message_reads',
+        filter: `user_id=eq.${user.id}`,
+      }, (payload) => {
+        if (tabRef.current === 'messages') return
+        const count = badgeLoaderRef.current.ingestRead(payload?.new?.message_id, user, profileRef.current)
+        if (count != null) setUnreadCount(count)
       })
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }

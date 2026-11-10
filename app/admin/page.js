@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds, countUnreadThreads } from '../../lib/messageUtils'
+import { createUnreadBadgeLoader } from '../../lib/messageSync'
 import DataDashboard from '../../components/DataDashboard'
 import ClinicOpenings from '../../components/ClinicOpenings'
 import Pipeline from '../../components/Pipeline'
@@ -1380,27 +1381,33 @@ export default function AdminPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // ── Messages data fetcher ───────────────────────────────────────────
-  async function fetchMessages(userId, prof = profileRef.current) {
+  // ── Messages badge ──────────────────────────────────────────────────
+  // Old: every INSERT re-downloaded 50 full messages (+ sender join), every read
+  // receipt, and the entire profiles table (which the badge never used).
+  // New: a light delta loader (shared with the volunteer page) — first call
+  // fetches the window, later calls only fetch rows newer than the watermark,
+  // and realtime INSERT payloads are folded in with no query at all.
+  const badgeLoaderRef = useRef(null)
+  if (!badgeLoaderRef.current) badgeLoaderRef.current = createUnreadBadgeLoader(supabase, countUnreadThreads)
+  const tabRef = useRef('dashboard')
+  tabRef.current = tab
+
+  async function fetchMessages(userId, prof = profileRef.current, opts) {
     if (!userId) return
-    const [{ data: msgs }, { data: reads }, { data: usersData }] = await Promise.all([
-      supabase.from('messages')
-        .select(`
-          id, created_at, body, image_url,
-          recipient_type, recipient_shift, recipient_day, recipient_role,
-          recipient_volunteer_id, sender_id, parent_message_id,
-          sender:profiles!messages_sender_id_fkey(full_name, role)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(10 * 5),
-      supabase.from('message_reads').select('message_id').eq('user_id', userId),
-      supabase.from('profiles').select('id, full_name, default_role, status').order('full_name'),
-    ])
-    const fetched = msgs || []
-    const readSet = new Set((reads || []).map(r => r.message_id))
     // Same visibility rules as MessageTab, so the badge matches the tab.
-    setUnreadCount(countUnreadThreads(fetched, readSet, { id: userId }, prof))
+    const count = await badgeLoaderRef.current.load({ id: userId }, prof, opts)
+    if (count != null) setUnreadCount(count)
   }
+
+  // Leaving the Messages tab: reads were just made there, so re-verify them once.
+  const prevTabRef = useRef(tab)
+  useEffect(() => {
+    const was = prevTabRef.current
+    prevTabRef.current = tab
+    if (was === 'messages' && tab !== 'messages' && user?.id) {
+      fetchMessages(user.id, profileRef.current, { forceReads: true })
+    }
+  }, [tab])
 
   // ── Real-time subscription: update badge immediately when new messages arrive ──
   useEffect(() => {
@@ -1411,7 +1418,21 @@ export default function AdminPage() {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-      }, () => { fetchMessages(user.id) })
+      }, (payload) => {
+        if (tabRef.current === 'messages') return // MessageTab handles it
+        const count = badgeLoaderRef.current.ingest(payload?.new, { id: user.id }, profileRef.current)
+        if (count != null) setUnreadCount(count)
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'message_reads',
+        filter: `user_id=eq.${user.id}`,
+      }, (payload) => {
+        if (tabRef.current === 'messages') return
+        const count = badgeLoaderRef.current.ingestRead(payload?.new?.message_id, { id: user.id }, profileRef.current)
+        if (count != null) setUnreadCount(count)
+      })
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])
