@@ -539,9 +539,6 @@ export default function VolunteerTasks({ userId, defaultRole }) {
   const [tasks, setTasks]             = useState([])
   const [teamMembers, setTeamMembers] = useState([])
   const [loading, setLoading]         = useState(true)
-  const [showDone, setShowDone]         = useState(false)
-  const [showBlocked, setShowBlocked]   = useState(false)
-  const [showInactive, setShowInactive] = useState(false)
   const [showNewForm, setShowNewForm]   = useState(false)
   const [filterPerson, setFilterPerson]  = useState('') // '' = everyone | 'unassigned' | profile id
   const [collapsed, setCollapsed]        = useState({})  // section key -> true when collapsed
@@ -581,8 +578,11 @@ export default function VolunteerTasks({ userId, defaultRole }) {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, ...changes } : t))
   }
 
+  // Blocked / Done / Inactive start collapsed; everything else starts expanded
+  const DEFAULT_COLLAPSED = ['blocked', 'closed', 'inactive']
+  const isCollapsed = key => (key in collapsed ? collapsed[key] : DEFAULT_COLLAPSED.includes(key))
   function toggleSection(key) {
-    setCollapsed(c => ({ ...c, [key]: !c[key] }))
+    setCollapsed(c => ({ ...c, [key]: !isCollapsed(key) }))
   }
 
   function handleCreated(task) {
@@ -722,7 +722,7 @@ export default function VolunteerTasks({ userId, defaultRole }) {
             <StageSection
               title="My Tasks"
               count={myTasks.length}
-              collapsed={!!collapsed.mine}
+              collapsed={isCollapsed('mine')}
               onToggle={() => toggleSection('mine')}
               accent
             >
@@ -736,111 +736,29 @@ export default function VolunteerTasks({ userId, defaultRole }) {
               key={group.key}
               title={group.label}
               count={group.tasks.length}
-              collapsed={!!collapsed[group.key]}
+              collapsed={isCollapsed(group.key)}
               onToggle={() => toggleSection(group.key)}
             >
               {group.tasks.map(renderRow)}
             </StageSection>
           ))}
 
-          {/* Blocked tasks toggle */}
-          {blocked.length > 0 && (
-            <div>
-              <button
-                onClick={() => setShowBlocked(s => !s)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem',
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'var(--muted)', fontSize: '0.82rem',
-                  fontFamily: 'DM Sans, sans-serif', padding: '0.25rem 0',
-                }}
-              >
-                <span style={{ transform: showBlocked ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
-                {showBlocked ? 'Hide' : 'Show'} {blocked.length} blocked task{blocked.length !== 1 ? 's' : ''}
-              </button>
-              {showBlocked && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-                  {blocked.map(task => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      currentUserId={userId}
-                      teamMembers={teamMembers}
-                      onUpdate={handleUpdate}
-                      showToast={showToast}
-                      teamBadge={null}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Completed tasks toggle */}
-          {closed.length > 0 && (
-            <div>
-              <button
-                onClick={() => setShowDone(s => !s)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem',
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'var(--muted)', fontSize: '0.82rem',
-                  fontFamily: 'DM Sans, sans-serif', padding: '0.25rem 0',
-                }}
-              >
-                <span style={{ transform: showDone ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
-                {showDone ? 'Hide' : 'Show'} {closed.length} completed task{closed.length !== 1 ? 's' : ''}
-              </button>
-              {showDone && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-                  {closed.map(task => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      currentUserId={userId}
-                      teamMembers={teamMembers}
-                      onUpdate={handleUpdate}
-                      showToast={showToast}
-                      teamBadge={null}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Inactive tasks toggle */}
-          {inactive.length > 0 && (
-            <div>
-              <button
-                onClick={() => setShowInactive(s => !s)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem',
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'var(--muted)', fontSize: '0.82rem',
-                  fontFamily: 'DM Sans, sans-serif', padding: '0.25rem 0',
-                }}
-              >
-                <span style={{ transform: showInactive ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
-                {showInactive ? 'Hide' : 'Show'} {inactive.length} inactive task{inactive.length !== 1 ? 's' : ''}
-              </button>
-              {showInactive && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-                  {inactive.map(task => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      currentUserId={userId}
-                      teamMembers={teamMembers}
-                      onUpdate={handleUpdate}
-                      showToast={showToast}
-                      teamBadge={null}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Blocked / Done / Inactive — same section UI as the live stages */}
+          {[
+            { key: 'blocked',  label: 'Blocked',  tasks: blocked  },
+            { key: 'closed',   label: 'Done',     tasks: closed   },
+            { key: 'inactive', label: 'Inactive', tasks: inactive },
+          ].map(group => group.tasks.length > 0 && (
+            <StageSection
+              key={group.key}
+              title={group.label}
+              count={group.tasks.length}
+              collapsed={isCollapsed(group.key)}
+              onToggle={() => toggleSection(group.key)}
+            >
+              {group.tasks.map(renderRow)}
+            </StageSection>
+          ))}
         </>
       )}
 
