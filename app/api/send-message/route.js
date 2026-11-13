@@ -158,22 +158,20 @@ export async function POST(req) {
     recipientUserIds = (data || []).map(p => p.id)
 
   } else if (recipient_type === 'admin') {
-    // If an admin is replying back to a specific volunteer, notify that
-    // volunteer only — not all admins, which is what was spamming them.
+    // Reply All on an admin thread notifies the Admins audience and, when the
+    // thread started with a volunteer, that original sender too. The stored
+    // recipient type stays 'admin' so replies still read "To: Admins".
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('role', 'admin')
+      .in('default_role', allowedToSeeHRMessagesRoles)
+      .neq('id', user.id)
+    recipientUserIds = (data || []).map(p => p.id)
     if (recipient_volunteer_id && recipient_volunteer_id !== user.id) {
-      recipientUserIds = [recipient_volunteer_id]
-    } else {
-      // Only notify admins whose default_role is allowed to see HR
-      // messages in their inbox — otherwise they'd get a push for a
-      // message they can't actually open.
-      const { data } = await supabaseAdmin
-        .from('profiles')
-        .select('id')
-        .eq('role', 'admin')
-        .in('default_role', allowedToSeeHRMessagesRoles)
-        .neq('id', user.id)
-      recipientUserIds = (data || []).map(p => p.id)
+      recipientUserIds.push(recipient_volunteer_id)
     }
+    recipientUserIds = [...new Set(recipientUserIds)]
 
   } else if (recipient_type === 'affiliation_missionary') {
     const { data } = await supabaseAdmin

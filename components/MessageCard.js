@@ -277,6 +277,8 @@ export function MessageCard({ m, readMessageIds, user, setLightboxUrl, senderLab
           key={att.url}
           src={att.url}
           alt={att.name || 'Attached image'}
+          loading="lazy"
+          decoding="async"
           onClick={e => { e.stopPropagation(); setLightboxUrl(att.url) }}
           style={{
             maxWidth: '100%',

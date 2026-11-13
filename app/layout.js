@@ -3,7 +3,9 @@ import Script from 'next/script'
 import { ConfirmDialogProvider } from '../lib/ConfirmDialog'
 
 const isNonProd = process.env.NODE_ENV !== 'production' || (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production')
-const logo = isNonProd ? '/logo4.png' : '/logo3.png'
+const icon192 = isNonProd ? '/logos/logo4-192.webp' : '/logos/logo3-192.webp'
+const icon512 = isNonProd ? '/logos/logo4-512.webp' : '/logos/logo3-512.webp'
+const appleIcon = isNonProd ? '/logos/logo4-180.png' : '/logos/logo3-180.png'
 
 export const metadata = {
   title: 'BFC Volunteer Portal',
@@ -14,8 +16,11 @@ export const metadata = {
     title: 'Portal',
   },
   icons: {
-    icon: logo,
-    apple: logo,
+    icon: [
+      { url: icon192, sizes: '192x192', type: 'image/webp' },
+      { url: icon512, sizes: '512x512', type: 'image/webp' },
+    ],
+    apple: [{ url: appleIcon, sizes: '180x180', type: 'image/png' }],
   },
 }
 
@@ -33,7 +38,6 @@ export default function RootLayout({ children }) {
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="BFC" />
-        <link rel="apple-touch-icon" href={logo} />
       </head>
       <body>
         <ConfirmDialogProvider>

@@ -162,7 +162,7 @@ export default function GuestHoursPage() {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: '1rem' }}>
       <div style={{ width: '100%', maxWidth: '440px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '2rem' }}>
         <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
-          <img src="/logo3.png" alt="Logo" style={{ width: '96px', height: 'auto', display: 'block', margin: '0 auto 1rem', borderRadius: '12px' }} />
+          <img src="/logos/logo3-192.webp" alt="Logo" style={{ width: '96px', height: 'auto', display: 'block', margin: '0 auto 1rem', borderRadius: '12px' }} />
           <h1 style={{ fontSize: '1.4rem', fontWeight: 700, letterSpacing: '-0.02em' }}>Volunteer Hours</h1>
           <p style={{ color: 'var(--muted)', fontSize: '0.875rem', marginTop: '0.25rem' }}>One-time volunteers — log your time. No sign-in needed.</p>
         </div>

@@ -864,7 +864,7 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
           )}
         </div>
       </nav>
-      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
     </div>
   )
 }
@@ -881,7 +881,7 @@ function MobileTopBar({ onOpenSidebar }) {
           <path d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
-      <img src="/logo2.png" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
     </div>
   )
 }

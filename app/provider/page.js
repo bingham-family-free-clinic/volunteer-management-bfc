@@ -748,6 +748,7 @@ export default function ProviderPage() {
               profile={profile}
               supabase={supabase}
               showToast={showToast}
+              isActive={tab === 'messages'}
             />
           </div>
         )}

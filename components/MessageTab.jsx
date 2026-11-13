@@ -1,13 +1,20 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react'
 import { MessageCard } from './MessageCard'
 import { formatDateTime } from '../lib/timeUtils'
 import { ROLES } from '../lib/constants'
-import { recipientLabel, parseGroupMemberIds, isMultiRecipient, splitToLabel, parseAttachments, isImageAttachment, serializeAttachments, typeFromName } from '../lib/messageUtils'
+import { recipientLabel, parseGroupMemberIds, isMultiRecipient, splitToLabel, parseAttachments, isImageAttachment, serializeAttachments, typeFromName, compressImageForUpload } from '../lib/messageUtils'
+import {
+  MSG_PAGE_SIZE, MSG_FETCH_LIMIT, READS_REFRESH_MS,
+  slimMessage, isHiddenDM, mergeMessages, maxCreatedAt,
+  fetchMessageRows, fetchReadIds, loadProfiles, getCachedProfiles,
+  getViewCache, setViewCache,
+} from '../lib/messageSync'
 
-const MSG_PAGE_SIZE = 10
-const BROADCAST_TYPES = ['everyone', 'role', 'shift']
+// Don't re-download profiles more than once a minute just because an
+// unfamiliar sender id showed up.
+const UNKNOWN_SENDER_PROFILE_REFRESH_MS = 60 * 1000
 
 // Typing indicator tuning
 const TYPING_THROTTLE_MS = 1500 // min gap between "typing: true" sends
@@ -173,6 +180,9 @@ function ReplyThread({
       const ids = target.recipient_volunteer_ids
       return Array.isArray(ids) && ids.length ? ids : []
     }
+    // Admin replies also name the original sender, but the audience is still
+    // the whole thread, so let every subscriber see the indicator.
+    if (target.recipient_type === 'admin') return null
     if (target.recipient_volunteer_id) return [target.recipient_volunteer_id]
     return null
   }
@@ -475,9 +485,12 @@ function ReplyThread({
     ? <strong style={{ fontWeight: 700 }}>{previewToName}</strong>
     : previewToName
 
-  const isAdmin        = profile?.role === 'admin'
   const isThreadSender = message.sender_id === user?.id
   const canReply = Boolean(user?.id)
+  // A thread sent to the Admins group. Reply All on it reaches the Admins
+  // audience plus the original thread sender, while the message still reads
+  // "To: Admins".
+  const isAdminThread = message.recipient_type === 'admin'
 
   // Group chat member names (Individuals tab, 2+ people), alphabetical —
   // everyone in the group except the person viewing, so each member sees
@@ -515,8 +528,9 @@ function ReplyThread({
   // whole audience or for its sender alone; the composer's "Replying to …"
   // dropdown switches between those two.
   function replyDropdownActive(clicked) {
-    return Boolean(clicked) &&
-      clicked.recipient_type !== 'volunteer' &&
+    if (!clicked) return false
+    // A direct message is always answered privately, in every thread type.
+    return clicked.recipient_type !== 'volunteer' &&
       clicked.sender_id !== user?.id
   }
 
@@ -525,14 +539,20 @@ function ReplyThread({
   function resolveReplyTarget() {
     const clicked = clickedReplyMessage()
     if (isReplyAll) {
-      // The whole audience of the message being answered
-      const src = clicked || message
+      // The whole audience of the message being answered. In an admin thread
+      // that is always the thread's original Admins audience.
+      const src = isAdminThread ? message : (clicked || message)
       return { target: {
         recipient_type: src.recipient_type,
         recipient_day: src.recipient_day,
         recipient_shift: src.recipient_shift,
         recipient_role: src.recipient_role,
-        recipient_volunteer_id: src.recipient_volunteer_id,
+        // Admin replies still show "To: Admins", but the original thread
+        // sender is included as an additional recipient so they can follow the
+        // conversation. The server treats this as "Admins + this volunteer".
+        recipient_volunteer_id: isAdminThread
+          ? message.sender_id
+          : src.recipient_volunteer_id,
         // Group threads store members as JSON — the API requires the id
         // array, to forward it explicitly. The source sender is unioned in
         // because stored lists predate full membership (composers excluded
@@ -608,7 +628,12 @@ function ReplyThread({
   // own message can only be answered for its crowd, a direct message only for
   // the one person on the other end.
   const replyActive = replyDropdownActive(replyClicked)
-  const replyAudienceName = recipientLabel(replyClicked || message)
+  // In an admin thread the group reply is called "All" because it reaches the
+  // Admins audience plus the original sender. Every other thread keeps the
+  // audience's own name.
+  const replyAudienceName = isAdminThread
+    ? 'All'
+    : recipientLabel(replyClicked || message)
   const replyPersonName = replyClicked
     ? (replyClicked.sender_id !== user?.id
         ? (replyClicked.sender?.full_name ?? nameOf(replyClicked.sender_id))
@@ -623,7 +648,9 @@ function ReplyThread({
     : [{ replyAll: isReplyAll, label: replyTargetName }]
   // Emphasise the crowd half of a reply the same way the "To:" line does —
   // "Replying to **Group**" against a plain "Replying to Jon Doe".
-  const audienceIsMulti = isMultiRecipient(replyClicked || message)
+  const audienceIsMulti = isMultiRecipient(
+    isAdminThread ? message : (replyClicked || message)
+  )
   const boldTarget = (text, isAudience) =>
     isAudience && audienceIsMulti
       ? <strong style={{ fontWeight: 700 }}>{text}</strong>
@@ -635,6 +662,7 @@ function ReplyThread({
     setLocallyHighlightedReplies(new Set())
     replyScrollPosRef.current = window.scrollY
     setReplyToId(msg.id)
+    // A direct message is answered privately; crowd messages default to All.
     setIsReplyAll(msg.recipient_type !== 'volunteer')
     setTargetMenuOpen(false)
     setReplyOpen(true)
@@ -1017,20 +1045,26 @@ export function MessageTab({
   schedule = [],
   onUnreadCountChange,
   openMessageId,
+  // False while the tab is mounted-but-hidden (provider page keeps it alive).
+  // Polling pauses then and catches up the moment it becomes active again.
+  isActive = true,
   // Bottom offset for the mobile recipients sheet (e.g. above the volunteer
   // BottomNav). Accepts any CSS length; 0 keeps the sheet flush to the bottom.
   sheetBottomOffset = 0,
 }) {
   // ── Local state ────────────────────────────────────────────────────────────
-  const [messages, setMessages]               = useState([])
+  const [rawMessages, setMessages]            = useState([])
   const [msgCursor, setMsgCursor]             = useState(null)
   const [hasMoreMsgs, setHasMoreMsgs]         = useState(false)
   const [loadingMoreMsgs, setLoadingMoreMsgs] = useState(false)
   const [readMessageIds, setReadMessageIds]   = useState(new Set())
-  const [broadcastReadCounts, setBroadcastReadCounts] = useState({})
   const [allUsers, setAllUsers]               = useState(allUsersProp)
   const [lightboxUrl, setLightboxUrl]         = useState(null)
   const [inboxFilter, setInboxFilter] = useState('all')
+  // Thread ids that were unread when the Unread filter was applied. Reading a
+  // thread while the filter is active must not make it vanish mid-view, so the
+  // filter unions this frozen set with whatever is still currently unread.
+  const [unreadFilterSnapshot, setUnreadFilterSnapshot] = useState(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const filterRef = useRef(null)
   const [inboxSearch, setInboxSearch] = useState('')
@@ -1085,24 +1119,15 @@ export function MessageTab({
   const isAdmin    = profile?.role === 'admin'
   const isProvider = profile?.default_role === 'Provider'
 
-  // ── Bootstrap ──────────────────────────────────────────────────────────────
+  // ── Click-outside handlers for the compose combo + filter dropdown ─────────
   useEffect(() => {
-    if (user) fetchMessages()
     function handleMouseDown(e) {
       if (comboRef.current && !comboRef.current.contains(e.target)) setComboOpen(false)
       if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false)
     }
     document.addEventListener('mousedown', handleMouseDown)
     return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [user])
-
-  // ── Poll unread count every 30s so the badge stays current
-  // even when the messages tab is not open ──
-  useEffect(() => {
-    if (!user) return
-    const id = setInterval(fetchMessages, 30000)
-    return () => clearInterval(id)
-  }, [user])
+  }, [])
 
   // ── Unlock pinch-to-zoom when lightbox is open on mobile ───────────────────
   useEffect(() => {
@@ -1115,70 +1140,202 @@ export function MessageTab({
     }
   }, [lightboxUrl])
 
-  // ── Data fetching ──────────────────────────────────────────────────────────
-  const fetchMessages = useCallback(async () => {
-    if (!user) return
+  // ── Data fetching (delta-based) ────────────────────────────────────────────
+  // Old behaviour: every 30s poll, every realtime event and every send
+  // re-downloaded 50 messages (with a profiles join), ALL of the user's read
+  // receipts, ALL profiles and a broadcast-read-count RPC.
+  // New behaviour: one full window per session, then only rows newer than a
+  // watermark. Realtime payloads are merged directly with no refetch.
+  const messagesRef     = useRef([])   // latest messages state, for async callbacks
+  const allUsersRef     = useRef(allUsers)
+  const watermarkRef    = useRef(null) // newest created_at CONFIRMED by a DB query
+  const readsAtRef      = useRef(0)    // last time read receipts were confirmed
+  const syncingRef      = useRef(false)
+  const syncPendingRef  = useRef(false)
+  const hiddenAtRef     = useRef(null)
+  const namesRefreshRef = useRef(0)
+  messagesRef.current = rawMessages
+  allUsersRef.current = allUsers
 
-    const [{ data: msgs }, { data: reads }, { data: usersData }] = await Promise.all([
-      // Fetch top-level messages AND their replies in one query.
-      // We fetch all messages and group client-side for simplicity.
-      supabase
-        .from('messages')
-        .select(`
-          id, created_at, body, image_url,
-          recipient_type, recipient_shift, recipient_day, recipient_role,
-          recipient_volunteer_id, sender_id, parent_message_id,
-          sender:profiles!messages_sender_id_fkey(full_name, role)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(MSG_PAGE_SIZE * 5), // fetch extra to account for reply rows
-      supabase
-        .from('message_reads')
-        .select('message_id')
-        .eq('user_id', user.id),
-      supabase
-        .from('profiles')
-        .select('id, full_name, default_role, status')
-        .order('full_name'),
-    ])
+  // Names rarely change: shared 10-minute cache across mounts.
+  const loadNames = useCallback(async (force = false) => {
+    const data = await loadProfiles(supabase, { force })
+    if (data) setAllUsers(data)
+  }, [supabase])
 
-    const fetched = (msgs || []).filter(m => m != null)
-    setMessages(fetched)
-    // Cursor = oldest top-level message fetched
-    const topLevel = fetched.filter(m => !m.parent_message_id)
-    setHasMoreMsgs(topLevel.length >= MSG_PAGE_SIZE)
-    if (topLevel.length > 0) {
-      setMsgCursor(topLevel[topLevel.length - 1].created_at)
+  // Merge rows into state; refresh names if a sender isn't in the list yet.
+  const mergeIn = useCallback((rows) => {
+    const fresh = (rows || []).filter(Boolean)
+    if (fresh.length === 0) return
+    setMessages(prev => mergeMessages(prev, fresh))
+    const known = new Set(allUsersRef.current.map(u => u.id))
+    const unknownSender = fresh.some(m => m.sender_id && !known.has(m.sender_id))
+    if (unknownSender && Date.now() - namesRefreshRef.current > UNKNOWN_SENDER_PROFILE_REFRESH_MS) {
+      namesRefreshRef.current = Date.now()
+      loadNames(true)
     }
+  }, [loadNames])
 
-    const readSet = new Set((reads || []).map(r => r.message_id))
-    setReadMessageIds(readSet)
-    setAllUsers(usersData || [])
-    await loadBroadcastReadCounts(fetched)
-
+  // Re-check read receipts for the messages we hold (bounded `.in()` query).
+  const refreshReads = useCallback(async () => {
+    if (!user) return
+    const ids = messagesRef.current.map(m => m.id)
+    if (ids.length === 0) { readsAtRef.current = Date.now(); return }
+    const reads = await fetchReadIds(supabase, user.id, ids)
+    if (!reads) return
+    readsAtRef.current = Date.now()
+    setReadMessageIds(prev => {
+      let changed = false
+      const next = new Set(prev)
+      reads.forEach(id => { if (!next.has(id)) { next.add(id); changed = true } })
+      return changed ? next : prev
+    })
   }, [user, supabase])
 
-  // ── Realtime: new messages + new read receipts ─────────────────────────────
-  // Debounced so bursts (e.g. a reply-all fan-out) collapse into one refetch,
-  // which already re-resolves the sender join and broadcast read counts.
-  // The 30s poll above stays as a fallback for dropped events/reconnects.
+  // First load of a session (or recovery after a big gap).
+  const fullLoad = useCallback(async () => {
+    if (!user) return
+    const [{ rows }] = await Promise.all([
+      fetchMessageRows(supabase, user.id),
+      loadNames(),
+    ])
+    if (!rows) return
+    // Reads before state so nothing flashes "unread" while receipts load.
+    const reads = await fetchReadIds(supabase, user.id, rows.map(m => m.id))
+
+    watermarkRef.current = maxCreatedAt(rows) || new Date(0).toISOString()
+    setMessages(rows)
+    const topLevel = rows.filter(m => !m.parent_message_id)
+    setHasMoreMsgs(topLevel.length >= MSG_PAGE_SIZE)
+    if (topLevel.length > 0) setMsgCursor(topLevel[topLevel.length - 1].created_at)
+    if (reads) {
+      readsAtRef.current = Date.now()
+      setReadMessageIds(prev => new Set([...prev, ...reads]))
+    }
+  }, [user, supabase, loadNames])
+
+  // Cheap sync: ask only for rows newer than the watermark. Empty result ≈ 0 bytes.
+  const syncMessages = useCallback(async () => {
+    if (!user) return
+    if (syncingRef.current) { syncPendingRef.current = true; return }
+    syncingRef.current = true
+    try {
+      do {
+        syncPendingRef.current = false
+        const wm = watermarkRef.current
+        if (!wm) { await fullLoad(); continue }
+        const { rows } = await fetchMessageRows(supabase, user.id, { after: wm })
+        if (!rows || rows.length === 0) continue
+        // So much arrived that a patch could leave a hole — reload the window.
+        if (rows.length >= MSG_FETCH_LIMIT) { await fullLoad(); continue }
+        watermarkRef.current = maxCreatedAt(rows) || wm
+        mergeIn(rows)
+      } while (syncPendingRef.current)
+    } finally {
+      syncingRef.current = false
+    }
+  }, [user, supabase, fullLoad, mergeIn])
+
+  // Paint instantly from the last visit (admin/volunteer pages unmount this tab
+  // when you leave it), then sync only the delta below.
+  const hydratedForRef = useRef(null)
+  useEffect(() => {
+    if (!user || hydratedForRef.current === user.id) return
+    hydratedForRef.current = user.id
+    const cached = getViewCache(user.id)
+    if (!cached) return
+    watermarkRef.current = cached.watermark
+    readsAtRef.current   = cached.readsAt
+    setMessages(cached.messages)
+    setReadMessageIds(cached.readIds)
+    setMsgCursor(cached.cursor)
+    setHasMoreMsgs(cached.hasMore)
+    const names = getCachedProfiles()
+    if (names) setAllUsers(names)
+  }, [user])
+
+  useEffect(() => {
+    if (!user || !watermarkRef.current) return
+    setViewCache({
+      userId: user.id,
+      messages: rawMessages,
+      readIds: readMessageIds,
+      cursor: msgCursor,
+      hasMore: hasMoreMsgs,
+      watermark: watermarkRef.current,
+      readsAt: readsAtRef.current,
+    })
+  }, [user, rawMessages, readMessageIds, msgCursor, hasMoreMsgs])
+
+  // Bootstrap / re-activation sync.
+  useEffect(() => {
+    if (!user || !isActive) return
+    syncMessages().then(() => {
+      if (Date.now() - readsAtRef.current > READS_REFRESH_MS) refreshReads()
+    })
+  }, [user, isActive, syncMessages, refreshReads])
+
+  // ── Poll every 30s so the badge stays current (now a delta query) ──────────
+  // Skipped while the document is hidden or this tab is inactive; catches up
+  // when the user comes back. Read receipts are re-verified after a long
+  // absence or every few minutes (realtime normally delivers them instantly).
+  useEffect(() => {
+    if (!user || !isActive) return
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      syncMessages().then(() => {
+        if (Date.now() - readsAtRef.current > READS_REFRESH_MS) refreshReads()
+      })
+    }, 30000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') { hiddenAtRef.current = Date.now(); return }
+      const awayMs = hiddenAtRef.current ? Date.now() - hiddenAtRef.current : 0
+      hiddenAtRef.current = null
+      syncMessages().then(() => { if (awayMs > 60 * 1000) refreshReads() })
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [user, isActive, syncMessages, refreshReads])
+
+  // ── Realtime: merge payloads directly (no refetch) ─────────────────────────
+  // • messages INSERT → the new row is already in the payload. Rows the UI can
+  //   never show (DMs between other people) are dropped.
+  // • message_reads INSERT → filtered to THIS user server-side (previously every
+  //   client refetched whenever anyone marked anything read) and applied
+  //   directly, which keeps a second device of the same user in sync.
+  // The watermark is NOT advanced by realtime rows, so if a realtime event is
+  // ever missed the next delta poll still picks the gap up.
   useEffect(() => {
     if (!user) return
-    let timer = null
-    const scheduleRefetch = () => {
-      if (timer) return
-      timer = setTimeout(() => { timer = null; fetchMessages() }, 500)
-    }
     const channel = supabase
       .channel(`messages-live:${user.id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, scheduleRefetch)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reads' }, scheduleRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+        const row = slimMessage(payload?.new)
+        if (!row || isHiddenDM(row, user.id)) return
+        mergeIn([row])
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reads', filter: `user_id=eq.${user.id}` }, payload => {
+        const id = payload?.new?.message_id
+        if (!id) return
+        setReadMessageIds(prev => (prev.has(id) ? prev : new Set(prev).add(id)))
+      })
       .subscribe()
-    return () => {
-      if (timer) clearTimeout(timer)
-      supabase.removeChannel(channel)
-    }
-  }, [user, supabase, fetchMessages])
+    return () => { supabase.removeChannel(channel) }
+  }, [user, supabase, mergeIn])
+
+  // Sender names come from the cached profiles list instead of a per-row join.
+  const nameById = useMemo(() => new Map(allUsers.map(u => [u.id, u.full_name])), [allUsers])
+  const messages = useMemo(
+    () => rawMessages.map(m => {
+      if (m.sender) return m
+      const name = nameById.get(m.sender_id)
+      return { ...m, sender: name ? { full_name: name } : null }
+    }),
+    [rawMessages, nameById]
+  )
 
   const markThreadRead = useCallback(async (messageId, replyIds = []) => {
     const allIds = [messageId, ...replyIds]
@@ -1228,40 +1385,22 @@ export function MessageTab({
   async function loadMoreMessages() {
     if (!user || !msgCursor || loadingMoreMsgs) return
     setLoadingMoreMsgs(true)
-    const { data: older } = await supabase
-      .from('messages')
-      .select(`
-        id, created_at, body, image_url,
-        recipient_type, recipient_shift, recipient_day, recipient_role,
-        recipient_volunteer_id, sender_id, parent_message_id,
-        sender:profiles!messages_sender_id_fkey(full_name, role)
-      `)
-      .order('created_at', { ascending: false })
-      .lt('created_at', msgCursor)
-      .limit(MSG_PAGE_SIZE * 2)
-
-    const fetched = (older || []).filter(m => m != null)
-    setMessages(prev => {
-      const existingIds = new Set(prev.map(m => m.id))
-      return [...prev, ...fetched.filter(m => !existingIds.has(m.id))]
-    })
-    const topLevel = fetched.filter(m => !m.parent_message_id)
-    setHasMoreMsgs(topLevel.length >= MSG_PAGE_SIZE)
-    if (topLevel.length > 0) setMsgCursor(topLevel[topLevel.length - 1].created_at)
-    if (fetched.length > 0) await loadBroadcastReadCounts(fetched)
-    setLoadingMoreMsgs(false)
-  }
-
-  async function loadBroadcastReadCounts(msgs) {
-    const broadcastIds = (msgs || [])
-      .filter(m => m && BROADCAST_TYPES.includes(m.recipient_type))
-      .map(m => m.id)
-    if (broadcastIds.length === 0) return
-    const { data, error } = await supabase.rpc('get_broadcast_read_counts', { message_ids: broadcastIds })
-    if (error) return
-    const map = {}
-    ;(data || []).forEach(r => { map[r.message_id] = Number(r.read_count) })
-    setBroadcastReadCounts(prev => ({ ...prev, ...map }))
+    try {
+      const { rows } = await fetchMessageRows(supabase, user.id, {
+        before: msgCursor,
+        limit: MSG_PAGE_SIZE * 2,
+      })
+      if (!rows) return
+      // Read receipts only for this page's ids, fetched before showing it.
+      const reads = rows.length ? await fetchReadIds(supabase, user.id, rows.map(m => m.id)) : null
+      setMessages(prev => mergeMessages(prev, rows))
+      if (reads) setReadMessageIds(prev => new Set([...prev, ...reads]))
+      const topLevel = rows.filter(m => !m.parent_message_id)
+      setHasMoreMsgs(topLevel.length >= MSG_PAGE_SIZE)
+      if (topLevel.length > 0) setMsgCursor(topLevel[topLevel.length - 1].created_at)
+    } finally {
+      setLoadingMoreMsgs(false)
+    }
   }
 
   // ── Thread grouping ────────────────────────────────────────────────────────
@@ -1378,7 +1517,23 @@ export function MessageTab({
     return inboxMessages.find(im => im.id === m.id) || (inboxRepliesMap[m.id] || []).some(r => r.sender_id !== user?.id)
   })
 
+  // A thread is unread when its root or any reply hasn't been read yet.
+  function isThreadUnread(m) {
+    if (!readMessageIds) return false
+    const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
+    const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
+      r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
+    )
+    return isUnreadMsg || hasUnreadReplies
+  }
+
   const filteredInboxThreads = inboxThreads.filter(m => {
+    if (inboxFilter === 'unread') {
+      // Keep threads that were unread when the filter was applied even after
+      // they're read, plus anything that is unread right now.
+      return isThreadUnread(m) || (unreadFilterSnapshot?.has(m.id) ?? false)
+    }
+
     if (inboxFilter === 'hr') {
       return m.recipient_type === 'admin'
     }
@@ -1415,13 +1570,9 @@ export function MessageTab({
   })
 
   // Unread count across all inbox threads (for tab badge and parent notification)
-  const unreadThreadCount = readMessageIds ? inboxThreads.filter(m => {
-    const isUnreadMsg = !readMessageIds.has(m.id) && m.sender_id !== user?.id
-    const hasUnreadReplies = (inboxRepliesMap[m.id] || []).some(
-      r => !readMessageIds.has(r.id) && r.sender_id !== user?.id
-    )
-    return isUnreadMsg || hasUnreadReplies
-  }).length : 0
+  const unreadThreadCount = readMessageIds
+    ? inboxThreads.filter(isThreadUnread).length
+    : 0
 
   // Notify parent whenever unread count changes so the Messages tab badge stays in sync
   useEffect(() => {
@@ -1582,9 +1733,17 @@ export function MessageTab({
         const f = msgFiles[i]
         const safe = (f.name || 'file').replace(/[^\w.-]+/g, '_').slice(-60) || 'file'
         const path = `${userId}/${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}_${safe}`
+        // Downscale big photos before upload: every viewer downloads this file.
+        const toUpload = await compressImageForUpload(f.file, f.type)
         const { error } = await supabase.storage
           .from('message-images')
-          .upload(path, f.file, { contentType: f.type || 'application/octet-stream', upsert: false })
+          .upload(path, toUpload, {
+            contentType: f.type || 'application/octet-stream',
+            upsert: false,
+            // Paths are unique and never overwritten, so let browsers/CDN keep
+            // them for a year instead of Supabase's 1-hour default.
+            cacheControl: '31536000',
+          })
         if (error) {
           showToast(`${f.name} failed to upload: ${error.message}`, 'error')
           return null
@@ -1653,10 +1812,7 @@ export function MessageTab({
         setMsgRecipientVolIds([])
         setComboQuery('')
         setComboOpen(false)
-        setMessages([])
-        setMsgCursor(null)
-        setHasMoreMsgs(false)
-        await fetchMessages()
+        await syncMessages()   // delta: just the message we sent
         setMsgView('inbox')
       }
     } catch (err) {
@@ -1669,12 +1825,42 @@ export function MessageTab({
   // ── Inbox filter dropdown ──────────────────────────────────────────────────
   const inboxFilterOptions = [
     ['all', 'All'],
+    ['unread', 'Unread'],
     ['direct', 'Directly to me'],
     ...(isAdmin ? [['hr', 'HR']] : []),
     ['role', 'My Role'],
     ['everyone', 'Everyone'],
   ]
   const activeFilterLabel = (inboxFilterOptions.find(([key]) => key === inboxFilter) ?? inboxFilterOptions[0])[1]
+
+  // Applying (or re-applying) the Unread filter freezes the current unread
+  // threads so reading them in place doesn't make them disappear.
+  function applyInboxFilter(key) {
+    if (key === 'unread') {
+      setUnreadFilterSnapshot(new Set(inboxThreads.filter(isThreadUnread).map(m => m.id)))
+    } else {
+      setUnreadFilterSnapshot(null)
+    }
+    setInboxFilter(key)
+    setFilterOpen(false)
+  }
+
+  // While the Unread filter is active, remember every thread that becomes
+  // unread so it survives being read (and collapsed) until the filter is
+  // re-applied or the page is reloaded.
+  useEffect(() => {
+    if (inboxFilter !== 'unread') return
+    const unreadIds = inboxThreads.filter(isThreadUnread).map(m => m.id)
+    if (unreadIds.length === 0) return
+    setUnreadFilterSnapshot(prev => {
+      const next = new Set(prev ?? [])
+      let changed = false
+      unreadIds.forEach(id => {
+        if (!next.has(id)) { next.add(id); changed = true }
+      })
+      return changed ? next : prev
+    })
+  }, [inboxFilter, readMessageIds, inboxThreads])
 
   // Inbox text search — matches sender name, recipient, or message body across
   // the whole thread (top-level + replies). Plain substring, re-run on every
@@ -1853,7 +2039,7 @@ export function MessageTab({
                         type="button"
                         role="option"
                         aria-selected={isActive}
-                        onClick={() => { setInboxFilter(key); setFilterOpen(false) }}
+                        onClick={() => applyInboxFilter(key)}
                         onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
                         onMouseLeave={e => { e.currentTarget.style.background = isActive ? '#0369a1' + '18' : 'transparent' }}
                         style={{
@@ -2002,10 +2188,9 @@ export function MessageTab({
                   supabase={supabase}
                   showToast={showToast}
                   readMessageIds={readMessageIds}
-                  broadcastReadCounts={broadcastReadCounts}
                   setLightboxUrl={setLightboxUrl}
                   allUsers={allUsers}
-                  onReplySent={fetchMessages}
+                  onReplySent={syncMessages}
                   onMarkRead={markThreadRead}
                   startExpanded={openThreadId === m.id}
                   searchQuery={inboxSearchQuery}
@@ -2063,10 +2248,9 @@ export function MessageTab({
                     supabase={supabase}
                     showToast={showToast}
                     readMessageIds={readMessageIds}
-                    broadcastReadCounts={broadcastReadCounts}
                     setLightboxUrl={setLightboxUrl}
                     allUsers={allUsers}
-                    onReplySent={fetchMessages}
+                    onReplySent={syncMessages}
                     onMarkRead={markThreadRead}
                     senderLabel={sent.isReplyThread ? undefined : toLabel}
                     collapsedLabel={sent.isReplyThread ? toLabel : undefined}
@@ -2465,4 +2649,3 @@ export function MessageTab({
     </div>
   )
 }
-

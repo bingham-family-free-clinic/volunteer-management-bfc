@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { SHIFTS, ROLES, getRoleCapacity, SCHOOLS, MAJORS, ACTION_LABELS, ACTION_COLORS, AFFILIATION_LABELS, MAX_FILE_SIZE } from '../../lib/constants'
 import { getMountainNow, getMountainLabel, asUTC, formatMountain, formatDateMountain, formatDateTime, toMountainInputValue, fromMountainInputValue } from '../../lib/timeUtils'
-import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
+import { getInboxMessages, parseGroupMemberIds, countUnreadThreads } from '../../lib/messageUtils'
+import { createUnreadBadgeLoader } from '../../lib/messageSync'
 import DataDashboard from '../../components/DataDashboard'
 import ClinicOpenings from '../../components/ClinicOpenings'
 import Pipeline from '../../components/Pipeline'
@@ -33,7 +34,7 @@ const CALLOUTS_LIMIT = 60
 // 'volunteers' intentionally appears in both VOLUNTEER and PROVIDER groups —
 // it's a shared shortcut, not evidence of provider access on its own (see
 // PROVIDER_GROUP_CORE_KEYS below).
-const VOLUNTEER_GROUP_KEYS = ['dashboard', 'pipeline', 'schedule', 'volunteers', 'shifts', 'callouts']
+const VOLUNTEER_GROUP_KEYS = ['dashboard', 'pipeline', 'schedule', 'waitlist', 'volunteers', 'shifts', 'callouts']
 const PROVIDER_GROUP_KEYS  = ['providers', 'volunteers', 'hours', 'create']
 // Keys that must be present (beyond the shared 'volunteers') for the
 // Providers menu to be worth showing at all.
@@ -378,7 +379,7 @@ function AdminDesktopHeader({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', padding: '0.5rem 0' }}>
-      <img src="/logo2.png" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
         {showVolunteers && (
@@ -619,6 +620,8 @@ function AdminSidebar({ open, onClose, navItems, activeTab, onSelectTab, onSwitc
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const [profile, setProfile] = useState(null)
+  const profileRef = useRef(null)
+  profileRef.current = profile
   const [user, setUser] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
 
@@ -648,7 +651,7 @@ export default function AdminPage() {
   const [addWeekPattern, setAddWeekPattern]         = useState('every')
   const [addNotes, setAddNotes]                     = useState('')
   const [showClinicOpenings, setShowClinicOpenings] = useState(false)
-  const [showWaitlist, setShowWaitlist]             = useState(false)
+  const [editingEntryId, setEditingEntryId]         = useState(null)
   const [scheduleDate, setScheduleDate]             = useState('')
   const [dateCoverShifts, setDateCoverShifts]       = useState([])
 
@@ -822,7 +825,7 @@ export default function AdminPage() {
   // ── Tab list (shared between the desktop pill row and the mobile sidebar) ──
   const tabItems = isLabDirector
     ? [
-        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['waitlist', 'Waitlist'], ['volunteers', 'Volunteers'],
       ]
     : isCredentialing
     ? [
@@ -831,28 +834,30 @@ export default function AdminPage() {
       ]
     : isOfficeManager
     ? [
-        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['waitlist', 'Waitlist'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
         ['training', 'Weekly Training'],
       ]
     : isOSSM
     ? [
-        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['waitlist', 'Waitlist'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
       ]
     : isHR
     ? [
-        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
+        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['waitlist', 'Waitlist'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
       ]
     : [
-        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
+        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['waitlist', 'Waitlist'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'],
         ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...tasksTabItem,
       ]
 
   // Insert Messages as the 3rd tab (just like the volunteer page)
-  const schedIdx = tabItems.findIndex(([key]) => key === 'schedule')
+  const schedIdx = tabItems.findIndex(([key]) => key === 'waitlist') !== -1
+    ? tabItems.findIndex(([key]) => key === 'waitlist')
+    : tabItems.findIndex(([key]) => key === 'schedule')
   if (schedIdx !== -1) {
     tabItems.splice(schedIdx + 1, 0, ['messages', 'Messages'])
   } else if (tabItems.length >= 2) {
@@ -1332,6 +1337,7 @@ export default function AdminPage() {
     setTab(key)
     setSelectedVolunteer(null)
     setAddingRole(null)
+    setEditingEntryId(null)
     if (!loadedTabs.current.has(key)) {
       loadedTabs.current.add(key)
       if (key === 'shifts') { loadShiftsFirstPage(); loadGuestOrgs(); loadGuestHoursTotals() }
@@ -1364,7 +1370,7 @@ export default function AdminPage() {
        setProfile(p)
        if (p?.default_role === 'Credentialing') setTab('providers')
        await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
-       fetchMessages(user.id)
+       fetchMessages(user.id, p)
        // Guest orgs load best-effort (tables may not exist until migrations run).
       loadGuestOrgs()
       loadGuestHoursTotals()
@@ -1375,38 +1381,33 @@ export default function AdminPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // ── Messages data fetcher ───────────────────────────────────────────
-  async function fetchMessages(userId) {
+  // ── Messages badge ──────────────────────────────────────────────────
+  // Old: every INSERT re-downloaded 50 full messages (+ sender join), every read
+  // receipt, and the entire profiles table (which the badge never used).
+  // New: a light delta loader (shared with the volunteer page) — first call
+  // fetches the window, later calls only fetch rows newer than the watermark,
+  // and realtime INSERT payloads are folded in with no query at all.
+  const badgeLoaderRef = useRef(null)
+  if (!badgeLoaderRef.current) badgeLoaderRef.current = createUnreadBadgeLoader(supabase, countUnreadThreads)
+  const tabRef = useRef('dashboard')
+  tabRef.current = tab
+
+  async function fetchMessages(userId, prof = profileRef.current, opts) {
     if (!userId) return
-    const [{ data: msgs }, { data: reads }, { data: usersData }] = await Promise.all([
-      supabase.from('messages')
-        .select(`
-          id, created_at, body, image_url,
-          recipient_type, recipient_shift, recipient_day, recipient_role,
-          recipient_volunteer_id, sender_id, parent_message_id,
-          sender:profiles!messages_sender_id_fkey(full_name, role)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(10 * 5),
-      supabase.from('message_reads').select('message_id').eq('user_id', userId),
-      supabase.from('profiles').select('id, full_name, default_role, status').order('full_name'),
-    ])
-    const fetched = msgs || []
-    const readSet = new Set((reads || []).map(r => r.message_id))
-    const topLevel = fetched.filter(m => !m.parent_message_id)
-    const repliesMap = {}
-    fetched.filter(m => m.parent_message_id).forEach(r => {
-      if (!repliesMap[r.parent_message_id]) repliesMap[r.parent_message_id] = []
-      repliesMap[r.parent_message_id].push(r)
-    })
-    const count = topLevel.filter(m => {
-      if (m.recipient_type === 'group' && m.sender_id !== userId && !parseGroupMemberIds(m).includes(userId)) return false
-      const isUnreadMsg = m.sender_id !== userId && !readSet.has(m.id)
-      const hasUnreadReplies = (repliesMap[m.id] || []).some(r => !readSet.has(r.id) && r.sender_id !== userId)
-      return isUnreadMsg || hasUnreadReplies
-    }).length
-    setUnreadCount(count)
+    // Same visibility rules as MessageTab, so the badge matches the tab.
+    const count = await badgeLoaderRef.current.load({ id: userId }, prof, opts)
+    if (count != null) setUnreadCount(count)
   }
+
+  // Leaving the Messages tab: reads were just made there, so re-verify them once.
+  const prevTabRef = useRef(tab)
+  useEffect(() => {
+    const was = prevTabRef.current
+    prevTabRef.current = tab
+    if (was === 'messages' && tab !== 'messages' && user?.id) {
+      fetchMessages(user.id, profileRef.current, { forceReads: true })
+    }
+  }, [tab])
 
   // ── Real-time subscription: update badge immediately when new messages arrive ──
   useEffect(() => {
@@ -1417,7 +1418,21 @@ export default function AdminPage() {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-      }, () => { fetchMessages(user.id) })
+      }, (payload) => {
+        if (tabRef.current === 'messages') return // MessageTab handles it
+        const count = badgeLoaderRef.current.ingest(payload?.new, { id: user.id }, profileRef.current)
+        if (count != null) setUnreadCount(count)
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'message_reads',
+        filter: `user_id=eq.${user.id}`,
+      }, (payload) => {
+        if (tabRef.current === 'messages') return
+        const count = badgeLoaderRef.current.ingestRead(payload?.new?.message_id, { id: user.id }, profileRef.current)
+        if (count != null) setUnreadCount(count)
+      })
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])
@@ -1449,18 +1464,24 @@ export default function AdminPage() {
 
         void refreshLiveData()
 
-        // Refresh every 5 min
-        const interval = setInterval(refreshLiveData, 5 * 60 * 1000)
-
-        function handleFocus() {
+        // Refresh every 5 min, but skip ticks while the tab is hidden
+        // (saves egress); refresh on return to visibility.
+        const interval = setInterval(() => {
+            if (document.visibilityState !== 'visible') return
             void refreshLiveData()
+        }, 5 * 60 * 1000)
+
+        function handleVisibilityChange() {
+            if (document.visibilityState === 'visible') {
+                void refreshLiveData()
+            }
         }
 
-        window.addEventListener('focus', handleFocus)
+        document.addEventListener('visibilitychange', handleVisibilityChange)
 
         return () => {
             clearInterval(interval)
-            window.removeEventListener('focus', handleFocus)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
     }, [tab, loading])
 
@@ -1709,6 +1730,23 @@ export default function AdminPage() {
     if (!clockOut) setActiveShifts(prev => [{ id: inserted.id, volunteer_id: inserted.volunteer_id, clock_in: clockIn, profiles: inserted.profiles }, ...prev])
     setCreatingShift(false)
   }
+  function resetEntryFormFields() {
+    setAddVolId(''); setAddStartDate(''); setAddEndDate(''); setAddWeekPattern('every'); setAddNotes('')
+  }
+  function cancelEntryForm() {
+    setAddingRole(null); setEditingEntryId(null); resetEntryFormFields()
+  }
+  // Clicking a schedule bubble opens the same form used for assigning, pre-filled.
+  function startEditEntry(entry) {
+    setShowClinicOpenings(false)
+    setEditingEntryId(entry.id)
+    setAddingRole(entry.role)
+    setAddVolId(entry.volunteer_id || '')
+    setAddStartDate(entry.start_date || '')
+    setAddEndDate(entry.end_date || '')
+    setAddWeekPattern(entry.week_pattern || 'every')
+    setAddNotes(entry.notes || '')
+  }
   async function handleAddEntry() {
     if (!addVolId) return;
     setAddingEntry(true);
@@ -1718,7 +1756,10 @@ export default function AdminPage() {
     // --- DIRECTOR RBAC CHECK ---
     let needsProfileUpdate = false;
 
-    if (ADMIN_ROLES.includes(addingRole) || VOLUNTEER_UPDATE_DEFAULT_ROLES.includes(addingRole)) {
+    const editingOriginal = editingEntryId ? schedule.find(x => x.id === editingEntryId) : null;
+    const sameVolunteerEdit = editingOriginal && editingOriginal.volunteer_id === addVolId;
+
+    if (!sameVolunteerEdit && (ADMIN_ROLES.includes(addingRole) || VOLUNTEER_UPDATE_DEFAULT_ROLES.includes(addingRole))) {
       if (vol?.default_role !== addingRole) {
         if (profile?.default_role !== 'Director') {
           showMessage(
@@ -1733,7 +1774,8 @@ export default function AdminPage() {
       }
     }
 
-    const currentEntries = getEntries(scheduleDay, scheduleShift, addingRole);
+    const currentEntries = getEntries(scheduleDay, scheduleShift, addingRole)
+      .filter(e => e.id !== editingEntryId);
 
     const effectiveCount = currentEntries.reduce((sum, entry) => {
       if (addStartDate && entry.end_date && entry.end_date < addStartDate)
@@ -1761,6 +1803,7 @@ export default function AdminPage() {
 
     const exists = schedule.find(s => {
       if (
+        s.id === editingEntryId ||
         s.volunteer_id !== addVolId ||
         s.day_of_week !== scheduleDay ||
         s.shift_time !== scheduleShift ||
@@ -1779,6 +1822,42 @@ export default function AdminPage() {
 
     if (exists) {
       showMessage('Volunteer already assigned to this slot', 'error');
+      setAddingEntry(false);
+      return;
+    }
+
+    if (editingEntryId) {
+      const { data: updated, error: updErr } = await supabase
+        .from('schedule')
+        .update({
+          volunteer_id: addVolId,
+          start_date: addStartDate || null,
+          end_date: addEndDate || null,
+          week_pattern: addWeekPattern || 'every',
+          notes: addNotes || null,
+        })
+        .eq('id', editingEntryId)
+        .select(
+          'id, volunteer_id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, profiles(id, full_name)'
+        )
+        .single();
+
+      if (updErr) {
+        showMessage(updErr.message, 'error');
+        setAddingEntry(false);
+        return;
+      }
+
+      showMessage('Schedule entry updated!', 'success');
+      await audit(
+        'updated_schedule',
+        'schedule',
+        editingEntryId,
+        vol?.full_name,
+        `${scheduleDay} ${scheduleShift} — ${addingRole} (${addStartDate || '...'} → ${addEndDate || '...'}, ${addWeekPattern || 'every'})`
+      );
+      setSchedule(prev => prev.map(x => (x.id === editingEntryId ? updated : x)));
+      cancelEntryForm();
       setAddingEntry(false);
       return;
     }
@@ -1883,6 +1962,7 @@ export default function AdminPage() {
     );
 
     setAddingRole(null);
+    setEditingEntryId(null);
     setAddVolId('');
     setAddStartDate('');
     setAddEndDate('');
@@ -2205,7 +2285,7 @@ export default function AdminPage() {
               <span style={{ width: '26px', height: '3px', background: 'var(--text)', borderRadius: '2px' }} />
             </button>
             <img
-              src="/logo2.png"
+              src="/logos/logo2-96.webp"
               alt="Logo"
               style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '10px' }}
             />
@@ -2285,24 +2365,22 @@ export default function AdminPage() {
             <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 {DAYS.map(d => (
-                  <button key={d} onClick={() => { setScheduleDay(d); setAddingRole(null); setScheduleDate(''); setDateCoverShifts([]) }} style={{ ...pillBtn(scheduleDay === d, false), textTransform: 'capitalize' }}>{d.slice(0,3)}</button>
+                  <button key={d} onClick={() => { setScheduleDay(d); setAddingRole(null); setEditingEntryId(null); setScheduleDate(''); setDateCoverShifts([]) }} style={{ ...pillBtn(scheduleDay === d, false), textTransform: 'capitalize' }}>{d.slice(0,3)}</button>
                 ))}
               </div>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 {SHIFTS.map(sh => (
-                  <button key={sh} onClick={() => { setScheduleShift(sh); setAddingRole(null); setScheduleDate(''); setDateCoverShifts([]) }} style={pillBtn(scheduleShift === sh, true)}>{sh}</button>
+                  <button key={sh} onClick={() => { setScheduleShift(sh); setAddingRole(null); setEditingEntryId(null); setScheduleDate(''); setDateCoverShifts([]) }} style={pillBtn(scheduleShift === sh, true)}>{sh}</button>
                 ))}
               </div>
-              <button onClick={() => { setShowWaitlist(o => !o); setShowClinicOpenings(false) }} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: showWaitlist ? 'rgba(59,130,246,0.15)' : 'var(--surface)', color: showWaitlist ? '#3b82f6' : 'var(--muted)', border: showWaitlist ? '1px solid rgba(59,130,246,0.45)' : '1px solid var(--border)', transition: 'all 0.15s' }}>Waitlist</button>
-              <button onClick={() => { setShowClinicOpenings(o => !o); setShowWaitlist(false) }} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: showClinicOpenings ? 'rgba(251,191,36,0.15)' : 'var(--surface)', color: showClinicOpenings ? '#eab308' : 'var(--muted)', border: showClinicOpenings ? '1px solid rgba(251,191,36,0.45)' : '1px solid var(--border)', transition: 'all 0.15s' }}>Clinic Openings</button>
+              <button onClick={() => { setShowClinicOpenings(o => !o); setAddingRole(null); setEditingEntryId(null) }} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 0.9rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: showClinicOpenings ? 'rgba(251,191,36,0.15)' : 'var(--surface)', color: showClinicOpenings ? '#eab308' : 'var(--muted)', border: showClinicOpenings ? '1px solid rgba(251,191,36,0.45)' : '1px solid var(--border)', transition: 'all 0.15s' }}>Clinic Openings</button>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: 'auto' }}>
                 <label style={{ ...labelStyle, margin: 0, whiteSpace: 'nowrap' }}>View date:</label>
                 <input type="date" value={scheduleDate} onChange={e => { const val = e.target.value; setScheduleDate(val); if (val) { loadDateCoverShifts(val); const d = new Date(val + 'T12:00:00'); const dayName = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][d.getDay()]; if (dayName !== 'sunday' && dayName !== 'saturday') setScheduleDay(dayName) } else { setDateCoverShifts([]) } }} style={{ ...inputStyle, width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.85rem' }} />
               </div>
             </div>
-            {showWaitlist && <div style={{ marginBottom: '1.25rem' }}><Waitlist supabase={supabase} profile={profile} /></div>}
             {showClinicOpenings && <div style={{ marginBottom: '1.25rem' }}><ClinicOpenings onClose={() => setShowClinicOpenings(false)} /></div>}
-            {!showClinicOpenings && !showWaitlist && (
+            {!showClinicOpenings && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {ROLES.filter(role => role !== 'Provider' && role !== 'Director').map(role => {
                   const entries = getEntries(scheduleDay, scheduleShift, role)
@@ -2311,7 +2389,7 @@ export default function AdminPage() {
                     <div key={role} style={{ ...card, padding: '1rem 1.25rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: entries.length > 0 || isOpen ? '0.75rem' : 0 }}>
                         <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{role}{getRoleCapacity(scheduleDay, scheduleShift, role) ? ` — ${getRoleCapacity(scheduleDay, scheduleShift, role)}` : ''}</span>
-                        <button onClick={() => { setAddingRole(isOpen ? null : role); setAddVolId('') }} style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOpen ? 'var(--surface)' : 'rgba(2,65,107,0.12)', color: isOpen ? 'var(--muted)' : 'var(--accent)', border: `1px solid ${isOpen ? 'var(--border)' : 'var(--accent)'}` }}>{isOpen ? 'Cancel' : '+ Assign'}</button>
+                        <button onClick={() => { if (isOpen) cancelEntryForm(); else { setEditingEntryId(null); resetEntryFormFields(); setAddingRole(role) } }} style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: isOpen ? 'var(--surface)' : 'rgba(2,65,107,0.12)', color: isOpen ? 'var(--muted)' : 'var(--accent)', border: `1px solid ${isOpen ? 'var(--border)' : 'var(--accent)'}` }}>{isOpen ? 'Cancel' : '+ Assign'}</button>
                       </div>
                       {entries.length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: isOpen ? '0.75rem' : 0 }}>
@@ -2321,9 +2399,9 @@ export default function AdminPage() {
                             const coverName = coverShift ? coverShift.profiles?.full_name : null
                             return (
                               <div key={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: approvedCallout ? 'rgba(96,165,250,0.08)' : 'rgba(2,65,107,0.08)', border: `1px solid ${approvedCallout ? 'rgba(96,165,250,0.4)' : 'rgba(2,65,107,0.35)'}`, color: approvedCallout ? 'var(--warn)' : 'var(--text)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: approvedCallout ? 'rgba(96,165,250,0.08)' : 'rgba(2,65,107,0.08)', border: `1px solid ${editingEntryId === entry.id ? 'var(--accent)' : approvedCallout ? 'rgba(96,165,250,0.4)' : 'rgba(2,65,107,0.35)'}`, boxShadow: editingEntryId === entry.id ? '0 0 0 2px rgba(2,65,107,0.25)' : 'none', color: approvedCallout ? 'var(--warn)' : 'var(--text)' }}>
                                   {approvedCallout && <span style={{ fontSize: '0.7rem' }}>out</span>}
-                                  <span style={{ textDecoration: approvedCallout ? 'line-through' : 'none', opacity: approvedCallout ? 0.6 : 1 }}>{entry.profiles?.full_name}</span>
+                                  <span role="button" tabIndex={0} title="Click to edit" onClick={() => startEditEntry(entry)} onKeyDown={e => { if (e.key === 'Enter') startEditEntry(entry) }} style={{ textDecoration: approvedCallout ? 'line-through' : 'none', opacity: approvedCallout ? 0.6 : 1, cursor: 'pointer' }}>{entry.profiles?.full_name}</span>
                                   {entry.notes && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.notes})</span>}
                                   {(entry.start_date || entry.end_date) && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.start_date ?? '...'} → {entry.end_date ?? '...'})</span>}
                                   {entry.week_pattern && entry.week_pattern !== 'every' && <span style={{ ...biweeklyBadge, fontSize: '0.65rem', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>{entry.week_pattern === 'odd' ? '1st&3rd' : '2nd&4th'}</span>}
@@ -2337,6 +2415,7 @@ export default function AdminPage() {
                       )}
                       {isOpen && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                          {editingEntryId && <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--accent)' }}>Editing schedule entry — {scheduleDay.charAt(0).toUpperCase() + scheduleDay.slice(1)} {scheduleShift}</div>}
                           <select value={addVolId} onChange={e => setAddVolId(e.target.value)} style={inputStyle}><option value="">— Select volunteer —</option>{userList.map(v => <option key={v.id} value={v.id}>{v.full_name}</option>)}</select>
                           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                             {[{ value: 'every', label: 'Every week' }, { value: 'odd', label: '1st & 3rd' }, { value: 'even', label: '2nd & 4th' }].map(opt => (<button key={opt.value} type="button" onClick={() => setAddWeekPattern(opt.value)} style={{ ...pillBtn(addWeekPattern === opt.value, false), fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}>{opt.label}</button>))}
@@ -2348,7 +2427,7 @@ export default function AdminPage() {
                           {profile?.default_role === 'Director' && (
                             <div><label style={labelStyle}>Schedule note <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional)</span></label><input type="text" value={addNotes} onChange={e => setAddNotes(e.target.value)} placeholder="e.g. arriving late" style={{ ...inputStyle, fontSize: '0.85rem', padding: '0.5rem 0.75rem' }} /></div>
                           )}
-                          <button onClick={handleAddEntry} disabled={!addVolId || addingEntry} style={{ padding: '0.75rem 1.25rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{addingEntry ? '...' : 'Assign'}</button>
+                          <button onClick={handleAddEntry} disabled={!addVolId || addingEntry} style={{ padding: '0.75rem 1.25rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{addingEntry ? '...' : (editingEntryId ? 'Save changes' : 'Assign')}</button>
                         </div>
                       )}
                     </div>
@@ -2358,6 +2437,9 @@ export default function AdminPage() {
             )}
           </div>
         )}
+
+        {/* ── WAITLIST TAB ──────────────────────────────────────────────────── */}
+        {tab === 'waitlist' && <Waitlist supabase={supabase} profile={profile} />}
 
         {/* ── VOLUNTEERS LIST ────────────────────────────────────────────────── */}
         {tab === 'volunteers' && !selectedVolunteer && (
