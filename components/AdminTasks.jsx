@@ -7,11 +7,19 @@ import { TASK_TEAMS as TEAMS } from '../lib/constants'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const STATUS_META = {
-  open:     { label: 'Open',     color: '#02416b', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  open:        { label: 'Open',        color: '#02416b', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  assigned:    { label: 'Assigned',    color: '#02416b', bg: 'rgba(2,65,107,0.08)',    border: 'rgba(2,65,107,0.25)'    },
+  in_progress: { label: 'In Progress', color: '#02416b', bg: 'rgba(234,179,8,0.12)',   border: 'rgba(234,179,8,0.35)'   },
   blocked:  { label: 'Blocked',  color: '#02416b', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
   closed:   { label: 'Done',     color: '#02416b', bg: 'rgba(2,65,107,0.12)',    border: 'rgba(2,65,107,0.3)'     },
   inactive: { label: 'Inactive', color: '#02416b', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
 }
+
+// Stages that are still "live" work (shown in the main list)
+const ACTIVE_STAGES = ['open', 'assigned', 'in_progress']
+
+// Only profiles with status = 'active' may be assigned to a task
+const isActiveMember = m => m.status === 'active'
 
 const S = {
   card: {
@@ -116,11 +124,15 @@ function AdminTaskRow({ task, currentUserId, allMembers, onUpdate, onDelete, sho
   const due = formatDue(task.due_date, task.status)
   const sm = STATUS_META[task.status] || STATUS_META.open
   // A task's team is a default role: everyone with that default role is on the team.
-  const teamMembers = allMembers.filter(m => m.default_role === task.team)
+  // Only active profiles can be assigned. If the current assignee is no longer active,
+  // keep them visible (labelled) so the dropdown doesn't render blank.
+  const teamMembers = allMembers.filter(m => m.default_role === task.team && isActiveMember(m))
+  const currentAssignee = allMembers.find(m => m.id === task.assignee_id)
+  const assigneeIsStale = !!task.assignee_id && !teamMembers.some(m => m.id === task.assignee_id)
 
   async function cycleStatus() {
     if (task.status === 'inactive') return          // circle button does nothing for inactive
-    const next = task.status === 'closed' ? 'open' : 'closed'
+    const next = task.status === 'closed' ? (task.assignee_id ? 'assigned' : 'open') : 'closed'
     setUpdatingStatus(true)
     const { error } = await supabase.from('tasks').update({ status: next }).eq('id', task.id)
     if (error) showToast(error.message, 'error')
@@ -167,10 +179,19 @@ function AdminTaskRow({ task, currentUserId, allMembers, onUpdate, onDelete, sho
   }
 
   async function changeAssignee(newId) {
+    // Guard: never assign a profile that isn't active
+    if (newId && !allMembers.some(m => m.id === newId && isActiveMember(m))) {
+      showToast('Only active profiles can be assigned to a task.', 'error')
+      return
+    }
+    // Keep stage in sync: Open <-> Assigned when the assignee is set/cleared
+    const changes = { assignee_id: newId || null }
+    if (newId && task.status === 'open') changes.status = 'assigned'
+    if (!newId && task.status === 'assigned') changes.status = 'open'
     setUpdatingAssignee(true)
-    const { error } = await supabase.from('tasks').update({ assignee_id: newId || null }).eq('id', task.id)
+    const { error } = await supabase.from('tasks').update(changes).eq('id', task.id)
     if (error) showToast(error.message, 'error')
-    else onUpdate(task.id, { assignee_id: newId || null })
+    else onUpdate(task.id, changes)
     setUpdatingAssignee(false)
   }
 
@@ -263,6 +284,11 @@ function AdminTaskRow({ task, currentUserId, allMembers, onUpdate, onDelete, sho
             }}
             >
             <option value="">Unassigned</option>
+            {assigneeIsStale && (
+                <option value={task.assignee_id} disabled>
+                {(currentAssignee?.full_name || 'Former member')} (inactive)
+                </option>
+            )}
             {teamMembers.map(m => (
                 <option key={m.id} value={m.id}>{m.full_name}</option>
             ))}
@@ -288,6 +314,8 @@ function AdminTaskRow({ task, currentUserId, allMembers, onUpdate, onDelete, sho
             }}
             >
             <option value="open">Open</option>
+            <option value="assigned">Assigned</option>
+            <option value="in_progress">In Progress</option>
             <option value="blocked">Blocked</option>
             <option value="closed">Closed</option>
             <option value="inactive">Inactive</option>
@@ -415,7 +443,7 @@ function NewTaskForm({ currentUserId, allMembers, onCreated, showToast, onClose 
   const [dueDate, setDueDate]   = useState('')
   const [saving, setSaving]     = useState(false)
 
-  const teamMembers = allMembers.filter(m => m.default_role === team)
+  const teamMembers = allMembers.filter(m => m.default_role === team && isActiveMember(m))
 
   async function submit() {
     if (!name.trim() || !team || !dueDate) return
@@ -423,7 +451,7 @@ function NewTaskForm({ currentUserId, allMembers, onCreated, showToast, onClose 
     const { data, error } = await supabase.from('tasks').insert({
       name: name.trim(),
       assignee_id: assigneeId || null,
-      status: 'open',
+      status: assigneeId ? 'assigned' : 'open',
       due_date: dueDate || null,
       team,
       created_by: currentUserId,
@@ -490,6 +518,7 @@ export default function AdminTasks({ currentUserId }) {
   const [showInactive, setShowInactive] = useState(false)
   const [showBlocked, setShowBlocked] = useState(false)
   const [filterTeam, setFilterTeam]   = useState('')
+  const [filterPerson, setFilterPerson] = useState('') // '' = everyone | 'unassigned' | profile id
   const [filterDue, setFilterDue]   = useState('') // 'overdue' | 'week' | 'month' | ''
   const [toast, setToast]           = useState(null)
 
@@ -509,7 +538,7 @@ export default function AdminTasks({ currentUserId }) {
         .order('due_date', { ascending: true, nullsFirst: false }),
       supabase
         .from('profiles')
-        .select('id, full_name, default_role')
+        .select('id, full_name, default_role, status')
         .in('default_role', TEAMS)
         .order('full_name'),
     ])
@@ -534,6 +563,8 @@ export default function AdminTasks({ currentUserId }) {
   // Filter logic
   const filtered = tasks.filter(task => {
     if (filterTeam && task.team !== filterTeam) return false
+    if (filterPerson === 'unassigned' && task.assignee_id) return false
+    if (filterPerson && filterPerson !== 'unassigned' && task.assignee_id !== filterPerson) return false
     if (filterDue) {
       if (!task.due_date) return filterDue === '' // no due date only shows when no filter
       const diff = daysUntilDue(task.due_date)
@@ -544,26 +575,40 @@ export default function AdminTasks({ currentUserId }) {
     return true
   })
 
-  const openTasks     = filtered.filter(t => t.status === 'open')
+  // Main list: Open, Assigned and In Progress tasks, ordered by stage then (existing) due-date order
+  const stageRank = { open: 0, assigned: 1, in_progress: 2 }
+  const openTasks     = filtered
+    .filter(t => ACTIVE_STAGES.includes(t.status))
+    .sort((a, b) => stageRank[a.status] - stageRank[b.status])
   const blockedTasks  = filtered.filter(t => t.status === 'blocked')
   const closedTasks   = filtered.filter(t => t.status === 'closed')
   const inactiveTasks = filtered.filter(t => t.status === 'inactive')
 
   // Stats
-  const allOpen     = tasks.filter(t => t.status === 'open').length
+  const allOpen       = tasks.filter(t => t.status === 'open').length
+  const allAssigned   = tasks.filter(t => t.status === 'assigned').length
+  const allInProgress = tasks.filter(t => t.status === 'in_progress').length
   const allBlocked  = tasks.filter(t => t.status === 'blocked').length
   const allOverdue  = tasks.filter(t => {
     if (t.status === 'closed' || t.status === 'inactive' || !t.due_date) return false
     return daysUntilDue(t.due_date) < 0
   }).length
 
+  // People for the filter: active members plus anyone who still holds a task
+  const assigneeIdsInTasks = new Set(tasks.map(t => t.assignee_id).filter(Boolean))
+  const personOptions = allMembers
+    .filter(m => isActiveMember(m) || assigneeIdsInTasks.has(m.id))
+    .filter(m => !filterTeam || m.default_role === filterTeam)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
       {/* Stats bar */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: '0.75rem' }}>
         {[
           { label: 'Open', value: allOpen,    color: '#02416b' },
+          { label: 'Assigned', value: allAssigned, color: '#02416b' },
+          { label: 'In Progress', value: allInProgress, color: '#02416b' },
           { label: 'Blocked', value: allBlocked, color: '#02416b' },
           { label: 'Overdue', value: allOverdue, color: '#02416b' },
         ].map(stat => (
@@ -578,11 +623,24 @@ export default function AdminTasks({ currentUserId }) {
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <select
           value={filterTeam}
-          onChange={e => setFilterTeam(e.target.value)}
+          onChange={e => { setFilterTeam(e.target.value); setFilterPerson('') }}
           style={{ ...S.input, width: 'auto', fontSize: '0.85rem', flex: '1 1 160px' }}
         >
           <option value="">All teams</option>
           {TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+
+        <select
+          value={filterPerson}
+          onChange={e => setFilterPerson(e.target.value)}
+          style={{ ...S.input, width: 'auto', fontSize: '0.85rem', flex: '1 1 160px' }}
+          aria-label="Filter by person"
+        >
+          <option value="">All people</option>
+          <option value="unassigned">Unassigned</option>
+          {personOptions.map(m => (
+            <option key={m.id} value={m.id}>{m.full_name}{isActiveMember(m) ? '' : ' (inactive)'}</option>
+          ))}
         </select>
 
         <select
@@ -623,8 +681,8 @@ export default function AdminTasks({ currentUserId }) {
 
       {/* Results summary */}
       <p style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
-        Showing {openTasks.length} open task{openTasks.length !== 1 ? 's' : ''}
-        {(filterTeam || filterDue) ? ' (filtered)' : ''}
+        Showing {openTasks.length} active task{openTasks.length !== 1 ? 's' : ''}
+        {(filterTeam || filterPerson || filterDue) ? ' (filtered)' : ''}
       </p>
 
       {/* Blocked tasks banner (collapsed by default, above open list) */}
@@ -669,7 +727,7 @@ export default function AdminTasks({ currentUserId }) {
         <>
           {openTasks.length === 0 ? (
             <div style={{ ...S.card, textAlign: 'center', padding: '2rem' }}>
-              <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No open tasks match your filters.</p>
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No active tasks match your filters.</p>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
