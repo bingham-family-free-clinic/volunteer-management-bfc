@@ -492,6 +492,46 @@ function NewTaskForm({ currentUserId, team, teamMembers, onCreated, showToast, o
   )
 }
 
+// ── Collapsible section card (My Tasks / Open / Assigned / In Progress) ──────
+const LIVE_STAGES = [
+  { key: 'open',        label: 'Open' },
+  { key: 'assigned',    label: 'Assigned' },
+  { key: 'in_progress', label: 'In Progress' },
+]
+
+function StageSection({ title, count, collapsed, onToggle, accent = false, children }) {
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      border: `1px solid ${accent ? 'var(--accent)' : 'var(--border)'}`,
+      borderRadius: 0,
+    }}>
+      <button
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%',
+          padding: '0.65rem 0.9rem', background: accent ? 'rgba(2,65,107,0.06)' : 'transparent',
+          border: 'none', borderBottom: collapsed ? 'none' : '1px solid var(--border)',
+          cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textAlign: 'left',
+        }}
+      >
+        <span style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)', transition: 'transform 0.15s', display: 'inline-block', fontSize: '0.7rem', color: 'var(--muted)' }}>▶</span>
+        <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</span>
+        <span style={{
+          fontFamily: 'DM Mono, monospace', fontSize: '0.72rem', color: '#02416b',
+          background: 'rgba(2,65,107,0.10)', padding: '0.05rem 0.5rem', borderRadius: '100px',
+        }}>{count}</span>
+      </button>
+      {!collapsed && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 // `defaultRole` is the volunteer's profiles.default_role, which IS their task team.
 export default function VolunteerTasks({ userId, defaultRole }) {
@@ -503,6 +543,8 @@ export default function VolunteerTasks({ userId, defaultRole }) {
   const [showBlocked, setShowBlocked]   = useState(false)
   const [showInactive, setShowInactive] = useState(false)
   const [showNewForm, setShowNewForm]   = useState(false)
+  const [filterPerson, setFilterPerson]  = useState('') // '' = everyone | 'unassigned' | profile id
+  const [collapsed, setCollapsed]        = useState({})  // section key -> true when collapsed
   const [toast, setToast]             = useState(null)
 
   function showToast(text, type = 'success') {
@@ -539,26 +581,63 @@ export default function VolunteerTasks({ userId, defaultRole }) {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, ...changes } : t))
   }
 
+  function toggleSection(key) {
+    setCollapsed(c => ({ ...c, [key]: !c[key] }))
+  }
+
   function handleCreated(task) {
     setTasks(prev => [task, ...prev])
     showToast('Task created!', 'success')
   }
 
-  const open     = tasks.filter(t => ['open', 'assigned', 'in_progress'].includes(t.status))
-  const blocked  = tasks.filter(t => t.status === 'blocked')
-  const closed   = tasks.filter(t => t.status === 'closed')
-  const inactive = tasks.filter(t => t.status === 'inactive')
+  // Header counts always reflect the whole team (unfiltered)
+  const stageCounts = Object.fromEntries(LIVE_STAGES.map(st => [st.key, tasks.filter(t => t.status === st.key).length]))
 
-  // Sort open: mine first, then by due date
-  const sortedOpen = [...open].sort((a, b) => {
-    const aMine = a.assignee_id === userId ? 0 : 1
-    const bMine = b.assignee_id === userId ? 0 : 1
-    if (aMine !== bMine) return aMine - bMine
+  // Person filter: active teammates, plus anyone who still holds a task but is no longer active
+  const personMap = new Map()
+  teamMembers.forEach(m => personMap.set(m.id, { id: m.id, name: m.full_name, inactive: false }))
+  tasks.forEach(t => {
+    if (t.assignee_id && !personMap.has(t.assignee_id)) {
+      personMap.set(t.assignee_id, { id: t.assignee_id, name: t.assignee?.full_name || 'Former member', inactive: true })
+    }
+  })
+  const personOptions = [...personMap.values()].sort((a, b) => a.name.localeCompare(b.name))
+
+  const visible = tasks.filter(t => {
+    if (!filterPerson) return true
+    if (filterPerson === 'unassigned') return !t.assignee_id
+    return t.assignee_id === filterPerson
+  })
+
+  const byDue = (a, b) => {
     if (!a.due_date && !b.due_date) return 0
     if (!a.due_date) return 1
     if (!b.due_date) return -1
     return a.due_date.localeCompare(b.due_date)
-  })
+  }
+
+  const liveTasks = visible.filter(t => LIVE_STAGES.some(st => st.key === t.status))
+  // "My Tasks" stays pinned at the top regardless of stage; the stage sections below hold everyone else's
+  const myTasks   = liveTasks.filter(t => t.assignee_id === userId).sort(byDue)
+  const stageGroups = LIVE_STAGES.map(st => ({
+    ...st,
+    tasks: liveTasks.filter(t => t.status === st.key && t.assignee_id !== userId).sort(byDue),
+  }))
+  const blocked  = visible.filter(t => t.status === 'blocked')
+  const closed   = visible.filter(t => t.status === 'closed')
+  const inactive = visible.filter(t => t.status === 'inactive')
+
+  const renderRow = task => (
+    <TaskRow
+      key={task.id}
+      task={task}
+      currentUserId={userId}
+      teamMembers={teamMembers}
+      onUpdate={handleUpdate}
+      showToast={showToast}
+      teamBadge={null}
+    />
+  )
 
   if (!TASK_TEAMS.includes(team)) {
     return (
@@ -577,10 +656,10 @@ export default function VolunteerTasks({ userId, defaultRole }) {
             {team} Tasks
           </h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.1rem' }}>
-            {open.length} open
-            {blocked.length  > 0 ? ` · ${blocked.length} blocked`  : ''}
-            {closed.length   > 0 ? ` · ${closed.length} completed` : ''}
-            {inactive.length > 0 ? ` · ${inactive.length} inactive` : ''}
+            {stageCounts.open} open · {stageCounts.assigned} assigned · {stageCounts.in_progress} in progress
+            {tasks.filter(t => t.status === 'blocked').length  > 0 ? ` · ${tasks.filter(t => t.status === 'blocked').length} blocked`  : ''}
+            {tasks.filter(t => t.status === 'closed').length   > 0 ? ` · ${tasks.filter(t => t.status === 'closed').length} completed` : ''}
+            {tasks.filter(t => t.status === 'inactive').length > 0 ? ` · ${tasks.filter(t => t.status === 'inactive').length} inactive` : ''}
           </p>
         </div>
         <button
@@ -596,6 +675,22 @@ export default function VolunteerTasks({ userId, defaultRole }) {
           {showNewForm ? 'Cancel' : '+ New Task'}
         </button>
       </div>
+
+      {/* Person filter */}
+      <select
+        value={filterPerson}
+        onChange={e => setFilterPerson(e.target.value)}
+        aria-label="Filter by person"
+        style={{ ...S.input, width: 'auto', maxWidth: '280px', fontSize: '0.85rem' }}
+      >
+        <option value="">All people</option>
+        <option value="unassigned">Unassigned</option>
+        {personOptions.map(p => (
+          <option key={p.id} value={p.id}>
+            {p.name}{p.id === userId ? ' (me)' : ''}{p.inactive ? ' (inactive)' : ''}
+          </option>
+        ))}
+      </select>
 
       {/* New task form */}
       {showNewForm && (
@@ -614,26 +709,39 @@ export default function VolunteerTasks({ userId, defaultRole }) {
         <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)', fontSize: '0.9rem' }}>Loading tasks…</div>
       ) : (
         <>
-          {sortedOpen.length === 0 && !showDone && !showBlocked && !showInactive && (
+          {liveTasks.length === 0 && (
             <div style={{ ...S.card, textAlign: 'center', padding: '2rem' }}>
-              <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No open tasks for this team.</p>
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
+                {filterPerson ? 'No active tasks for this person.' : 'No active tasks for this team.'}
+              </p>
             </div>
           )}
 
-          {/* Open tasks */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {sortedOpen.map(task => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                currentUserId={userId}
-                teamMembers={teamMembers}
-                onUpdate={handleUpdate}
-                showToast={showToast}
-                teamBadge={null}
-              />
-            ))}
-          </div>
+          {/* My tasks — pinned to the top, all stages together */}
+          {myTasks.length > 0 && (
+            <StageSection
+              title="My Tasks"
+              count={myTasks.length}
+              collapsed={!!collapsed.mine}
+              onToggle={() => toggleSection('mine')}
+              accent
+            >
+              {myTasks.map(renderRow)}
+            </StageSection>
+          )}
+
+          {/* Everyone else's tasks, one section per stage */}
+          {stageGroups.map(group => group.tasks.length > 0 && (
+            <StageSection
+              key={group.key}
+              title={group.label}
+              count={group.tasks.length}
+              collapsed={!!collapsed[group.key]}
+              onToggle={() => toggleSection(group.key)}
+            >
+              {group.tasks.map(renderRow)}
+            </StageSection>
+          ))}
 
           {/* Blocked tasks toggle */}
           {blocked.length > 0 && (
