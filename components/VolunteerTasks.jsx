@@ -6,7 +6,9 @@ import { getMountainNow } from '../lib/timeUtils'
 import { TASK_TEAMS } from '../lib/constants'
 
 const STATUS_META = {
-  open:     { label: 'Open',     color: '#02416b', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  open:        { label: 'Open',        color: '#02416b', bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.3)'   },
+  assigned:    { label: 'Assigned',    color: '#02416b', bg: 'rgba(2,65,107,0.08)',    border: 'rgba(2,65,107,0.25)'    },
+  in_progress: { label: 'In Progress', color: '#02416b', bg: 'rgba(234,179,8,0.12)',   border: 'rgba(234,179,8,0.35)'   },
   blocked:  { label: 'Blocked',  color: '#02416b', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.3)'   },
   closed:   { label: 'Done',     color: '#02416b', bg: 'rgba(2,65,107,0.12)',    border: 'rgba(2,65,107,0.3)'     },
   inactive: { label: 'Inactive', color: '#02416b', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.25)' },
@@ -124,7 +126,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
 
   async function cycleStatus() {
     if (task.status === 'inactive') return          // circle button does nothing for inactive
-    const next = task.status === 'closed' ? 'open' : 'closed'
+    const next = task.status === 'closed' ? (task.assignee_id ? 'assigned' : 'open') : 'closed'
     setUpdatingStatus(true)
     const { error } = await supabase.from('tasks').update({ status: next }).eq('id', task.id)
     if (error) showToast(error.message, 'error')
@@ -164,10 +166,19 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
   }
 
   async function changeAssignee(newId) {
+    // Teammates list only contains active profiles; guard anyway
+    if (newId && !teamMembers.some(m => m.id === newId)) {
+      showToast('Only active profiles can be assigned to a task.', 'error')
+      return
+    }
+    // Keep stage in sync: Open <-> Assigned when the assignee is set/cleared
+    const changes = { assignee_id: newId || null }
+    if (newId && task.status === 'open') changes.status = 'assigned'
+    if (!newId && task.status === 'assigned') changes.status = 'open'
     setUpdatingAssignee(true)
-    const { error } = await supabase.from('tasks').update({ assignee_id: newId || null }).eq('id', task.id)
+    const { error } = await supabase.from('tasks').update(changes).eq('id', task.id)
     if (error) showToast(error.message, 'error')
-    else onUpdate(task.id, { assignee_id: newId || null })
+    else onUpdate(task.id, changes)
     setUpdatingAssignee(false)
   }
 
@@ -265,6 +276,11 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
             }}
             >
             <option value="">Unassigned</option>
+            {task.assignee_id && !assignee && (
+                <option value={task.assignee_id} disabled>
+                {task.assignee?.full_name || 'Former member'} (inactive)
+                </option>
+            )}
             {teamMembers.map(m => (
                 <option key={m.id} value={m.id}>{m.full_name}</option>
             ))}
@@ -290,6 +306,8 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
             }}
             >
             <option value="open">Open</option>
+            <option value="assigned">Assigned</option>
+            <option value="in_progress">In Progress</option>
             <option value="blocked">Blocked</option>
             <option value="closed">Closed</option>
             <option value="inactive">Inactive</option>
@@ -414,7 +432,7 @@ function NewTaskForm({ currentUserId, team, teamMembers, onCreated, showToast, o
     const { data, error } = await supabase.from('tasks').insert({
       name: name.trim(),
       assignee_id: assigneeId || null,
-      status: 'open',
+      status: assigneeId ? 'assigned' : 'open',
       due_date: dueDate || null,
       team,
       created_by: currentUserId,
@@ -507,8 +525,9 @@ export default function VolunteerTasks({ userId, defaultRole }) {
         .order('due_date', { ascending: true, nullsFirst: false }),
       supabase
         .from('profiles')
-        .select('id, full_name, default_role')
+        .select('id, full_name, default_role, status')
         .eq('default_role', team)
+        .eq('status', 'active')
         .order('full_name'),
     ])
     setTasks(tasksData || [])
@@ -525,7 +544,7 @@ export default function VolunteerTasks({ userId, defaultRole }) {
     showToast('Task created!', 'success')
   }
 
-  const open     = tasks.filter(t => t.status === 'open')
+  const open     = tasks.filter(t => ['open', 'assigned', 'in_progress'].includes(t.status))
   const blocked  = tasks.filter(t => t.status === 'blocked')
   const closed   = tasks.filter(t => t.status === 'closed')
   const inactive = tasks.filter(t => t.status === 'inactive')
