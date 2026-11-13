@@ -1,5 +1,5 @@
 import 'server-only'
-import webpush from 'web-push'
+import * as webpush from 'web-push'
 import { createClient } from '@supabase/supabase-js'
 import { allowedToSeeHRMessagesRoles } from '../../../lib/messageUtils'
 

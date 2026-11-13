@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { use, useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { groupSlotsByDay, formatSlotTime, formatSlotFull, TIMEZONE_LABEL } from '../../../lib/interview-schedule'
 
@@ -53,7 +53,7 @@ async function extractErrorMessage(error, fallback) {
 }
 
 export default function SchedulePage({ params }) {
-  const { token } = params
+  const { token } = use(params)
 
   const [status,       setStatus]       = useState('loading') // loading | invalid | ready | error
   const [applicant,    setApplicant]    = useState(null)
