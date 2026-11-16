@@ -600,6 +600,14 @@ The app registers as a Progressive Web App with Apple web-app meta tags in `app/
 
 ---
 
+## Chatbot Module
+
+The BFC Volunteer Portal includes an internal AI chatbot module that answers questions about clinic volunteer operations using a generated Markdown knowledge base. The chatbot is not a standalone service; it lives inside this application and consumes only `knowledge/generated/`, never application source code at runtime.
+
+See [CHATBOT.md](./CHATBOT.md) for full documentation covering architecture, environment variables, knowledge generation, GitHub Actions automation, retrieval, performance, testing, design decisions, and troubleshooting.
+
+---
+
 ## Backend Architecture
 
 All backend architecture is contained in a private repository. Access may be granted upon request.
