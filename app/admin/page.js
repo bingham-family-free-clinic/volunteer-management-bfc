@@ -1360,6 +1360,9 @@ export default function AdminPage() {
         .from('profiles')
         .select('id,full_name,email,role,default_role,affiliation')
         .eq('id', user.id).single()
+      // Office Managers no longer use the admin page — they get a view-only
+      // layout on the Clinical Supervisor page instead.
+      if (p?.default_role === 'Office Manager') { window.location.href = '/clinical-supervisor'; return }
       if (p?.role !== 'admin') { window.location.href = '/volunteer'; return }
       if (!hasAdminAccess(p)) {
         setProfile(p)

@@ -7,6 +7,9 @@ import { getMountainNow } from '../../lib/timeUtils'
 // import LunchScheduler from '../../components/LunchScheduler'
 import ProviderScheduleView from '../../components/ProviderScheduleView'
 import Live from '../../components/Live'
+import WeeklyTraining from '../../components/WeeklyTraining'
+import LanguageCoverage from '../../components/LanguageCoverage'
+import { OfficeManagerSchedule, OfficeManagerVolunteers } from '../../components/OfficeManagerView'
 
 const CALLOUTS_LIMIT = 60
 
@@ -19,6 +22,18 @@ const OTHER_TABS = [
   ['languages', 'Language Coverage'],
   ['providers', 'Providers'],
 ]
+
+// Office Managers get a different (view-only, except Weekly Training) layout
+// of this page: full schedule, all volunteers and the weekly training editor.
+const OM_MAIN_TABS = [
+  ['live', 'Live'],
+  ['schedule', 'Schedule'],
+  ['volunteers', 'Volunteers'],
+  ['training', 'Weekly Training'],
+]
+
+// Full profile columns so the read-only volunteer detail view has what it needs.
+const OM_PROFILE_COLS = 'id,full_name,email,phone,role,affiliation,status,status_reason,credentials,languages,default_role,school,major,sma_name,sma_contact,advisor_name,advisor_contact,intern_school,intern_department,end_date'
 
 function dropdownItemStyle(active) {
   return {
@@ -40,7 +55,7 @@ function dropdownItemStyle(active) {
   }
 }
 
-function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onCloseOther, onSwitchView, onSignOut }) {
+function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onCloseOther, onSwitchView, onSignOut, mainTabs = MAIN_TABS }) {
   const otherActive = OTHER_TABS.some(([key]) => key === activeTab)
 
   return (
@@ -48,7 +63,7 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
       <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
-        {MAIN_TABS.map(([key, label]) => (
+        {mainTabs.map(([key, label]) => (
           <button
             key={key}
             onClick={() => onSelectTab(key)}
@@ -298,14 +313,14 @@ export default function CSPage() {
       .eq('id', user.id)
       .single()
 
-    if (profile?.default_role !== 'Clinical Supervisor' && profile?.role !== 'admin') {
+    if (profile?.default_role !== 'Clinical Supervisor' && profile?.default_role !== 'Office Manager' && profile?.role !== 'admin') {
       router.push('/volunteer')
       return
     }
 
     setMyProfile(profile)
     setAuthorized(true)
-    await loadData(user.id)
+    await loadData(user.id, profile?.default_role === 'Office Manager')
     setLoading(false)
   }
 
@@ -333,11 +348,11 @@ export default function CSPage() {
     setCallouts(merged.map(c => ({ ...c, profiles: c.volunteer, status: c.status ?? (c.is_read ? 'approved' : 'pending') })))
   }
 
-  async function loadData(userId) {
+  async function loadData(userId, isOM = false) {
     const [shiftsRes, schedRes, volsRes, mySchedRes] = await Promise.all([
       supabase.from('shifts').select('id, volunteer_id, clock_in, profiles(id, full_name)').is('clock_out', null),
       supabase.from('schedule').select('*, profiles(id, full_name)').order('role'),
-      supabase.from('profiles').select('id, full_name, phone, languages, role, default_role, affiliation, email, status'),
+      supabase.from('profiles').select(isOM ? OM_PROFILE_COLS : 'id, full_name, phone, languages, role, default_role, affiliation, email, status'),
       supabase.from('schedule').select('*').eq('volunteer_id', userId),
     ])
 
@@ -365,6 +380,10 @@ export default function CSPage() {
   }
 
   const clockedInIds = new Set(activeShifts.map(s => s.volunteer_id))
+
+  // Office Managers see a different layout of this page (see OM_MAIN_TABS).
+  const isOfficeManager = myProfile?.default_role === 'Office Manager'
+  const mainTabs = isOfficeManager ? OM_MAIN_TABS : MAIN_TABS
 
   // The day+shift combos the CS user is personally scheduled for
   const myShiftCombos = mySchedule.reduce((acc, s) => {
@@ -525,6 +544,7 @@ export default function CSPage() {
             onCloseOther={() => setOtherOpen(false)}
             onSwitchView={() => { window.location.href = '/volunteer' }}
             onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
+            mainTabs={mainTabs}
           />
         )}
 
@@ -532,7 +552,7 @@ export default function CSPage() {
         <MobileSidebar
           open={isMobile && sidebarOpen}
           onClose={() => setSidebarOpen(false)}
-          navItems={[...MAIN_TABS, ...OTHER_TABS].map(([key, label]) => ({ key, label }))}
+          navItems={[...mainTabs, ...OTHER_TABS].map(([key, label]) => ({ key, label }))}
           activeTab={tab}
           onSelectTab={setTab}
           showSwitchView={true}
@@ -551,6 +571,19 @@ export default function CSPage() {
           />
         )}
 
+        {/* ── OFFICE MANAGER TABS (view-only, except Weekly Training) ── */}
+        {isOfficeManager && tab === 'volunteers' && (
+          <OfficeManagerVolunteers volunteers={volunteers} schedule={schedule} />
+        )}
+
+        {isOfficeManager && tab === 'training' && (
+          <WeeklyTraining supabase={supabase} profile={myProfile} />
+        )}
+
+        {isOfficeManager && tab === 'languages' && (
+          <LanguageCoverage volunteers={volunteers} schedule={schedule} />
+        )}
+
         {tab === 'providers' && (
           <>
             <ProviderScheduleView supabase={supabase} />
@@ -558,7 +591,11 @@ export default function CSPage() {
         )}
 
         {/* ── MY SCHEDULE TAB ───────────────────────────────── */}
-        {tab === 'schedule' && (
+        {isOfficeManager && tab === 'schedule' && (
+          <OfficeManagerSchedule schedule={schedule} callouts={callouts} />
+        )}
+
+        {!isOfficeManager && tab === 'schedule' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <p style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
               Showing only the shifts you are personally scheduled for. Tap a name to expand contact info.
@@ -643,7 +680,7 @@ export default function CSPage() {
         )}
 
         {/* ── LANGUAGES TAB ─────────────────────────────────── */}
-        {tab === 'languages' && (
+        {!isOfficeManager && tab === 'languages' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <p style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
               Language coverage for your scheduled shifts only. Click a bubble to see who speaks it.
