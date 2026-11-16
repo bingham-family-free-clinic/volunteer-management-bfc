@@ -350,6 +350,29 @@ export default function ProviderPage() {
       return
     }
 
+    // Clear any existing callout for this slot so the provider can re-schedule themselves
+    const { error: calloutDelErr } = await supabase.from('provider_callouts')
+      .delete()
+      .eq('provider_id', user.id)
+      .eq('shift_date', date)
+      .eq('shift_time', shift)
+    if (calloutDelErr) {
+      showToast(calloutDelErr.message, 'error')
+      setSigningUp(null)
+      return
+    }
+
+    const coveredByRecurring = (liveRecurring || []).some(r =>
+      r.provider_id === user.id && r.shift_time === shift && recurringAppliesToDate(r, date)
+    )
+
+    if (coveredByRecurring) {
+      showToast('Shift added!', 'success')
+      await Promise.all([fetchUpcomingShifts(user.id), fetchSlotData(user.id)])
+      setSigningUp(null)
+      return
+    }
+
     const { error } = await supabase.from('provider_shifts').insert({
       provider_id: user.id, shift_date: date, shift_time: shift, day_of_week: day, affiliation: profile?.affiliation || null,
     })
