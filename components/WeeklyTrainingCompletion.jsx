@@ -245,9 +245,9 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
           </div>
           <button onClick={load} style={{ ...pillBtn(false), whiteSpace: 'nowrap' }}>Refresh</button>
         </div>
-        <div style={{ padding: '0.85rem 1rem', borderRadius: '10px', background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.35)' }}>
+        <div style={{ padding: '0.85rem 1rem', borderRadius: '10px', background: 'transparent', border: '1px solid var(--border)' }}>
           <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text)', lineHeight: 1.5 }}>
-            <strong style={{ color: '#f97316' }}>Not real-time:</strong> Attendance records are typically updated <strong>2–3 days after</strong> shifts occur. Required weeks, completion counts, and &quot;missing&quot; statuses for recent dates may be incomplete or change once records are finalized.
+            <strong style={{ color: '#60a5fa' }}>Not real-time:</strong> Attendance records are typically updated <strong>2–3 days after</strong> shifts occur. Required weeks, completion counts, and &quot;missing&quot; statuses for recent dates may be incomplete or change once records are finalized.
           </p>
         </div>
       </div>
@@ -259,9 +259,9 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
         <StatCard label="Volunteers Tracked" value={summary.tracked} sub={showInactive ? 'Including inactive' : 'Active only (with required weeks)'} />
-        <StatCard label="Fully Complete" value={summary.complete} sub="No missing required weeks" color="#22c55e" />
-        <StatCard label="With Missing Weeks" value={summary.withMissing} sub="One or more incomplete" color={summary.withMissing ? '#f97316' : 'var(--text)'} />
-        <StatCard label="Overall Completion" value={summary.overall == null ? '—' : `${summary.overall}%`} sub={`${summary.totalComp} / ${summary.totalReq} required weeks`} color={summary.overall != null && summary.overall >= 100 ? '#22c55e' : 'var(--text)'} />
+        <StatCard label="Fully Complete" value={summary.complete} sub="No missing required weeks" color="#60a5fa" />
+        <StatCard label="With Missing Weeks" value={summary.withMissing} sub="One or more incomplete" color={summary.withMissing ? '#60a5fa' : 'var(--text)'} />
+        <StatCard label="Overall Completion" value={summary.overall == null ? '—' : `${summary.overall}%`} sub={`${summary.totalComp} / ${summary.totalReq} required weeks`} color={summary.overall != null && summary.overall >= 100 ? '#60a5fa' : 'var(--text)'} />
       </div>
 
       <div style={{ ...card, padding: '1rem 1.1rem' }}>
@@ -326,7 +326,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
                 const isOpen = !!expanded[v.id]
                 const isInactive = (v.status || 'active') === 'inactive'
                 const complete = v.required > 0 && v.completed === v.required
-                const rateColor = v.rate == null ? 'var(--muted)' : complete ? '#22c55e' : v.rate >= 80 ? '#60a5fa' : v.rate >= 50 ? '#f97316' : '#ef4444'
+                const rateColor = v.rate == null ? 'var(--muted)' : complete ? '#60a5fa' : v.rate >= 80 ? '#93c5fd' : v.rate >= 50 ? '#3b82f6' : '#1d4ed8'
                 return (
                   <div key={v.id} style={{ borderBottom: i < filteredSorted.length - 1 ? '1px solid var(--border)' : 'none' }}>
                     <button
@@ -338,8 +338,8 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 600 }}>{v.name}</span>
                             {isInactive && <span style={badge('rgba(156,163,175,0.15)', '#9ca3af', 'rgba(156,163,175,0.4)')}>inactive</span>}
-                            {complete && <span style={badge('rgba(34,197,94,0.12)', '#22c55e', 'rgba(34,197,94,0.35)')}>complete</span>}
-                            {!complete && v.required > 0 && <span style={badge('rgba(249,115,22,0.12)', '#f97316', 'rgba(249,115,22,0.35)')}>missing {v.missingWeeks.length}</span>}
+                            {complete && <span style={badge('rgba(96,165,250,0.12)', '#60a5fa', 'rgba(96,165,250,0.35)')}>complete</span>}
+                            {!complete && v.required > 0 && <span style={badge('rgba(59,130,246,0.12)', '#3b82f6', 'rgba(59,130,246,0.35)')}>missing {v.missingWeeks.length}</span>}
                           </div>
                           <p style={{ margin: '0.15rem 0 0', fontSize: '0.78rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {[v.default_role, v.email].filter(Boolean).join(' · ') || '—'}
@@ -358,7 +358,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
                             const done = v.completedWeeksArr.includes(wk)
                             const posted = trainingWeekSet.has(wk)
                             return (
-                              <div key={wk} title={`${wk} (Mon ${formatWeekRangeShort(wk)})${posted ? '' : ' — no training posted'}`} style={{ padding: '0.35rem 0.55rem', borderRadius: '8px', fontSize: '0.78rem', fontFamily: 'DM Mono, monospace', background: done ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.08)', color: done ? '#22c55e' : '#ef4444', border: `1px solid ${done ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}` }}>
+                              <div key={wk} title={`${wk} (Mon ${formatWeekRangeShort(wk)})${posted ? '' : ' — no training posted'}`} style={{ padding: '0.35rem 0.55rem', borderRadius: '8px', fontSize: '0.78rem', fontFamily: 'DM Mono, monospace', background: done ? 'rgba(96,165,250,0.12)' : 'rgba(29,78,216,0.08)', color: done ? '#60a5fa' : '#1d4ed8', border: `1px solid ${done ? 'rgba(96,165,250,0.35)' : 'rgba(29,78,216,0.35)'}` }}>
                                 {wk} {done ? '✓' : '✗'}{!posted ? ' · no post' : ''}
                               </div>
                             )
@@ -391,7 +391,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
               <div style={{ padding: '1rem 1.1rem', borderRight: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
                   <h4 style={{ margin: 0, fontSize: '0.9rem' }}>Completed</h4>
-                  <span style={badge('rgba(34,197,94,0.12)', '#22c55e', 'rgba(34,197,94,0.35)')}>{byWeekData.completed.length}</span>
+                  <span style={badge('rgba(96,165,250,0.12)', '#60a5fa', 'rgba(96,165,250,0.35)')}>{byWeekData.completed.length}</span>
                 </div>
                 {byWeekData.completed.length === 0 ? (
                   <p style={{ color: 'var(--muted)', fontStyle: 'italic', margin: 0 }}>No completions recorded for required attendees in this week.</p>
@@ -409,14 +409,14 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
               <div style={{ padding: '1rem 1.1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
                   <h4 style={{ margin: 0, fontSize: '0.9rem' }}>Not Completed</h4>
-                  <span style={badge('rgba(239,68,68,0.1)', '#ef4444', 'rgba(239,68,68,0.35)')}>{byWeekData.notCompleted.length}</span>
+                  <span style={badge('rgba(59,130,246,0.12)', '#3b82f6', 'rgba(59,130,246,0.35)')}>{byWeekData.notCompleted.length}</span>
                 </div>
                 {byWeekData.notCompleted.length === 0 ? (
                   <p style={{ color: 'var(--muted)', fontStyle: 'italic', margin: 0 }}>All required attendees completed this week.</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                     {byWeekData.notCompleted.map(v => (
-                      <div key={v.id} style={{ padding: '0.5rem 0.65rem', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.04)' }}>
+                      <div key={v.id} style={{ padding: '0.5rem 0.65rem', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.25)', background: 'rgba(59,130,246,0.04)' }}>
                         <p style={{ margin: 0, fontWeight: 500, fontSize: '0.88rem' }}>{v.name}</p>
                         <p style={{ margin: '0.1rem 0 0', fontSize: '0.75rem', color: 'var(--muted)' }}>{v.default_role || v.email || '—'}</p>
                       </div>

@@ -867,7 +867,7 @@ export default function CSPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '1.5rem' }}>
-      <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+      <div style={{ maxWidth: '960px', margin: '0 auto' }}>
 
         {langModal && (() => {
           const speakers = speakersOf(langModal.lang, langModal.day, langModal.shift)
