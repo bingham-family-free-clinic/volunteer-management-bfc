@@ -9,6 +9,7 @@ import { SHIFTS, ROLES, getRoleCapacity, AFFILIATION_LABELS } from '../../lib/co
 import ProviderScheduleView from '../../components/ProviderScheduleView'
 import Live from '../../components/Live'
 import WeeklyTraining from '../../components/WeeklyTraining'
+import WeeklyTrainingCompletion from '../../components/WeeklyTrainingCompletion'
 import LanguageCoverage from '../../components/LanguageCoverage'
 
 const CALLOUTS_LIMIT = 60
@@ -623,6 +624,7 @@ function OfficeManagerDesktopHeader({ activeTab, onSelectTab, openMenu, onToggle
   ]
   const trainingItems = [
     ['training', 'Weekly Training'],
+    ['training-completion', 'Training Completion'],
   ]
   const otherItems = [
     ['languages', 'Language Coverage'],
@@ -950,6 +952,7 @@ export default function CSPage() {
             { key: 'volunteers', label: 'Volunteers' },
             { key: 'guests', label: 'Guest Orgs' },
             { key: 'training', label: 'Weekly Training' },
+            { key: 'training-completion', label: 'Training Completion' },
             { key: 'languages', label: 'Language Coverage' },
             { key: 'providers', label: 'Provider Schedule' },
           ] : [...mainTabs, ...OTHER_TABS].map(([key, label]) => ({ key, label })))}
@@ -977,6 +980,9 @@ export default function CSPage() {
         {isOfficeManager && tab === 'guests' && <OfficeManagerGuestOrgs />}
         {isOfficeManager && tab === 'training' && (
           <WeeklyTraining supabase={supabase} profile={myProfile} />
+        )}
+        {isOfficeManager && tab === 'training-completion' && (
+          <WeeklyTrainingCompletion supabase={supabase} profile={myProfile} />
         )}
         {isOfficeManager && tab === 'schedule' && (
           <OfficeManagerSchedule schedule={schedule} callouts={callouts} />
