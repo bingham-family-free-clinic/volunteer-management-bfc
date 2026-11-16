@@ -1,0 +1,49 @@
+name: Regenerate Knowledge Base
+
+on:
+  push:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - id: changed
+        run: |
+          BEFORE="${{ github.event.before }}"
+          SHA="${{ github.sha }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "${{ github.ref }}" --depth 1 || true
+            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" "$SHA" || true)
+          fi
+          printf '%s\n' $CHANGED > /tmp/changed-files.txt
+          COUNT=$(printf '%s\n' "$CHANGED" | grep -c . || true)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - run: node scripts/generate-knowledge.js --changed-file /tmp/changed-files.txt
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - run: |
+          if git diff --quiet -- knowledge/generated; then
+            echo "No knowledge base changes to commit."
+          else
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+            git add knowledge/generated
+            git commit -m "Regenerate knowledge base (automated)"
+            git push origin HEAD
+          fi

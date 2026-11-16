@@ -224,6 +224,15 @@ function shouldSkip(feature, files) {
 }
 
 async function main() {
+  const args = process.argv.slice(2)
+  let changedFile = null
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--changed-file' && args[i + 1]) {
+      changedFile = args[i + 1]
+      i++
+    }
+  }
+
   if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true })
   if (!fs.existsSync(manifestPath)) {
     console.error('manifest.json not found')
@@ -232,13 +241,34 @@ async function main() {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
   const results = []
 
+  let targetFeatures = null
+  if (changedFile) {
+    const changed = fs
+      .readFileSync(changedFile, 'utf8')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    targetFeatures = new Set()
+    for (const [feature, patterns] of Object.entries(manifest)) {
+      if (patterns.some((p) => changed.some((f) => matchGlob(p, f)))) {
+        targetFeatures.add(feature)
+      }
+    }
+    results.push(`[affected] ${[...targetFeatures].join(', ') || '(none)'}`)
+  }
+
   for (const [feature, patterns] of Object.entries(manifest)) {
     const files = collectFiles(patterns).filter((f) => fs.existsSync(path.join(root, f)))
     if (files.length === 0) {
       results.push(`[skip] ${feature}: no source files found`)
       continue
     }
-    if (shouldSkip(feature, files)) {
+    if (targetFeatures) {
+      if (!targetFeatures.has(feature)) {
+        results.push(`[skip] ${feature}: not affected by changed files`)
+        continue
+      }
+    } else if (shouldSkip(feature, files)) {
       results.push(`[skip] ${feature}: unaffected (${files.length} source files)`)
       continue
     }
