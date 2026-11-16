@@ -6,7 +6,7 @@ const manifestPath = path.join(root, 'manifest.json')
 const genDir = path.join(root, 'knowledge', 'generated')
 const today = new Date().toISOString().slice(0, 10)
 const apiKey = process.env.GEMINI_API_KEY
-const model = 'gemini-1.5-flash'
+const model = 'gemini-2.5-flash'
 const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey || ''}`
 
 function slug(feature) {
