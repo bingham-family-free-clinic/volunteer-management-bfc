@@ -1,6 +1,15 @@
 import { search, expandRelated, loadDocuments, TTLCache, createRateLimiter, logger } from '../../../lib/chatbot/index.js'
 
-const MODEL = 'gemini-3.6-flash'
+// fs is used for the knowledge base, so this must run on the Node runtime.
+export const runtime = 'nodejs'
+// Must be longer than GEMINI_TIMEOUT_MS so the 30s abort fires (and returns a
+// friendly error) before the platform kills the function.
+export const maxDuration = 40
+
+const MODEL = process.env.CHATBOT_MODEL || 'gemini-3.5-flash-lite'
+// Gemini 3.x models "think" before answering. For doc Q&A, low is plenty and much faster.
+const THINKING_LEVEL = process.env.CHATBOT_THINKING_LEVEL || 'low'
+const GEMINI_TIMEOUT_MS = Number(process.env.CHATBOT_TIMEOUT_MS || 30000)
 const CACHE_TTL_MS = Number(process.env.CHATBOT_CACHE_TTL_SECONDS || 3600) * 1000
 const RATE_WINDOW_MS = Number(process.env.CHATBOT_RATE_WINDOW_MS || 60000)
 const RATE_MAX_HITS = Number(process.env.CHATBOT_RATE_MAX_HITS || 30)
@@ -15,8 +24,8 @@ const ERROR_GEMINI = 'gemini'
 const ERROR_VALIDATION = 'validation'
 const ERROR_UNKNOWN = 'unknown'
 
-function geminiEndpoint(apiKey) {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey || ''}`
+function geminiEndpoint() {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`
 }
 
 function buildPrompt(question, docs) {
@@ -41,11 +50,12 @@ ${question}`
 }
 
 function classifyError(err) {
+  if (err && (err.name === 'AbortError' || err.name === 'TimeoutError')) return ERROR_GEMINI
   const message = (err && err.message) || String(err)
   if (message.includes('Gemini API 429')) return ERROR_RATE_LIMIT
   if (message.includes('Gemini API 401') || message.includes('API_KEY_INVALID')) return ERROR_CONFIG
   if (message.includes('Gemini API 403')) return ERROR_CONFIG
-  if (message.includes('Gemini API 5') || message.includes('fetch') || message.includes('Abort')) return ERROR_GEMINI
+  if (message.includes('Gemini API 5') || /fetch|abort/i.test(message)) return ERROR_GEMINI
   if (message.includes('Gemini API')) return ERROR_GEMINI
   return ERROR_UNKNOWN
 }
@@ -69,38 +79,41 @@ function userMessageFor(code) {
 
 async function callGemini(apiKey, prompt, meta) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 30000)
+  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS)
+  const t0 = Date.now()
   try {
-    logger.info('gemini request', { model: MODEL, ...meta })
-    const res = await fetch(geminiEndpoint(apiKey), {
+    logger.info('gemini request', { model: MODEL, thinking: THINKING_LEVEL, promptChars: prompt.length, ...meta })
+    const res = await fetch(geminiEndpoint(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Key in a header rather than the URL so it never lands in logs
+        'x-goog-api-key': apiKey
+      },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        // No temperature/topK/topP overrides: Gemini 3 models work best at their defaults.
         generationConfig: {
-          temperature: 0.2,
-          topK: 1,
-          topP: 1,
           candidateCount: 1,
-          maxOutputTokens: 2048
+          maxOutputTokens: 2048,
+          thinkingConfig: { thinkingLevel: THINKING_LEVEL }
         }
       }),
       signal: controller.signal
     })
     if (!res.ok) {
       const err = await res.text().catch(() => res.statusText)
-      logger.error('gemini api error', { ...meta, status: res.status, body: err })
+      logger.error('gemini api error', { ...meta, status: res.status, body: err, ms: Date.now() - t0 })
       throw new Error(`Gemini API ${res.status}: ${err}`)
     }
     const json = await res.json()
-    const text =
-      json.candidates && json.candidates[0]
-        ? json.candidates[0].content.parts.map((p) => p.text || '').join('')
-        : ''
-    logger.info('gemini response', { ...meta, chars: text.length })
+    // Skip "thought" parts so only the final answer is returned
+    const parts = json.candidates?.[0]?.content?.parts || []
+    const text = parts.filter((p) => !p.thought).map((p) => p.text || '').join('')
+    logger.info('gemini response', { ...meta, chars: text.length, ms: Date.now() - t0 })
     return text.trim()
   } catch (err) {
-    logger.error('gemini failure', { ...meta, message: err.message, code: classifyError(err) })
+    logger.error('gemini failure', { ...meta, message: err.message, code: classifyError(err), ms: Date.now() - t0 })
     throw err
   } finally {
     clearTimeout(timer)
@@ -147,7 +160,7 @@ export async function POST(req) {
   meta.question = question.slice(0, 120)
   logger.info('chat request', meta)
 
-  const cacheKey = question.toLowerCase()
+  const cacheKey = question.toLowerCase().replace(/\s+/g, ' ')
   const cached = cache.get(cacheKey)
   if (cached) {
     logger.info('cache hit', meta)
@@ -155,23 +168,21 @@ export async function POST(req) {
   }
 
   const apiKey = process.env.GEMINI_API_KEY
-  const topDocs = search(question, { limit: 4 })
-  const usedDocs = topDocs.length ? expandRelated(topDocs, loadDocuments()) : []
-  logger.info('retrieval', { ...meta, docs: usedDocs.map((d) => d.file) })
-
   if (!apiKey) {
+    // Not cached: once the key is set, answers should work immediately.
     logger.warn('gemini not configured', meta)
-    const response = {
+    return Response.json({
       error: userMessageFor(ERROR_CONFIG),
       errorCode: ERROR_CONFIG,
       question,
       sources: [],
       placeholder: true
-    }
-    cache.set(cacheKey, response)
-    logger.info('response', { ...meta, errorCode: ERROR_CONFIG })
-    return Response.json(response)
+    })
   }
+
+  const topDocs = search(question, { limit: 4 })
+  const usedDocs = topDocs.length ? expandRelated(topDocs, loadDocuments()) : []
+  logger.info('retrieval', { ...meta, docs: usedDocs.map((d) => d.file) })
 
   if (usedDocs.length === 0) {
     logger.info('no relevant documents', meta)
@@ -182,50 +193,42 @@ export async function POST(req) {
       sources: [],
       placeholder: false
     }
-    cache.set(cacheKey, response)
-    logger.info('response', { ...meta, errorCode: ERROR_RETRIEVAL })
+    cache.set(cacheKey, response) // deterministic, safe to cache
     return Response.json(response)
   }
 
+  const sources = usedDocs.map((d) => d.file)
+
   try {
-    const prompt = buildPrompt(question, usedDocs)
-    const answer = await callGemini(apiKey, prompt, meta)
+    const answer = await callGemini(apiKey, buildPrompt(question, usedDocs), meta)
     if (!answer) {
+      // Empty answers are usually transient; don't cache them
       logger.warn('empty gemini answer', meta)
-      const response = {
-        answer:
-          'I could not generate an answer from the knowledge base at this time.',
+      return Response.json({
+        answer: 'I could not generate an answer from the knowledge base at this time. Please try again.',
         question,
-        sources: usedDocs.map((d) => d.file),
+        sources,
         placeholder: false
-      }
-      cache.set(cacheKey, response)
-      logger.info('response', { ...meta, sources: response.sources.length })
-      return Response.json(response)
+      })
     }
 
-    const response = {
-      answer,
-      question,
-      sources: usedDocs.map((d) => d.file),
-      placeholder: false
-    }
-
-    cache.set(cacheKey, response)
-    logger.info('response', { ...meta, sources: response.sources.length })
+    const response = { answer, question, sources, placeholder: false }
+    cache.set(cacheKey, response) // only successful answers are cached
+    logger.info('response', { ...meta, sources: sources.length })
     return Response.json(response)
   } catch (err) {
+    // Errors (timeouts, 5xx, 429) are NOT cached, so a retry actually retries.
     const code = classifyError(err)
     logger.error('chat failed', { ...meta, code, message: err.message })
-    const response = {
-      error: userMessageFor(code),
-      errorCode: code,
-      question,
-      sources: usedDocs.map((d) => d.file),
-      placeholder: false
-    }
-    cache.set(cacheKey, response)
-    logger.info('response', { ...meta, errorCode: code })
-    return Response.json(response, { status: code === ERROR_RATE_LIMIT ? 429 : 200 })
+    return Response.json(
+      {
+        error: userMessageFor(code),
+        errorCode: code,
+        question,
+        sources,
+        placeholder: false
+      },
+      { status: code === ERROR_RATE_LIMIT ? 429 : 200 }
+    )
   }
 }
