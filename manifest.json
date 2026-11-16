@@ -1,0 +1,36 @@
+{
+  "Scheduling": [
+    "app/admin/page.js",
+    "components/Waitlist.js",
+    "components/ClinicOpenings.jsx",
+    "components/Live.js",
+    "lib/scheduleUtils.js",
+    "lib/timeUtils.js"
+  ],
+  "Attendance": [
+    "app/admin/page.js",
+    "app/volunteer/page.js",
+    "app/ossm/page.js",
+    "lib/timeUtils.js"
+  ],
+  "Volunteers": [
+    "app/admin/page.js",
+    "lib/supabase.js",
+    "lib/constants.js"
+  ],
+  "Notifications": [
+    "app/api/send-message/route.js",
+    "app/api/send-push/route.js",
+    "lib/messageUtils.js",
+    "lib/messageSync.js",
+    "lib/pushNotifications.js",
+    "components/MessageCard.js",
+    "components/MessageTab.jsx"
+  ],
+  "Permissions": [
+    "app/layout.js",
+    "app/admin/page.js",
+    "app/volunteer/page.js",
+    "lib/constants.js"
+  ]
+}
