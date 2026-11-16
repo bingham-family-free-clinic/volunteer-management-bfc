@@ -8,6 +8,13 @@ const RATE_MAX_HITS = Number(process.env.CHATBOT_RATE_MAX_HITS || 30)
 const cache = new TTLCache(CACHE_TTL_MS)
 const isRateLimited = createRateLimiter(RATE_WINDOW_MS, RATE_MAX_HITS)
 
+const ERROR_CONFIG = 'config'
+const ERROR_RETRIEVAL = 'retrieval'
+const ERROR_RATE_LIMIT = 'rate_limit'
+const ERROR_GEMINI = 'gemini'
+const ERROR_VALIDATION = 'validation'
+const ERROR_UNKNOWN = 'unknown'
+
 function geminiEndpoint(apiKey) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey || ''}`
 }
@@ -33,11 +40,38 @@ User question:
 ${question}`
 }
 
-async function callGemini(apiKey, prompt) {
+function classifyError(err) {
+  const message = (err && err.message) || String(err)
+  if (message.includes('Gemini API 429')) return ERROR_RATE_LIMIT
+  if (message.includes('Gemini API 401') || message.includes('API_KEY_INVALID')) return ERROR_CONFIG
+  if (message.includes('Gemini API 403')) return ERROR_CONFIG
+  if (message.includes('Gemini API 5') || message.includes('fetch') || message.includes('Abort')) return ERROR_GEMINI
+  if (message.includes('Gemini API')) return ERROR_GEMINI
+  return ERROR_UNKNOWN
+}
+
+function userMessageFor(code) {
+  switch (code) {
+    case ERROR_CONFIG:
+      return 'The chatbot is not configured. A Gemini API key is missing — please contact your administrator to set GEMINI_API_KEY.'
+    case ERROR_RETRIEVAL:
+      return "I couldn't find any relevant documentation for your question in the knowledge base. Try rephrasing or asking about a different topic (scheduling, attendance, volunteers, messaging, or permissions)."
+    case ERROR_RATE_LIMIT:
+      return 'You have sent too many requests. Please wait a moment and try again.'
+    case ERROR_GEMINI:
+      return 'The AI service is having trouble right now. Please try again in a moment.'
+    case ERROR_VALIDATION:
+      return 'Please enter a question before asking.'
+    default:
+      return 'Something went wrong while processing your question. Please try again.'
+  }
+}
+
+async function callGemini(apiKey, prompt, meta) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 30000)
   try {
-    logger.info('gemini request', { model: MODEL })
+    logger.info('gemini request', { model: MODEL, ...meta })
     const res = await fetch(geminiEndpoint(apiKey), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -55,6 +89,7 @@ async function callGemini(apiKey, prompt) {
     })
     if (!res.ok) {
       const err = await res.text().catch(() => res.statusText)
+      logger.error('gemini api error', { ...meta, status: res.status, body: err })
       throw new Error(`Gemini API ${res.status}: ${err}`)
     }
     const json = await res.json()
@@ -62,82 +97,135 @@ async function callGemini(apiKey, prompt) {
       json.candidates && json.candidates[0]
         ? json.candidates[0].content.parts.map((p) => p.text || '').join('')
         : ''
-    logger.info('gemini response', { chars: text.length })
+    logger.info('gemini response', { ...meta, chars: text.length })
     return text.trim()
   } catch (err) {
-    logger.error('gemini failure', { message: err.message })
+    logger.error('gemini failure', { ...meta, message: err.message, code: classifyError(err) })
     throw err
   } finally {
     clearTimeout(timer)
   }
 }
 
+function errorResponse(code, status) {
+  return Response.json(
+    {
+      error: userMessageFor(code),
+      errorCode: code,
+      question: '',
+      sources: [],
+      placeholder: false
+    },
+    { status }
+  )
+}
+
 export async function POST(req) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  const meta = { ip }
+
   if (isRateLimited(ip)) {
-    logger.warn('rate limited', { ip })
-    return Response.json({ error: 'Too many requests. Please try again later.' }, { status: 429 })
+    logger.warn('rate limited', meta)
+    return errorResponse(ERROR_RATE_LIMIT, 429)
   }
 
   let body
   try {
     body = await req.json()
   } catch {
-    logger.warn('invalid json body')
-    return Response.json({ error: 'Invalid JSON body.' }, { status: 400 })
+    logger.warn('invalid json body', meta)
+    return errorResponse(ERROR_VALIDATION, 400)
   }
 
   const question =
     typeof body?.question === 'string' ? body.question.trim() : ''
   if (!question) {
-    logger.warn('missing question')
-    return Response.json({ error: 'A question is required.' }, { status: 400 })
+    logger.warn('missing question', meta)
+    return errorResponse(ERROR_VALIDATION, 400)
   }
 
-  logger.info('chat request', { ip, questionLength: question.length })
+  meta.question = question.slice(0, 120)
+  logger.info('chat request', meta)
 
   const cacheKey = question.toLowerCase()
   const cached = cache.get(cacheKey)
   if (cached) {
-    logger.info('cache hit', { question: cacheKey.slice(0, 60) })
+    logger.info('cache hit', meta)
     return Response.json(cached)
   }
 
   const apiKey = process.env.GEMINI_API_KEY
   const topDocs = search(question, { limit: 4 })
   const usedDocs = topDocs.length ? expandRelated(topDocs, loadDocuments()) : []
-  logger.info('retrieval', { question: cacheKey.slice(0, 60), docs: usedDocs.map((d) => d.file) })
+  logger.info('retrieval', { ...meta, docs: usedDocs.map((d) => d.file) })
 
-  let answer
   if (!apiKey) {
-    logger.warn('gemini not configured')
-    answer =
-      'The chatbot is not configured with a Gemini API key, so no answer can be generated.'
-  } else if (usedDocs.length === 0) {
-    answer =
-      'I could not find any relevant documentation for your question in the knowledge base.'
-  } else {
-    try {
-      const prompt = buildPrompt(question, usedDocs)
-      answer = await callGemini(apiKey, prompt)
-      if (!answer) {
-        answer =
-          'I could not generate an answer from the knowledge base at this time.'
-      }
-    } catch (err) {
-      answer =
-        'The chatbot is temporarily unavailable. Please try again later.'
+    logger.warn('gemini not configured', meta)
+    const response = {
+      error: userMessageFor(ERROR_CONFIG),
+      errorCode: ERROR_CONFIG,
+      question,
+      sources: [],
+      placeholder: true
     }
+    cache.set(cacheKey, response)
+    logger.info('response', { ...meta, errorCode: ERROR_CONFIG })
+    return Response.json(response)
   }
 
-  const response = {
-    answer,
-    question,
-    sources: usedDocs.map((d) => d.file),
-    placeholder: !apiKey
+  if (usedDocs.length === 0) {
+    logger.info('no relevant documents', meta)
+    const response = {
+      error: userMessageFor(ERROR_RETRIEVAL),
+      errorCode: ERROR_RETRIEVAL,
+      question,
+      sources: [],
+      placeholder: false
+    }
+    cache.set(cacheKey, response)
+    logger.info('response', { ...meta, errorCode: ERROR_RETRIEVAL })
+    return Response.json(response)
   }
 
-  cache.set(cacheKey, response)
-  logger.info('response', { question: cacheKey.slice(0, 60), sources: response.sources.length })
-  return Response.json(response)
+  try {
+    const prompt = buildPrompt(question, usedDocs)
+    const answer = await callGemini(apiKey, prompt, meta)
+    if (!answer) {
+      logger.warn('empty gemini answer', meta)
+      const response = {
+        answer:
+          'I could not generate an answer from the knowledge base at this time.',
+        question,
+        sources: usedDocs.map((d) => d.file),
+        placeholder: false
+      }
+      cache.set(cacheKey, response)
+      logger.info('response', { ...meta, sources: response.sources.length })
+      return Response.json(response)
+    }
+
+    const response = {
+      answer,
+      question,
+      sources: usedDocs.map((d) => d.file),
+      placeholder: false
+    }
+
+    cache.set(cacheKey, response)
+    logger.info('response', { ...meta, sources: response.sources.length })
+    return Response.json(response)
+  } catch (err) {
+    const code = classifyError(err)
+    logger.error('chat failed', { ...meta, code, message: err.message })
+    const response = {
+      error: userMessageFor(code),
+      errorCode: code,
+      question,
+      sources: usedDocs.map((d) => d.file),
+      placeholder: false
+    }
+    cache.set(cacheKey, response)
+    logger.info('response', { ...meta, errorCode: code })
+    return Response.json(response, { status: code === ERROR_RATE_LIMIT ? 429 : 200 })
+  }
 }
