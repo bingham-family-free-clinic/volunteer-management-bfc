@@ -2003,7 +2003,7 @@ function VolunteerPageInner() {
                         <div>
                           <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{c.callout_date}<span style={{ marginLeft: '0.5rem', fontFamily: 'DM Mono, monospace', fontSize: '0.82rem', color: 'var(--muted)' }}>{c.shift_time}</span></p>
                             {isClinicOpening && (
-                                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                                <span style={{ color: 'var(--accent)', fontWeight: 400 }}>
                                     {' · '}
                                     {c.openings} opening{c.openings === 1 ? '' : 's'} available
                                 </span>
