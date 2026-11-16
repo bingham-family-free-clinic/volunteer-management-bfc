@@ -624,7 +624,11 @@ function OfficeManagerDesktopHeader({ activeTab, onSelectTab, openMenu, onToggle
   const trainingItems = [
     ['training', 'Weekly Training'],
   ]
-  const otherActive = false
+  const otherItems = [
+    ['languages', 'Language Coverage'],
+    ['providers', 'Provider Schedule'],
+  ]
+  const otherActive = otherItems.some(([key]) => key === activeTab)
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
       <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
@@ -653,6 +657,9 @@ function OfficeManagerDesktopHeader({ activeTab, onSelectTab, openMenu, onToggle
                 boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
               }}>
                 <button onClick={() => { onCloseMenu(); onSwitchView() }} style={dropdownItemStyle(false)}>Volunteer View</button>
+                {otherItems.map(([key, label]) => (
+                  <button key={key} onClick={() => { onCloseMenu(); onSelectTab(key) }} style={dropdownItemStyle(activeTab === key)}>{label}</button>
+                ))}
                 <button onClick={() => { onCloseMenu(); onSignOut() }} style={{ ...dropdownItemStyle(false), color: 'var(--muted)', marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}>Sign out</button>
               </div>
             </>
@@ -943,6 +950,8 @@ export default function CSPage() {
             { key: 'volunteers', label: 'Volunteers' },
             { key: 'guests', label: 'Guest Orgs' },
             { key: 'training', label: 'Weekly Training' },
+            { key: 'languages', label: 'Language Coverage' },
+            { key: 'providers', label: 'Provider Schedule' },
           ] : [...mainTabs, ...OTHER_TABS].map(([key, label]) => ({ key, label })))}
           activeTab={tab}
           onSelectTab={setTab}
@@ -971,6 +980,9 @@ export default function CSPage() {
         )}
         {isOfficeManager && tab === 'schedule' && (
           <OfficeManagerSchedule schedule={schedule} callouts={callouts} />
+        )}
+        {isOfficeManager && tab === 'languages' && (
+          <LanguageCoverage volunteers={volunteers} schedule={schedule} />
         )}
 
         {tab === 'providers' && <ProviderScheduleView supabase={supabase} />}
