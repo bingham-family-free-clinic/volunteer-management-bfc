@@ -1,6 +1,6 @@
 import { search, expandRelated, loadDocuments, TTLCache, createRateLimiter, logger } from '../../../lib/chatbot/index.js'
 
-const MODEL = 'gemini-2.5-flash'
+const MODEL = 'gemini-3.8-flash'
 const CACHE_TTL_MS = Number(process.env.CHATBOT_CACHE_TTL_SECONDS || 3600) * 1000
 const RATE_WINDOW_MS = Number(process.env.CHATBOT_RATE_WINDOW_MS || 60000)
 const RATE_MAX_HITS = Number(process.env.CHATBOT_RATE_MAX_HITS || 30)
