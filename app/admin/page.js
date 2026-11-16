@@ -18,6 +18,7 @@ import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import { MessageTab } from '../../components/MessageTab'
 import Newsletter from '../../components/Newsletter'
+import ChatBot from '../../components/ChatBot'
 
 export const dynamic = 'force-dynamic'
 
@@ -880,6 +881,9 @@ export default function AdminPage() {
     const volIdx = tabItems.findIndex(([key]) => key === 'volunteers')
     if (volIdx !== -1) tabItems.splice(volIdx + 1, 0, ['newsletter', 'Newsletter'])
   }
+
+  // BFC ChatBot — available to every admin.
+  tabItems.push(['chatbot', 'BFC ChatBot'])
 
   // ── Desktop header groupings — derived from tabItems, so they automatically
   // respect whatever this role does/doesn't have access to. ──────────────────
@@ -3181,6 +3185,7 @@ export default function AdminPage() {
         {tab === 'tasks' && hasTasksTab && (
           <AdminTasks currentUserId={profile.id} />
         )}
+        {tab === 'chatbot' && <ChatBot />}
 
         {/* Mobile sidebar — holds the tabs (as pills would show on desktop), plus
             Volunteer View / Sign out, which move here from the header on mobile. */}
