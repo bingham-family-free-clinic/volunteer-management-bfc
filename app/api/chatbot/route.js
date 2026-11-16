@@ -2,14 +2,14 @@ import { search, expandRelated, loadDocuments, TTLCache, createRateLimiter, logg
 
 // fs is used for the knowledge base, so this must run on the Node runtime.
 export const runtime = 'nodejs'
-// Must be longer than GEMINI_TIMEOUT_MS so the 30s abort fires (and returns a
+// Must be longer than GEMINI_TIMEOUT_MS so the 90s abort fires (and returns a
 // friendly error) before the platform kills the function.
-export const maxDuration = 40
+export const maxDuration = 100
 
 const MODEL = process.env.CHATBOT_MODEL || 'gemini-3.5-flash-lite'
 // Gemini 3.x models "think" before answering. For doc Q&A, low is plenty and much faster.
 const THINKING_LEVEL = process.env.CHATBOT_THINKING_LEVEL || 'low'
-const GEMINI_TIMEOUT_MS = Number(process.env.CHATBOT_TIMEOUT_MS || 30000)
+const GEMINI_TIMEOUT_MS = Number(process.env.CHATBOT_TIMEOUT_MS || 90000)
 const CACHE_TTL_MS = Number(process.env.CHATBOT_CACHE_TTL_SECONDS || 3600) * 1000
 const RATE_WINDOW_MS = Number(process.env.CHATBOT_RATE_WINDOW_MS || 60000)
 const RATE_MAX_HITS = Number(process.env.CHATBOT_RATE_MAX_HITS || 30)

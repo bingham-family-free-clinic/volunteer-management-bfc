@@ -10,6 +10,76 @@ export default function ChatBot() {
   const inputStyle = { width: '100%', padding: '0.75rem 1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.95rem', outline: 'none', fontFamily: 'DM Sans, sans-serif' }
   const labelStyle = { display: 'block', fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }
 
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+  }
+
+  function inline(text) {
+    return String(text)
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;height:auto;border-radius:6px;display:block;margin:0.5rem 0">')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:underline">$1</a>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/__(.+?)__/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+?)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+  }
+
+  function markdownToHtml(text) {
+    if (!text) return ''
+    let html = ''
+    let inFence = false
+    let fenceLang = ''
+    let fenceBuf = ''
+    for (const raw of text.split('\n')) {
+      if (raw.startsWith('```')) {
+        if (!inFence) {
+          inFence = true
+          fenceLang = raw.slice(3).trim()
+          html += `<pre><code${fenceLang ? ` class="language-${escapeHtml(fenceLang)}"` : ''}>`
+        } else {
+          html += escapeHtml(fenceBuf) + '</code></pre>'
+          inFence = false
+          fenceBuf = ''
+        }
+        continue
+      }
+      if (inFence) {
+        fenceBuf += raw + '\n'
+        continue
+      }
+      const h = raw.match(/^(#{1,6})\s(.*)$/)
+      if (h) {
+        html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>\n`
+        continue
+      }
+      if (/^[-*_]{3,}\s*$/.test(raw)) {
+        html += '<hr>\n'
+        continue
+      }
+      const bq = raw.match(/^>\s(.*)$/)
+      if (bq) {
+        html += `<blockquote>${inline(bq[1])}</blockquote>\n`
+        continue
+      }
+      const li = raw.match(/^(\s*)([-*+]|\d+\.)\s(.*)$/)
+      if (li) {
+        html += `<li>${inline(li[3])}</li>\n`
+        continue
+      }
+      if (raw.trim() === '') {
+        html += '\n'
+        continue
+      }
+      html += `<p>${inline(raw)}</p>\n`
+    }
+    if (inFence) html += escapeHtml(fenceBuf) + '</code></pre>'
+    html = html.replace(/(<li>[\s\S]*?<\/li>\n)+/g, (m) => `<ul>\n${m}</ul>\n`)
+    return html
+  }
+
   const isRetryable = (code) =>
     code === 'gemini' || code === 'rate_limit' || code === 'unknown'
 
@@ -156,7 +226,12 @@ export default function ChatBot() {
   }
 
   return (
-    <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '820px' }}>
+    <>
+      <style>{`
+        @keyframes chatbotSpin { to { transform: rotate(360deg) } }
+        .chatbotSpinner { display:inline-block;width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:chatbotSpin 0.8s linear infinite; }
+      `}</style>
+      <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '820px' }}>
       <h2 style={{ fontWeight: 600, fontSize: '1.15rem', margin: 0, color: 'var(--text)' }}>BFC ChatBot</h2>
       <p style={{ fontSize: '0.85rem', color: 'var(--muted)', margin: 0 }}>
         Ask about scheduling, attendance, volunteers, messaging, permissions, and more. Answers come from the generated knowledge base.
@@ -191,6 +266,13 @@ export default function ChatBot() {
         </div>
       </form>
 
+      {loading && (
+        <div style={{ display:'flex',alignItems:'center',gap:'0.6rem',padding:'0.9rem 1.1rem',borderRadius:'10px',background:'rgba(15,23,42,0.04)',border:'1px dashed rgba(15,23,42,0.12)',color:'var(--muted)' }}>
+          <span className="chatbotSpinner"></span>
+          <span style={{ fontSize:'0.85rem',fontWeight:500 }}>Thinking…</span>
+        </div>
+      )}
+
       {entry && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {entry.error ? (
@@ -203,7 +285,7 @@ export default function ChatBot() {
                   <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '100px', background: 'rgba(156,163,175,0.12)', color: 'var(--muted)', border: '1px solid rgba(156,163,175,0.25)', fontWeight: 600 }}>placeholder</span>
                 )}
               </div>
-              <div style={{ background: 'var(--bg)', padding: '1rem 1.25rem', borderRadius: '10px', border: '1px solid var(--border)', whiteSpace: 'pre-wrap', fontSize: '0.95rem', lineHeight: 1.55, color: 'var(--text)' }}>{entry.answer}</div>
+              <div style={{ background: 'var(--bg)', padding: '1rem 1.25rem', borderRadius: '10px', border: '1px solid var(--border)', fontSize: '0.95rem', lineHeight: 1.6, color: 'var(--text)' }} dangerouslySetInnerHTML={{ __html: markdownToHtml(entry.answer) }}></div>
               {entry.sources && entry.sources.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sources:</span>
@@ -247,5 +329,6 @@ export default function ChatBot() {
         </div>
       )}
     </div>
+    </>
   )
 }
