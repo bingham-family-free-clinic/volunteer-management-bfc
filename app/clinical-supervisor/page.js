@@ -510,6 +510,47 @@ function dropdownItemStyle(active) {
   }
 }
 
+function HeaderMenu({ label, items, activeTab, open, onToggle, onClose, onSelectTab }) {
+  const isActive = items.some(([key]) => key === activeTab)
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={onToggle}
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          fontFamily: 'DM Sans, sans-serif',
+          fontSize: '0.95rem',
+          fontWeight: isActive || open ? 600 : 500,
+          color: isActive || open ? 'var(--text)' : 'var(--muted)',
+        }}
+      >
+        {label}
+      </button>
+
+      {open && (
+        <>
+          <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 0.9rem)', right: 0,
+            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px',
+            minWidth: '210px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
+          }}>
+            {items.map(([key, itemLabel]) => (
+              <button key={key} onClick={() => { onClose(); onSelectTab(key) }} style={dropdownItemStyle(activeTab === key)}>
+                {itemLabel}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onCloseOther, onSwitchView, onSignOut, mainTabs = MAIN_TABS }) {
   const otherActive = OTHER_TABS.some(([key]) => key === activeTab)
 
@@ -573,6 +614,55 @@ function DesktopHeader({ activeTab, onSelectTab, otherOpen, onToggleOther, onClo
   )
 }
 
+function OfficeManagerDesktopHeader({ activeTab, onSelectTab, openMenu, onToggleMenu, onCloseMenu, onSwitchView, onSignOut }) {
+  const volunteerItems = [
+    ['live', 'Live'],
+    ['schedule', 'Schedule'],
+    ['volunteers', 'Volunteers'],
+    ['guests', 'Guest Orgs'],
+  ]
+  const trainingItems = [
+    ['training', 'Weekly Training'],
+  ]
+  const otherActive = false
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0.5rem 0' }}>
+      <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '42px', height: '42px', objectFit: 'contain' }} />
+      <nav style={{ display: 'flex', alignItems: 'center', gap: '2.25rem' }}>
+        <HeaderMenu label="Volunteers" items={volunteerItems} activeTab={activeTab} open={openMenu === 'volunteers'} onToggle={() => onToggleMenu('volunteers')} onClose={onCloseMenu} onSelectTab={onSelectTab} />
+        <HeaderMenu label="Training" items={trainingItems} activeTab={activeTab} open={openMenu === 'training'} onToggle={() => onToggleMenu('training')} onClose={onCloseMenu} onSelectTab={onSelectTab} />
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => onToggleMenu('other')}
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem',
+              fontWeight: otherActive || openMenu === 'other' ? 600 : 500,
+              color: otherActive || openMenu === 'other' ? 'var(--text)' : 'var(--muted)',
+            }}
+          >
+            Other
+          </button>
+          {openMenu === 'other' && (
+            <>
+              <div onClick={onCloseMenu} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 0.9rem)', right: 0,
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px',
+                minWidth: '210px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 1001,
+              }}>
+                <button onClick={() => { onCloseMenu(); onSwitchView() }} style={dropdownItemStyle(false)}>Volunteer View</button>
+                <button onClick={() => { onCloseMenu(); onSignOut() }} style={{ ...dropdownItemStyle(false), color: 'var(--muted)', marginTop: '0.3rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem', borderRadius: 0 }}>Sign out</button>
+              </div>
+            </>
+          )}
+        </div>
+      </nav>
+    </div>
+  )
+}
+
 function MobileSidebar({ open, onClose, navItems, activeTab, onSelectTab, showSwitchView, onSwitchView, onSignOut }) {
   function handleItemClick(action) { action(); onClose() }
   return (
@@ -615,6 +705,7 @@ export default function CSPage() {
   const [isMobile, setIsMobile] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [otherOpen, setOtherOpen] = useState(false)
+  const [openMenu, setOpenMenu] = useState(null) // OM desktop header menus: 'volunteers' | 'training' | 'other' | null
   useEffect(() => {
     const ua = navigator.userAgent || navigator.vendor || ''
     const isMobileUA = /android|iphone|ipad|ipod|iemobile|blackberry|opera mini|mobile/i.test(ua)
@@ -820,6 +911,16 @@ export default function CSPage() {
             </button>
             <img src="/logos/logo2-96.webp" alt="Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
           </div>
+        ) : isOfficeManager ? (
+          <OfficeManagerDesktopHeader
+            activeTab={tab}
+            onSelectTab={setTab}
+            openMenu={openMenu}
+            onToggleMenu={(name) => setOpenMenu(m => (m === name ? null : name))}
+            onCloseMenu={() => setOpenMenu(null)}
+            onSwitchView={() => { window.location.href = '/volunteer' }}
+            onSignOut={async () => { await supabase.auth.signOut(); window.location.href = '/' }}
+          />
         ) : (
           <DesktopHeader
             activeTab={tab}
@@ -836,7 +937,13 @@ export default function CSPage() {
         <MobileSidebar
           open={isMobile && sidebarOpen}
           onClose={() => setSidebarOpen(false)}
-          navItems={[...mainTabs, ...OTHER_TABS].map(([key, label]) => ({ key, label }))}
+          navItems={(isOfficeManager ? [
+            { key: 'live', label: 'Live' },
+            { key: 'schedule', label: 'Schedule' },
+            { key: 'volunteers', label: 'Volunteers' },
+            { key: 'guests', label: 'Guest Orgs' },
+            { key: 'training', label: 'Weekly Training' },
+          ] : [...mainTabs, ...OTHER_TABS].map(([key, label]) => ({ key, label })))}
           activeTab={tab}
           onSelectTab={setTab}
           showSwitchView={true}
