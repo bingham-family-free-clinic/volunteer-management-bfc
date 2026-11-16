@@ -1106,9 +1106,22 @@ function VolunteerPageInner() {
           }
       }
 
-      console.table(clinicOpenings)
 
-      setOpenShifts((openSubs || []).map(c => ({ ...c, profiles: c.volunteer })))
+      const mergedOpenings = [
+          ...(openSubs || []).map(c => ({
+              ...c,
+              source: 'callout',
+              profiles: c.volunteer,
+              openings: 1,
+          })),
+          ...clinicOpenings,
+      ].sort((a, b) =>
+          a.callout_date.localeCompare(b.callout_date) ||
+          SHIFTS.indexOf(a.shift_time) - SHIFTS.indexOf(b.shift_time) ||
+          (a.role || '').localeCompare(b.role || '')
+      )
+      setOpenShifts(mergedOpenings)
+
     setMyCoverRequests(myCoverReqs || [])
 
     setCalloutLoading(false)
@@ -1288,37 +1301,82 @@ function VolunteerPageInner() {
     }
   }
 
-  async function handleRequestCover(calloutId) {
-    // Find the open shift being requested
-    const openShift = openShifts.find(s => s.id === calloutId)
-    if (openShift) {
-      const shiftDate = openShift.callout_date                        // e.g. "2025-09-10"
-      const shiftTime = openShift.shift_time                          // e.g. "10-2"
-      const dayName   = openShift.day_of_week                         // e.g. "tuesday"
-
-      // 1. Check regular schedule — same day + same shift_time
-      const scheduleConflict = schedule.some(
-        s => s.day_of_week === dayName && s.shift_time === shiftTime
-      )
-      if (scheduleConflict) {
-        showToast("You're already scheduled for that shift.", 'error')
-        return
-      }
-
-      // 2. Check already-approved covers — same date + same shift_time
-      const coverConflict = approvedCovers.some(
-        r => r.callout?.callout_date === shiftDate && r.callout?.shift_time === shiftTime
-      )
-      if (coverConflict) {
-        showToast("You're already covering a shift at that time.", 'error')
-        return
-      }
+    function getOpeningKey(opening) {
+        if (opening.source === 'callout') {
+            return `callout:${opening.id}`
+        }
+        return `clinic:${opening.callout_date}:${opening.shift_time}:${opening.role}`
     }
 
-    setRequestingCoverId(calloutId)
-    const { error } = await supabase.from('shift_cover_requests').insert({ callout_id: calloutId, volunteer_id: user.id })
-    if (error) showToast(error.message, 'error')
-    else { showToast('Cover request submitted!', 'success'); setMyCoverRequests(prev => [...prev, { callout_id: calloutId, status: 'pending' }]) }
+    async function handleRequestCover(opening) {
+    // Find the open shift being requested
+
+    const isCallout = opening.source === 'callout'
+    const openingKey = getOpeningKey(opening)
+
+    const openShift = openShifts.find(shift => getOpeningKey(shift) === openingKey)
+
+    if (!openShift) {
+        showToast("This shift has been taken or is no longer available.", "error")
+        return
+    }
+
+    const shiftDate = openShift.callout_date                        // e.g. "2025-09-10"
+    const shiftTime = openShift.shift_time                          // e.g. "10-2"
+    const dayName   = openShift.day_of_week                         // e.g. "tuesday"
+
+    // 1. Check regular schedule — same day + same shift_time
+    const scheduleConflict = schedule.some(
+        s => s.day_of_week === dayName && s.shift_time === shiftTime
+    )
+    if (scheduleConflict) {
+        showToast("You're already scheduled for that shift.", 'error')
+        return
+    }
+
+    // 2. Check already-approved covers — same date + same shift_time
+
+    const clinicCoverConflict = myCoverRequests.some(r =>
+        r.callout_id === null &&
+        r.status === 'approved' &&
+        r.shift_date === shiftDate &&
+        r.shift_time === shiftTime
+    )
+
+    const coverConflict = approvedCovers.some(
+        r => r.callout?.callout_date === shiftDate && r.callout?.shift_time === shiftTime
+    ) || clinicCoverConflict
+
+
+    if (coverConflict) {
+        showToast("You're already covering a shift at that time.", 'error')
+        return
+    }
+
+
+    setRequestingCoverId(openingKey)
+
+    const request = isCallout
+        ? {
+            callout_id: opening.id,
+            volunteer_id: user.id,
+        } : {
+            callout_id: null,
+            volunteer_id: user.id,
+            shift_date: opening.callout_date,
+            shift_time: opening.shift_time,
+            role: opening.role,
+        }
+
+    const { error } = await supabase.from('shift_cover_requests').insert(request)
+
+    if (error) {
+        showToast(error.message, 'error')
+    } else {
+        showToast('Cover request submitted!', 'success')
+        setMyCoverRequests(prev => [...prev, { ...request, status: 'pending' }])
+    }
+
     setRequestingCoverId(null)
   }
 
@@ -1926,19 +1984,37 @@ function VolunteerPageInner() {
               ) : openShifts.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>No open shifts right now.</p> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {openShifts.map(c => {
-                    const myReq = myCoverRequests.find(r => r.callout_id === c.id)
-                    const isApproved = myReq?.status === 'approved'
+                      const myReq = myCoverRequests.find(r =>
+                          c.source === 'callout'
+                              ? r.callout_id === c.id
+                              : r.callout_id === null &&
+                              r.shift_date === c.callout_date &&
+                              r.shift_time === c.shift_time &&
+                              r.role === c.role
+                      )
+                      const isClinicOpening = c.source === 'clinic_opening'
+                      const isApproved = myReq?.status === 'approved'
                     return (
-                      <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'var(--bg)', borderRadius: '8px', border: `1px solid ${isApproved ? 'rgba(74,222,128,0.4)' : 'var(--border)'}`, flexWrap: 'wrap', gap: '0.75rem' }}>
+                      <div key={getOpeningKey(c)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem',
+                          background: isClinicOpening
+                              ? 'rgba(2,65,107,0.05)'
+                              : 'var(--bg)',
+                          borderRadius: '8px', border: `1px solid ${isApproved ? 'rgba(74,222,128,0.4)' : 'var(--border)'}`, flexWrap: 'wrap', gap: '0.75rem' }}>
                         <div>
                           <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{c.callout_date}<span style={{ marginLeft: '0.5rem', fontFamily: 'DM Mono, monospace', fontSize: '0.82rem', color: 'var(--muted)' }}>{c.shift_time}</span></p>
-                          <p style={{ color: 'var(--muted)', fontSize: '0.82rem', textTransform: 'capitalize' }}>{c.day_of_week}{c.role ? ` · ${c.role}` : ''}{c.profiles?.full_name ? ` · ${c.profiles.full_name} calling out` : ''}</p>
+                            {isClinicOpening && (
+                                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                                    {' · '}
+                                    {c.openings} opening{c.openings === 1 ? '' : 's'} available
+                                </span>
+                            )}
+                            <p style={{ color: 'var(--muted)', fontSize: '0.82rem', textTransform: 'capitalize' }}>{c.day_of_week}{c.role ? ` · ${c.role}` : ''}{c.profiles?.full_name ? ` · ${c.profiles.full_name} calling out` : ''}</p>
                         </div>
                         {isApproved
                           ? <span style={{ fontSize: '0.8rem', padding: '0.25rem 0.7rem', borderRadius: '100px', background: 'rgba(74,222,128,0.12)', color: 'var(--accent)', border: '1px solid rgba(74,222,128,0.3)', fontWeight: 600 }}>✓ You're covering</span>
                           : myReq
                             ? <span style={{ fontSize: '0.8rem', padding: '0.25rem 0.7rem', borderRadius: '100px', background: 'rgba(96,165,250,0.1)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)', fontWeight: 500 }}>Requested</span>
-                            : <button onClick={() => handleRequestCover(c.id)} disabled={requestingCoverId === c.id} style={{ padding: '0.35rem 0.9rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{requestingCoverId === c.id ? '...' : 'I can cover'}</button>}
+                            : <button onClick={() => handleRequestCover(c)} disabled={requestingCoverId === getOpeningKey(c)} style={{ padding: '0.35rem 0.9rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>{requestingCoverId === getOpeningKey(c) ? '...' : 'I can cover'}</button>}
                       </div>
                     )
                   })}
