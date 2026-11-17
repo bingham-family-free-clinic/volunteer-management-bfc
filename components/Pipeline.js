@@ -2373,6 +2373,38 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     }
   }
 
+  // The row points at an object that is no longer in Storage (old uploads that
+  // were offloaded/deleted), so there is nothing to list, open, or merge into.
+  // Drop just the DB reference so the item isn't stuck. Storage is deliberately
+  // left alone: "Object not found" is also what a permissions failure looks
+  // like, so deleting here could destroy a file this session merely can't see.
+  async function handleClearBrokenFile(applicantId, item) {
+    const detail = checklistFiles[item.key]?.error || ''
+    const missing = /not_found|NoSuchKey|Object not found/i.test(detail)
+    const confirmed = window.confirm(
+      missing
+        ? `The stored file for "${item.label}" is missing from Storage.\n\nRemove it from the checklist? Only the reference is cleared — nothing is deleted from Storage.`
+        : `Couldn't read the stored file for "${item.label}" (${detail}).\n\nRemove it from the checklist anyway? The file itself is not deleted, but the checklist will no longer point to it.`
+    )
+    if (!confirmed) return
+
+    setRemovingFile({ itemKey: item.key, name: null })
+    try {
+      const { error } = await supabase.from('onboarding_checklists')
+        .update({ [item.urlKey]: null, updated_at: new Date().toISOString() })
+        .eq('applicant_id', applicantId)
+      if (error) throw error
+
+      setChecklist(prev => ({ ...prev, [item.urlKey]: null }))
+      setChecklistFiles(prev => { const next = { ...prev }; delete next[item.key]; return next })
+      msg(`${item.label} cleared — you can upload a new file`)
+    } catch (e) {
+      msg(await describeStorageError(e, 'Could not clear the file'), 'error')
+    } finally {
+      setRemovingFile(null)
+    }
+  }
+
   // Opens a single file from an item's document in a new tab.
   async function openChecklistFile(item, fileName) {
     const path = checklist[item.urlKey]
@@ -3018,7 +3050,16 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         />
 
         {entry?.loading && <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontStyle: 'italic' }}>Loading files…</span>}
-        {entry?.error && <span style={{ fontSize: '0.72rem', color: C.danger }}>Couldn't read the uploaded files: {entry.error}</span>}
+        {entry?.error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.72rem', color: C.danger }}>Couldn't read the uploaded files: {entry.error}</span>
+            <button type="button" onClick={() => handleClearBrokenFile(applicantId, item)} disabled={rowBusy}
+              title="Clear the reference so you can upload a new file"
+              style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}>
+              {removingFile?.itemKey === item.key ? 'Clearing...' : 'Remove'}
+            </button>
+          </div>
+        )}
 
         {files.map(f => {
           const removing = removingFile?.itemKey === item.key && removingFile?.name === f.name
@@ -3028,13 +3069,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 style={{ background: 'none', border: 'none', padding: 0, color: C.blue, textDecoration: 'underline', cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {f.name}
               </button>
+              <button type="button" onClick={() => handleRemoveFile(applicantId, item, f.name)} disabled={rowBusy}
+                style={{ flexShrink: 0, padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}>
+                {removing ? 'Removing...' : 'Remove'}
+              </button>
               {f.source === 'volunteer' && (
                 <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44`, whiteSpace: 'nowrap', flexShrink: 0 }}>volunteer upload</span>
               )}
-              <button type="button" onClick={() => handleRemoveFile(applicantId, item, f.name)} disabled={rowBusy}
-                style={{ marginLeft: 'auto', flexShrink: 0, padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}>
-                {removing ? 'Removing...' : 'Remove'}
-              </button>
             </div>
           )
         })}
