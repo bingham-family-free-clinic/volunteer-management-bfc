@@ -3177,19 +3177,41 @@ export default function AdminPage() {
                                             </p>
                                         </div>
 
-                                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                                             <button
                                                 onClick={() => approveCover(request)}
                                                 disabled={approvingCoverId === request.id}
+                                                style={{
+                                                    padding: '0.3rem 0.8rem',
+                                                    background: 'rgba(2,65,107,0.12)',
+                                                    color: 'var(--accent)',
+                                                    border: '1px solid rgba(2,65,107,0.35)',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 600,
+                                                    fontFamily: 'DM Sans, sans-serif',
+                                                    cursor: approvingCoverId === request.id ? 'not-allowed' : 'pointer',
+                                                }}
                                             >
-                                                {approvingCoverId === request.id ? '...' : '✓ Assign'}
+                                                {approvingCoverId === request.id ? 'Assigning…' : '✓ Assign'}
                                             </button>
 
                                             <button
                                                 onClick={() => denyCover(request.id)}
                                                 disabled={approvingCoverId === request.id}
+                                                style={{
+                                                    padding: '0.3rem 0.8rem',
+                                                    background: 'rgba(239,68,68,0.08)',
+                                                    color: '#ef4444',
+                                                    border: '1px solid rgba(239,68,68,0.25)',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 600,
+                                                    fontFamily: 'DM Sans, sans-serif',
+                                                    cursor: approvingCoverId === request.id ? 'not-allowed' : 'pointer',
+                                                }}
                                             >
-                                                ✕
+                                                ✕ Deny
                                             </button>
                                         </div>
                                     </div>
