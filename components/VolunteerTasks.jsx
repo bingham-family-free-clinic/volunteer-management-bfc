@@ -250,7 +250,7 @@ function TaskRow({ task, currentUserId, teamMembers, onUpdate, showToast, teamBa
                 fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.04em',
                 color: teamBadge.color, background: teamBadge.bg,
                 border: `1px solid ${teamBadge.border}`,
-                borderRadius: 0, padding: '0.1rem 0.4rem',
+                borderRadius: '4px', padding: '0.1rem 0.4rem',
               }}>
                 {task.team.toUpperCase()}
               </span>

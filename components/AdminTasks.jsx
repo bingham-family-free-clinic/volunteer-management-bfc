@@ -25,7 +25,7 @@ const S = {
   card: {
     background: 'var(--surface)',
     border: '1px solid var(--border)',
-    borderRadius: 0,
+    borderRadius: '6px',
     padding: '1.25rem',
   },
   input: {
@@ -33,7 +33,7 @@ const S = {
     padding: '0.65rem 0.9rem',
     background: 'var(--bg)',
     border: '1px solid var(--border)',
-    borderRadius: 0,
+    borderRadius: '6px',
     color: 'var(--text)',
     fontSize: '0.9rem',
     outline: 'none',
