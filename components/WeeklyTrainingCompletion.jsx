@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getMonday, toWeekKey, formatWeekRangeShort } from '../lib/trainingUtils'
 import { SHIFTS } from '../lib/constants'
+import { isSurveyWeekKey } from './BiannualSurvey'
 
 const TRACKING_START_DATE = '2026-06-29'
 const TRACKING_START_WEEK = toWeekKey(getMonday(new Date(2026, 5, 29))) // 2026-06-29 (Mon)
@@ -100,7 +101,10 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
       ])
       if (profRes.error) throw profRes.error
       setProfiles(profRes.data || [])
-      setAttendanceRows(attendance || [])
+      // No weekly training is published during the Volunteer Feedback Survey
+      // week, so those weeks must never count as "required" (otherwise
+      // volunteers get docked for a training that was never offered).
+      setAttendanceRows((attendance || []).filter(r => !isSurveyWeekKey(weekKeyFromDateStr(r.shift_date))))
       setAckRows(acks || [])
       setTrainingWeeks((trainings.data || []).map(t => t.week_start))
     } catch (e) {
@@ -320,7 +324,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
           <div>
             <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600 }}>Weekly Training Completion</h2>
             <p style={{ margin: '0.25rem 0 0', color: 'var(--muted)', fontSize: '0.85rem' }}>
-              Required weeks are based on unexcused attendance records (Mondays, week-of shift date) tracked since {TRACKING_START_DATE}. Completion is matched by weekly training acknowledgment for the same week.
+              Required weeks are based on unexcused attendance records (Mondays, week-of shift date) tracked since {TRACKING_START_DATE}. Volunteer Feedback Survey weeks are excluded, since no training is offered then. Completion is matched by weekly training acknowledgment for the same week.
             </p>
           </div>
           <button onClick={load} style={{ ...pillBtn(false), whiteSpace: 'nowrap' }}>Refresh</button>
