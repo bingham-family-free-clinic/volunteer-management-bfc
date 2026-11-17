@@ -1005,7 +1005,7 @@ function VolunteerPageInner() {
     }
 
       const coversWithNames = (myCoverReqs || []).map(request => {
-          const shift = request.callout === null
+          const shift = request.callout !== null
               ? {
                   ...request.callout,
                   source: 'callout',
