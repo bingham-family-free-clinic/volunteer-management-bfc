@@ -124,12 +124,90 @@ const CHECKLIST_ITEMS = [
   { key: 'id_check',                  label: 'ID',                        bucket: 'onboarding-ids',               urlKey: 'id_check_url'          },
   { key: 'immunization',              label: 'Immunization',              bucket: 'onboarding-immunizations',     urlKey: 'immunization_url'      },
   { key: 'tb_test',                   label: 'TB Test',                   bucket: 'onboarding-tb-tests',          urlKey: 'tb_test_url'           },
-  { key: 'licenses_certifications',   label: 'Licenses & Certifications', bucket: 'onboarding-licenses',           urlKey: 'licenses_url'          },
+  { key: 'licenses_certifications',   label: 'Licenses & Certifications', bucket: 'onboarding-licenses',          urlKey: 'licenses_url'          },
   { key: 'confidentiality_agreement', label: 'Confidentiality Agreement', bucket: 'onboarding-confidentiality',   urlKey: 'confidentiality_url'   },
   { key: 'parking_pass',              label: 'Parking Pass',              bucket: 'onboarding-parking-passes',    urlKey: 'parking_pass_url'      },
 ]
 
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
+
+// Items on the onboarding checklist that take uploaded documents (step 3). The
+// confidentiality agreement and parking pass are generated as PDFs by their own
+// modals, so they aren't listed here.
+const ZIP_UPLOAD_ITEMS = FILE_CHECKLIST_ITEMS.filter(i => i.key !== 'parking_pass' && i.key !== 'confidentiality_agreement')
+
+// ── Onboarding checklist document storage ────────────────────────────────────
+// Each checklist item still stores ONE path in onboarding_checklists
+// (item.urlKey) pointing at a .zip, which acts as that item's "folder" of
+// files. Who uploaded each file is stamped in the zip entry's comment
+// ('admin' | 'volunteer'). Entries with no stamp (older uploads) fall back to
+// the item's volunteer_uploads flag. A volunteer upload that isn't a zip is
+// treated as a single file.
+const FILE_MIME_TYPES = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }
+
+function mimeForFileName(name) {
+  const ext = String(name).split('.').pop().toLowerCase()
+  return FILE_MIME_TYPES[ext] || 'application/octet-stream'
+}
+
+// "scan.pdf" -> "scan (2).pdf" when a file with that name is already on the item.
+function uniqueFileName(name, taken) {
+  if (!taken.has(name)) return name
+  const dot  = name.lastIndexOf('.')
+  const base = dot > 0 ? name.slice(0, dot) : name
+  const ext  = dot > 0 ? name.slice(dot) : ''
+  let n = 2
+  while (taken.has(`${base} (${n})${ext}`)) n++
+  return `${base} (${n})${ext}`
+}
+
+// Lists the files stored at `path`: [{ name, source, data? }]. `data` (a Blob)
+// is only filled in when withData is true — needed when the zip is rebuilt.
+async function readStoredFiles(supabase, bucket, path, volunteerFlagged, withData = false) {
+  const { data: blob, error } = await supabase.storage.from(bucket).download(path)
+  if (error) throw error
+  const fallback = volunteerFlagged ? 'volunteer' : 'admin'
+
+  if (!/\.zip$/i.test(path)) {
+    return [{ name: path.split('/').pop() || 'file', source: fallback, data: withData ? blob : undefined }]
+  }
+
+  const zip   = await JSZip.loadAsync(blob)
+  const files = []
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue
+    files.push({
+      name:   entry.name,
+      source: entry.comment === 'admin' || entry.comment === 'volunteer' ? entry.comment : fallback,
+      data:   withData ? await entry.async('blob') : undefined,
+    })
+  }
+  return files
+}
+
+// Pulls one file out of the stored document (for opening it in a tab).
+async function extractStoredFile(supabase, bucket, path, fileName) {
+  const { data: blob, error } = await supabase.storage.from(bucket).download(path)
+  if (error) throw error
+  if (!/\.zip$/i.test(path)) return blob
+  const zip   = await JSZip.loadAsync(blob)
+  const entry = zip.file(fileName)
+  if (!entry) throw new Error('File not found in archive')
+  return entry.async('blob')
+}
+
+// Zips `files` ([{ name, data, source }]) and uploads them to a new path.
+async function writeChecklistZip(supabase, bucket, applicantId, itemKey, files) {
+  const zip = new JSZip()
+  for (const f of files) zip.file(f.name, f.data, { comment: f.source })
+  const zipBlob = await zip.generateAsync({ type: 'blob' })
+  const path    = `${applicantId}/${itemKey}-${Date.now()}.zip`
+  const { error } = await supabase.storage
+    .from(bucket)
+    .upload(path, zipBlob, { contentType: 'application/zip', upsert: true })
+  if (error) throw error
+  return path
+}
 const NON_PATIENT_ROLES = ['Information Systems', 'Communications']
 
 const DEFAULT_REQUIRED = ['background_check', 'id_check', 'immunization', 'tb_test']
@@ -1531,6 +1609,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [checklist,       setChecklist]       = useState(EMPTY_CHECKLIST)
   const [savingChecklist, setSavingChecklist] = useState(false)
   const [uploadingKey,    setUploadingKey]    = useState(null)
+  const [checklistFiles, setChecklistFiles] = useState({})     // { [itemKey]: { path, files: [{ name, source }], loading?, error? } }
+  const [removingFile,   setRemovingFile]   = useState(null)   // { itemKey, name } | null
 
   const [toast, setToast] = useState(null)
 
@@ -1555,6 +1635,38 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       loadTemplates()
     }
   }, [activeTab])
+
+  // Lists the files inside each onboarding checklist document so step 3 can show
+  // one line per file. Cached per item and re-read only when the stored path
+  // changes (every upload/remove writes a new path).
+  const checklistPathsKey = ZIP_UPLOAD_ITEMS.map(i => checklist[i.urlKey] || '').join('|')
+  useEffect(() => {
+    if (selected?.stage !== 'onboarding') return
+    for (const item of ZIP_UPLOAD_ITEMS) {
+      const path   = checklist[item.urlKey] || null
+      const cached = checklistFiles[item.key]
+      if (!path) {
+        if (cached) setChecklistFiles(prev => { const next = { ...prev }; delete next[item.key]; return next })
+        continue
+      }
+      if (cached?.path === path) continue
+
+      const flagged = (checklist.volunteer_uploads || []).includes(item.key)
+      setChecklistFiles(prev => ({ ...prev, [item.key]: { path, files: [], loading: true } }))
+      readStoredFiles(supabase, item.bucket, path, flagged, false)
+        .then(files => setChecklistFiles(prev =>
+          prev[item.key]?.path === path
+            ? { ...prev, [item.key]: { path, files: files.map(({ name, source }) => ({ name, source })) } }
+            : prev))
+        .catch(e => {
+          console.error(`Could not read ${item.label} files:`, e)
+          setChecklistFiles(prev =>
+            prev[item.key]?.path === path
+              ? { ...prev, [item.key]: { path, files: [], error: e.message || 'unknown error' } }
+              : prev)
+        })
+    }
+  }, [selected?.id, selected?.stage, checklistPathsKey])
 
   // Lookups for the Applied-stage "Staffing Need" badge — recomputed only
   // when the underlying clinic schedule / waitlist rows change.
@@ -2114,42 +2226,145 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     return path
   }
 
+  // ─── Onboarding checklist: multi-file documents ───────────────────────────
+  // Re-reads the item's current path/flag from the DB right before changing it,
+  // so a document the volunteer uploaded while this page was open isn't lost.
+  async function getFreshItemState(applicantId, item) {
+    const { data, error } = await supabase.from('onboarding_checklists')
+      .select(`${item.urlKey}, volunteer_uploads`)
+      .eq('applicant_id', applicantId)
+      .maybeSingle()
+    if (error) throw error
+    return {
+      path:    data?.[item.urlKey] ?? null,
+      flagged: (data?.volunteer_uploads || []).includes(item.key),
+    }
+  }
+
+  // Writes the item's full file list as a new zip, points the checklist at it,
+  // then deletes the zip it replaces. An empty list clears the item.
+  async function commitChecklistFiles(applicantId, item, oldPath, files) {
+    let newPath = null
+
+    if (files.length > 0) {
+      newPath = await writeChecklistZip(supabase, item.bucket, applicantId, item.key, files)
+
+      // Targeted RPC: writes only this item's URL (and clears its volunteer flag
+      // server-side). It never touches other URLs, flags, or approvals, so a
+      // concurrently-uploaded document isn't clobbered.
+      const { error } = await supabase.rpc('admin_set_checklist_file', {
+        p_applicant_id: applicantId,
+        p_item_key: item.key,
+        p_url: newPath,
+      })
+      if (error) {
+        await supabase.storage.from(item.bucket).remove([newPath])   // don't leave the new zip orphaned
+        throw error
+      }
+    } else {
+      // Last file removed — clear just this item's path.
+      const { error } = await supabase.from('onboarding_checklists')
+        .update({ [item.urlKey]: null, updated_at: new Date().toISOString() })
+        .eq('applicant_id', applicantId)
+      if (error) throw error
+    }
+
+    // The old zip is superseded; delete it so replaced/removed files don't pile up.
+    if (oldPath && oldPath !== newPath) {
+      const { error: delErr } = await supabase.storage.from(item.bucket).remove([oldPath])
+      if (delErr) console.warn(`Could not delete old ${item.label} file:`, delErr)
+    }
+
+    setChecklist(prev => ({
+      ...prev,
+      [item.urlKey]: newPath,
+      volunteer_uploads: newPath
+        ? (prev.volunteer_uploads || []).filter(k => k !== item.key)
+        : (prev.volunteer_uploads || []),
+    }))
+    setChecklistFiles(prev => {
+      const next = { ...prev }
+      if (newPath) next[item.key] = { path: newPath, files: files.map(({ name, source }) => ({ name, source })) }
+      else delete next[item.key]
+      return next
+    })
+  }
+
+  // Adds the picked files to whatever is already on the item.
   async function handleFileUpload(applicantId, item, filesArr) {
     if (!filesArr.length || !item.bucket || !item.urlKey) return
 
     setUploadingKey(item.key)
 
     try {
-      const path = await uploadChecklistFiles(
-          applicantId,
-          item,
-          filesArr
-      )
+      const { path: oldPath, flagged } = await getFreshItemState(applicantId, item)
+      const existing = oldPath ? await readStoredFiles(supabase, item.bucket, oldPath, flagged, true) : []
 
-      // Targeted RPC: writes only this item's URL and removes its volunteer
-      // flag server-side. It never touches other URLs, flags, or approvals,
-      // so a concurrently-uploaded document isn't clobbered.
-      const { error: dbErr } = await supabase.rpc('admin_set_checklist_file', {
-        p_applicant_id: applicantId,
-        p_item_key: item.key,
-        p_url: path,
+      const taken = new Set(existing.map(f => f.name))
+      const added = filesArr.map(file => {
+        const name = uniqueFileName(file.name, taken)
+        taken.add(name)
+        return { name, data: file, source: 'admin' }
       })
 
-      if (dbErr) {
-        msg(dbErr.message, 'error')
-      } else {
-        setChecklist(prev => ({
-          ...prev,
-          [item.urlKey]: path,
-          volunteer_uploads: (prev.volunteer_uploads || []).filter(k => k !== item.key),
-        }))
-        msg(`${item.label} uploaded`)
-      }
-
+      await commitChecklistFiles(applicantId, item, oldPath, [...existing, ...added])
+      msg(added.length === 1 ? `${item.label}: ${added[0].name} uploaded` : `${item.label}: ${added.length} files uploaded`)
     } catch (e) {
-      msg(e.message, 'error')
+      msg(e.message || 'Upload failed', 'error')
     } finally {
       setUploadingKey(null)
+    }
+  }
+
+  // Removes one file from the item (permanently deletes it from storage).
+  async function handleRemoveFile(applicantId, item, fileName) {
+    if (!window.confirm(`Remove "${fileName}" from ${item.label}? This can't be undone.`)) return
+
+    setRemovingFile({ itemKey: item.key, name: fileName })
+
+    try {
+      const { path: oldPath, flagged } = await getFreshItemState(applicantId, item)
+      const existing  = oldPath ? await readStoredFiles(supabase, item.bucket, oldPath, flagged, true) : []
+      const remaining = existing.filter(f => f.name !== fileName)
+
+      if (remaining.length === existing.length) {
+        // Already gone (e.g. someone else changed it) — resync the list.
+        msg('That file is no longer on record', 'error')
+        await loadChecklist(applicantId)
+        return
+      }
+
+      await commitChecklistFiles(applicantId, item, oldPath, remaining)
+      msg(`${fileName} removed`)
+    } catch (e) {
+      msg(e.message || 'Remove failed', 'error')
+    } finally {
+      setRemovingFile(null)
+    }
+  }
+
+  // Opens a single file from an item's document in a new tab.
+  async function openChecklistFile(item, fileName) {
+    const path = checklist[item.urlKey]
+    if (!path) return
+
+    // Open the tab now, inside the click, so the popup isn't blocked while the
+    // file is being fetched.
+    const tab = window.open('', '_blank')
+    try {
+      const blob = await extractStoredFile(supabase, item.bucket, path, fileName)
+      const url  = URL.createObjectURL(new Blob([blob], { type: mimeForFileName(fileName) }))
+      if (tab) {
+        tab.location.href = url
+      } else {
+        const link = document.createElement('a')
+        link.href = url; link.download = fileName
+        document.body.appendChild(link); link.click(); document.body.removeChild(link)
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 300000)
+    } catch (e) {
+      tab?.close()
+      msg(`Could not open file: ${e.message}`, 'error')
     }
   }
 
@@ -2559,6 +2774,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSelected(applicant)
     setOnboardStep(1)
     setChecklist(EMPTY_CHECKLIST)
+    setChecklistFiles({})
     setNotesDraft(a.notes || '')
 
     // Staff-entered values (affiliData) take priority if they've already
@@ -2751,46 +2967,66 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   function FileRow({ item, applicantId }) {
     const ref = useRef(null)
-    const has       = !!(checklist[item.urlKey])
-    const uploading = uploadingKey === item.key
-    const volunteerUploaded = (checklist.volunteer_uploads || []).includes(item.key)
     if (!item.bucket || !item.urlKey) return null
+
+    const entry   = checklistFiles[item.key]
+    const files   = entry?.files || []
+    const rowBusy = uploadingKey === item.key || removingFile?.itemKey === item.key
+
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.4rem' }}>
         <input ref={ref}
                type="file"
                multiple
                accept=".pdf,.jpg,.jpeg,.png,.webp,image/*"
                style={{ display: 'none' }}
                onChange={e => {
-                 const files = Array.from(e.target.files || [])
-                 if (files.length > 0) {
-                   handleFileUpload(applicantId, item, files);
-                 }
+                 const picked = Array.from(e.target.files || [])
+                 if (picked.length > 0) handleFileUpload(applicantId, item, picked)
                  e.target.value = ''
-               }
-
-               }
+               }}
         />
-        {volunteerUploaded && (
-          <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44`, whiteSpace: 'nowrap' }}>volunteer upload</span>
-        )}
-        {has
-          ? <><button onClick={() => openFile(item.bucket, checklist[item.urlKey])} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>{volunteerUploaded ? 'Download' : 'View File'}</button><button onClick={() => ref.current?.click()} style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>Replace</button></>
-          : <button onClick={() => ref.current?.click()} disabled={uploading} style={{ padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: uploading ? 0.5 : 1 }}>{uploading ? 'Uploading...' : '+ Attach File'}</button>
-        }
-        {item.key === 'tb_test' && (
-          <>
-            <span style={{ fontSize: '0.67rem', color: 'var(--muted)', fontFamily: 'DM Sans, sans-serif' }}>Expiration Date:</span>
-            <input
-              type="date"
-              value={onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired' ? onboardForm.tb_exp : ''}
-              onChange={e => setOnboardForm(f => ({ ...f, tb_exp: e.target.value }))}
-              title="Expiration Date"
-              style={{ width: '140px', padding: '0.25rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }}
-            />
-          </>
-        )}
+
+        {entry?.loading && <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontStyle: 'italic' }}>Loading files…</span>}
+        {entry?.error && <span style={{ fontSize: '0.72rem', color: C.danger }}>Couldn't read the uploaded files: {entry.error}</span>}
+
+        {files.map(f => {
+          const removing = removingFile?.itemKey === item.key && removingFile?.name === f.name
+          return (
+            <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button type="button" onClick={() => openChecklistFile(item, f.name)} title="Open file"
+                style={{ background: 'none', border: 'none', padding: 0, color: C.blue, textDecoration: 'underline', cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {f.name}
+              </button>
+              {f.source === 'volunteer' && (
+                <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44`, whiteSpace: 'nowrap', flexShrink: 0 }}>volunteer upload</span>
+              )}
+              <button type="button" onClick={() => handleRemoveFile(applicantId, item, f.name)} disabled={rowBusy}
+                style={{ marginLeft: 'auto', flexShrink: 0, padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}>
+                {removing ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
+          )
+        })}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button type="button" onClick={() => ref.current?.click()} disabled={rowBusy}
+            style={{ padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}>
+            {uploadingKey === item.key ? 'Uploading...' : '+ Attach File'}
+          </button>
+          {item.key === 'tb_test' && (
+            <>
+              <span style={{ fontSize: '0.67rem', color: 'var(--muted)', fontFamily: 'DM Sans, sans-serif' }}>Expiration Date:</span>
+              <input
+                type="date"
+                value={onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired' ? onboardForm.tb_exp : ''}
+                onChange={e => setOnboardForm(f => ({ ...f, tb_exp: e.target.value }))}
+                title="Expiration Date"
+                style={{ width: '140px', padding: '0.25rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }}
+              />
+            </>
+          )}
+        </div>
       </div>
     )
   }
