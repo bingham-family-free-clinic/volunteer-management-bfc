@@ -455,3 +455,60 @@ alter table public.profiles
 
 comment on column public.profiles.trained_roles is
   'Roles this volunteer has been trained in. Empty array = no trained roles yet.';
+
+-- ─── 7. Admin access to the onboarding document buckets ─────────────────────
+-- The pipeline lists the files inside each stored zip with
+-- storage.download(), which needs SELECT on storage.objects. The only storage
+-- policies in this file are scoped to the volunteer who uploaded the file, so
+-- an admin session matched no policy at all and every item failed with
+-- "Couldn't read the uploaded files". Admins already upload/replace/remove
+-- these documents in the pipeline, so grant the matching read/write access on
+-- the five buckets it reads from.
+--
+-- Safe to re-run: the policy is only created when it is missing.
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'storage'
+       and tablename = 'objects'
+       and policyname = 'Admins can manage onboarding documents'
+  ) then
+    create policy "Admins can manage onboarding documents"
+      on storage.objects
+      for all
+      to authenticated
+      using (
+        bucket_id = any (array[
+          'onboarding-background-checks',
+          'onboarding-ids',
+          'onboarding-immunizations',
+          'onboarding-tb-tests',
+          'onboarding-licenses'
+        ])
+        and exists (
+          select 1
+            from public.profiles p
+           where p.id = auth.uid()
+             and p.role = 'admin'
+        )
+      )
+      with check (
+        bucket_id = any (array[
+          'onboarding-background-checks',
+          'onboarding-ids',
+          'onboarding-immunizations',
+          'onboarding-tb-tests',
+          'onboarding-licenses'
+        ])
+        and exists (
+          select 1
+            from public.profiles p
+           where p.id = auth.uid()
+             and p.role = 'admin'
+        )
+      );
+  end if;
+end
+$$;

@@ -161,11 +161,41 @@ function uniqueFileName(name, taken) {
   return `${base} (${n})${ext}`
 }
 
+// supabase-js reports a failed storage download as the literal string "{}"
+// (it JSON-stringifies the Response it never read), which is what showed up as
+// "Couldn't read the uploaded files: {}". Pull the real status/body out of the
+// wrapped response so the UI actually says why it failed.
+async function describeStorageError(e, fallback = 'unknown error') {
+  const res = e && e.originalError
+  if (res && typeof res.status === 'number') {
+    let body = ''
+    try { body = String(await res.text()).trim() } catch {}
+    const status = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`
+    return body ? `${status} — ${body.slice(0, 200)}` : status
+  }
+  return (e && e.message) || fallback
+}
+
+// The bytes stored at `path`. download() only works when the session can
+// SELECT the object, so when that's denied fall back to a signed URL plus a
+// fetch — the same access path handleOffload() already uses for these buckets.
+async function fetchStoredBlob(supabase, bucket, path) {
+  const { data, error } = await supabase.storage.from(bucket).download(path)
+  if (data) return data
+
+  const { data: signed, error: signError } = await supabase.storage.from(bucket).createSignedUrl(path, 300)
+  if (signed?.signedUrl) {
+    const res = await fetch(signed.signedUrl)
+    if (res.ok) return res.blob()
+    throw new Error(`Could not fetch the file (HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''})`)
+  }
+  throw new Error(await describeStorageError(error || signError))
+}
+
 // Lists the files stored at `path`: [{ name, source, data? }]. `data` (a Blob)
 // is only filled in when withData is true — needed when the zip is rebuilt.
 async function readStoredFiles(supabase, bucket, path, volunteerFlagged, withData = false) {
-  const { data: blob, error } = await supabase.storage.from(bucket).download(path)
-  if (error) throw error
+  const blob = await fetchStoredBlob(supabase, bucket, path)
   const fallback = volunteerFlagged ? 'volunteer' : 'admin'
 
   if (!/\.zip$/i.test(path)) {
@@ -187,8 +217,7 @@ async function readStoredFiles(supabase, bucket, path, volunteerFlagged, withDat
 
 // Pulls one file out of the stored document (for opening it in a tab).
 async function extractStoredFile(supabase, bucket, path, fileName) {
-  const { data: blob, error } = await supabase.storage.from(bucket).download(path)
-  if (error) throw error
+  const blob = await fetchStoredBlob(supabase, bucket, path)
   if (!/\.zip$/i.test(path)) return blob
   const zip   = await JSZip.loadAsync(blob)
   const entry = zip.file(fileName)
@@ -1658,11 +1687,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           prev[item.key]?.path === path
             ? { ...prev, [item.key]: { path, files: files.map(({ name, source }) => ({ name, source })) } }
             : prev))
-        .catch(e => {
+        .catch(async e => {
           console.error(`Could not read ${item.label} files:`, e)
+          const detail = await describeStorageError(e)
           setChecklistFiles(prev =>
             prev[item.key]?.path === path
-              ? { ...prev, [item.key]: { path, files: [], error: e.message || 'unknown error' } }
+              ? { ...prev, [item.key]: { path, files: [], error: detail } }
               : prev)
         })
     }
@@ -2310,7 +2340,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       await commitChecklistFiles(applicantId, item, oldPath, [...existing, ...added])
       msg(added.length === 1 ? `${item.label}: ${added[0].name} uploaded` : `${item.label}: ${added.length} files uploaded`)
     } catch (e) {
-      msg(e.message || 'Upload failed', 'error')
+      msg(await describeStorageError(e, 'Upload failed'), 'error')
     } finally {
       setUploadingKey(null)
     }
@@ -2337,7 +2367,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       await commitChecklistFiles(applicantId, item, oldPath, remaining)
       msg(`${fileName} removed`)
     } catch (e) {
-      msg(e.message || 'Remove failed', 'error')
+      msg(await describeStorageError(e, 'Remove failed'), 'error')
     } finally {
       setRemovingFile(null)
     }
@@ -2364,7 +2394,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       setTimeout(() => URL.revokeObjectURL(url), 300000)
     } catch (e) {
       tab?.close()
-      msg(`Could not open file: ${e.message}`, 'error')
+      msg(`Could not open file: ${await describeStorageError(e)}`, 'error')
     }
   }
 
@@ -2417,7 +2447,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       }
 
     } catch (e) {
-      msg(e.message, 'error')
+      msg(await describeStorageError(e, 'Upload failed'), 'error')
     } finally {
       setRecentUploadingKey(null)
     }
