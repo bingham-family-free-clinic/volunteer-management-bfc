@@ -12,7 +12,7 @@ import Pipeline from '../../components/Pipeline'
 import Waitlist from '../../components/Waitlist'
 import LunchScheduler from '../../components/LunchScheduler'
 import Providers from '../../components/Providers'
-import Live, { computeExpectedNotClockedIn } from '../../components/Live'
+import Live, { computeExpectedNotClockedIn, isActiveThisWeek } from '../../components/Live'
 import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
@@ -1593,6 +1593,120 @@ export default function AdminPage() {
 
   async function approveCover(req) {
     setApprovingCoverId(req.id)
+
+    if (req.callout_id === null) {
+
+        if (!req.shift_date || !req.shift_time || !req.role) {
+            showMessage('Broken opening request, missing data', 'error')
+            setApprovingCoverId(null)
+            return
+        }
+
+        const [year, month, day] = req.shift_date.split('-').map(Number)
+        const weekdayIndex = new Date(
+            Date.UTC(year, month - 1, day)
+        ).getUTCDay()
+
+        const dayName = [
+            'sunday',
+            'monday',
+            'tuesday',
+            'wednesday',
+            'thursday',
+            'friday',
+            'saturday',
+        ][weekdayIndex]
+
+        const roleCapacity = getRoleCapacity(dayName, req.shift_time, req.role)
+
+        // refresh to make sure we don't double schedule
+        const [
+            { data: slotSchedule, error: scheduleError },
+            { count: approvedCount, error: approvedError },
+        ] = await Promise.all([
+            supabase
+                .from('schedule')
+                .select('volunteer_id,start_date,end_date,week_pattern')
+                .eq('day_of_week', dayName)
+                .eq('shift_time', req.shift_time)
+                .eq('role', req.role),
+
+            supabase
+                .from('shift_cover_requests')
+                .select('id', { count: 'exact', head: true })
+                .is('callout_id', null)
+                .eq('shift_date', req.shift_date)
+                .eq('shift_time', req.shift_time)
+                .eq('role', req.role)
+                .eq('status', 'approved'),
+        ])
+
+        if (scheduleError || approvedError) {
+            showMessage(
+                scheduleError?.message || approvedError?.message,
+                'error'
+            )
+            setApprovingCoverId(null)
+            return
+        }
+
+        const scheduledCount = (slotSchedule || []).filter(row =>
+            (!row.start_date || row.start_date <= req.shift_date) &&
+            (!row.end_date || row.end_date >= req.shift_date) &&
+            isActiveThisWeek(req.shift_date, row.week_pattern)
+        ).length
+
+        const openingsBeforeApproval = Math.max(
+            (roleCapacity || 0) - scheduledCount - (approvedCount || 0),
+            0
+        )
+
+        if (openingsBeforeApproval <= 0) {
+            showMessage("The shift this request is asking for is full.", "warning")
+            setApprovingCoverId(null)
+            return
+        }
+
+        const now = new Date().toISOString()
+
+        const { error: approvalError } = await supabase
+            .from('shift_cover_requests')
+            .update({
+                status: 'approved',
+                reviewed_at: now,
+            })
+            .eq('id', req.id)
+            .eq('status', 'pending')
+
+        if (approvalError) {
+            showMessage(approvalError.message, 'error')
+        } else {
+            showMessage("Shift successfully approved!", 'success')
+            setCoverRequests(previous =>
+                previous.map(request =>
+                    request.id === req.id
+                        ? {
+                            ...request,
+                            status: 'approved',
+                            reviewed_at: now,
+                        }
+                        : request
+                )
+            )
+
+            await audit(
+                'approved_cover',
+                'clinic_opening',
+                req.id,
+                req.profiles?.full_name,
+                `${req.shift_date} ${req.shift_time} ${req.role}`
+            )
+        }
+
+        setApprovingCoverId(null)
+        return
+    }
+
     const callout = callouts.find(c => c.id === req.callout_id)
     if (!callout) { showMessage('Callout not found', 'error'); setApprovingCoverId(null); return }
 
@@ -1621,7 +1735,19 @@ export default function AdminPage() {
     const { error } = await supabase.from('shift_cover_requests').update({ status: 'denied', reviewed_at: new Date().toISOString() }).eq('id', id)
     if (error) { showMessage(error.message, 'error'); setApprovingCoverId(null); return }
     showMessage('Cover request denied.', 'success')
-    await audit('denied_cover', 'callout', req?.callout_id, req?.profiles?.full_name)
+
+    const isClinicRequest = req?.callout_id === null
+
+    await audit(
+      'denied_cover',
+      isClinicRequest ? 'clinic_opening' : 'callout',
+      isClinicRequest ? req?.id : req?.callout_id,
+      req?.profiles?.full_name,
+      isClinicRequest
+          ? `${req?.shift_date} ${req?.shift_time} ${req?.role}`
+          : null
+    )
+
     // Patch local state
     setCoverRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'denied', reviewed_at: new Date().toISOString() } : r))
     setApprovingCoverId(null)
@@ -3051,16 +3177,21 @@ export default function AdminPage() {
                                             </p>
                                         </div>
 
-                                        <span style={{
-                                            color: 'var(--accent)',
-                                            background: 'rgba(2,65,107,0.1)',
-                                            border: '1px solid rgba(2,65,107,0.3)',
-                                            borderRadius: '100px',
-                                            padding: '0.2rem 0.6rem',
-                                            fontSize: '0.75rem',
-                                            fontWeight: 600,
-                                        }}> Pending
-                                        </span>
+                                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                            <button
+                                                onClick={() => approveCover(request)}
+                                                disabled={approvingCoverId === request.id}
+                                            >
+                                                {approvingCoverId === request.id ? '...' : '✓ Assign'}
+                                            </button>
+
+                                            <button
+                                                onClick={() => denyCover(request.id)}
+                                                disabled={approvingCoverId === request.id}
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
                                     </div>
                                 )
                             })}
