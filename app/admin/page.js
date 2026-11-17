@@ -12,7 +12,7 @@ import Pipeline from '../../components/Pipeline'
 import Waitlist from '../../components/Waitlist'
 import LunchScheduler from '../../components/LunchScheduler'
 import Providers from '../../components/Providers'
-import Live, { computeExpectedNotClockedIn } from '../../components/Live'
+import Live, { computeExpectedNotClockedIn, isActiveThisWeek } from '../../components/Live'
 import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
@@ -1050,7 +1050,7 @@ export default function AdminPage() {
 
   async function loadCoverRequests() {
     // Fetch pending cover requests first, then reviewed ones to fill remaining slots
-    const cols = 'id,callout_id,volunteer_id,status,requested_at,reviewed_at,profiles(full_name)'
+    const cols = 'id,callout_id,volunteer_id,status,requested_at,shift_date,shift_time,role,reviewed_at,profiles(full_name)'
     const COVER_LIMIT = 100
     const [{ data: pendingData }, { data: reviewedData }] = await Promise.all([
       supabase.from('shift_cover_requests').select(cols)
@@ -1589,6 +1589,120 @@ export default function AdminPage() {
 
   async function approveCover(req) {
     setApprovingCoverId(req.id)
+
+    if (req.callout_id === null) {
+
+        if (!req.shift_date || !req.shift_time || !req.role) {
+            showMessage('Broken opening request, missing data', 'error')
+            setApprovingCoverId(null)
+            return
+        }
+
+        const [year, month, day] = req.shift_date.split('-').map(Number)
+        const weekdayIndex = new Date(
+            Date.UTC(year, month - 1, day)
+        ).getUTCDay()
+
+        const dayName = [
+            'sunday',
+            'monday',
+            'tuesday',
+            'wednesday',
+            'thursday',
+            'friday',
+            'saturday',
+        ][weekdayIndex]
+
+        const roleCapacity = getRoleCapacity(dayName, req.shift_time, req.role)
+
+        // refresh to make sure we don't double schedule
+        const [
+            { data: slotSchedule, error: scheduleError },
+            { count: approvedCount, error: approvedError },
+        ] = await Promise.all([
+            supabase
+                .from('schedule')
+                .select('volunteer_id,start_date,end_date,week_pattern')
+                .eq('day_of_week', dayName)
+                .eq('shift_time', req.shift_time)
+                .eq('role', req.role),
+
+            supabase
+                .from('shift_cover_requests')
+                .select('id', { count: 'exact', head: true })
+                .is('callout_id', null)
+                .eq('shift_date', req.shift_date)
+                .eq('shift_time', req.shift_time)
+                .eq('role', req.role)
+                .eq('status', 'approved'),
+        ])
+
+        if (scheduleError || approvedError) {
+            showMessage(
+                scheduleError?.message || approvedError?.message,
+                'error'
+            )
+            setApprovingCoverId(null)
+            return
+        }
+
+        const scheduledCount = (slotSchedule || []).filter(row =>
+            (!row.start_date || row.start_date <= req.shift_date) &&
+            (!row.end_date || row.end_date >= req.shift_date) &&
+            isActiveThisWeek(req.shift_date, row.week_pattern)
+        ).length
+
+        const openingsBeforeApproval = Math.max(
+            (roleCapacity || 0) - scheduledCount - (approvedCount || 0),
+            0
+        )
+
+        if (openingsBeforeApproval <= 0) {
+            showMessage("The shift this request is asking for is full.", "warning")
+            setApprovingCoverId(null)
+            return
+        }
+
+        const now = new Date().toISOString()
+
+        const { error: approvalError } = await supabase
+            .from('shift_cover_requests')
+            .update({
+                status: 'approved',
+                reviewed_at: now,
+            })
+            .eq('id', req.id)
+            .eq('status', 'pending')
+
+        if (approvalError) {
+            showMessage(approvalError.message, 'error')
+        } else {
+            showMessage("Shift successfully approved!", 'success')
+            setCoverRequests(previous =>
+                previous.map(request =>
+                    request.id === req.id
+                        ? {
+                            ...request,
+                            status: 'approved',
+                            reviewed_at: now,
+                        }
+                        : request
+                )
+            )
+
+            await audit(
+                'approved_cover',
+                'clinic_opening',
+                req.id,
+                req.profiles?.full_name,
+                `${req.shift_date} ${req.shift_time} ${req.role}`
+            )
+        }
+
+        setApprovingCoverId(null)
+        return
+    }
+
     const callout = callouts.find(c => c.id === req.callout_id)
     if (!callout) { showMessage('Callout not found', 'error'); setApprovingCoverId(null); return }
 
@@ -1617,7 +1731,19 @@ export default function AdminPage() {
     const { error } = await supabase.from('shift_cover_requests').update({ status: 'denied', reviewed_at: new Date().toISOString() }).eq('id', id)
     if (error) { showMessage(error.message, 'error'); setApprovingCoverId(null); return }
     showMessage('Cover request denied.', 'success')
-    await audit('denied_cover', 'callout', req?.callout_id, req?.profiles?.full_name)
+
+    const isClinicRequest = req?.callout_id === null
+
+    await audit(
+      'denied_cover',
+      isClinicRequest ? 'clinic_opening' : 'callout',
+      isClinicRequest ? req?.id : req?.callout_id,
+      req?.profiles?.full_name,
+      isClinicRequest
+          ? `${req?.shift_date} ${req?.shift_time} ${req?.role}`
+          : null
+    )
+
     // Patch local state
     setCoverRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'denied', reviewed_at: new Date().toISOString() } : r))
     setApprovingCoverId(null)
@@ -2908,12 +3034,26 @@ export default function AdminPage() {
         {tab === 'callouts' && (() => {
           const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
           const pendingCallouts  = callouts.filter(c => (!c.status || c.status === 'pending') && c.callout_date >= todayStr)
+            const pendingClinicRequests = coverRequests
+                .filter(request =>
+                    request.callout_id === null &&
+                    request.status === 'pending' &&
+                    request.shift_date &&
+                    request.shift_date >= todayStr
+                )
+                .sort((a, b) =>
+                    a.shift_date.localeCompare(b.shift_date) ||
+                    SHIFTS.indexOf(a.shift_time) - SHIFTS.indexOf(b.shift_time) ||
+                    (a.role || '').localeCompare(b.role || '')
+                )
+
           const approvedCallouts = [...callouts.filter(c => c.status === 'approved' && !c.covered_by && c.callout_date >= todayStr)]
             .sort((a, b) => {
               const aPending = coverRequests.filter(r => r.callout_id === a.id && r.status === 'pending').length
               const bPending = coverRequests.filter(r => r.callout_id === b.id && r.status === 'pending').length
               return bPending - aPending
             })
+
           const sortedPendingCallouts = [...pendingCallouts].sort((a, b) => {
             const aHasCover = coverRequests.some(r => r.callout_id === a.id && r.status === 'pending') ? 0 : 1
             const bHasCover = coverRequests.some(r => r.callout_id === b.id && r.status === 'pending') ? 0 : 1
@@ -2970,6 +3110,113 @@ export default function AdminPage() {
                       </div>
                 )}
               </div>
+                <div style={card}>
+                    <h2 style={{
+                        fontWeight: 600,
+                        marginBottom: '1.25rem',
+                    }}>
+                        Clinic Opening Requests
+                    </h2>
+
+                    {pendingClinicRequests.length === 0 ? (
+                        <p style={{
+                            color: 'var(--muted)',
+                            fontSize: '0.9rem',
+                        }}>
+                            No pending Clinic Opening requests.
+                        </p>
+                    ) : (
+                        <div style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.75rem',
+                        }}>
+                            {pendingClinicRequests.map(request => {
+                                const volunteerName =
+                                    request.profiles?.full_name ||
+                                    volunteers.find(v => v.id === request.volunteer_id)?.full_name ||
+                                    'Unknown volunteer'
+
+                                return (
+                                    <div
+                                        key={request.id}
+                                        style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            gap: '0.75rem',
+                                            flexWrap: 'wrap',
+                                            padding: '0.75rem 1rem',
+                                            background: 'rgba(2,65,107,0.05)',
+                                            border: '1px solid rgba(2,65,107,0.35)',
+                                            borderRadius: '8px',
+                                        }}
+                                    >
+                                        <div>
+                                            <p style={{
+                                                fontWeight: 600,
+                                                fontSize: '0.9rem',
+                                            }}>
+                                                {volunteerName}
+                                            </p>
+
+                                            <p style={{
+                                                color: 'var(--muted)',
+                                                fontSize: '0.8rem',
+                                                marginTop: '0.2rem',
+                                            }}>
+                                                {request.shift_date}
+                                                {' · '}
+                                                {request.shift_time}
+                                                {' · '}
+                                                {request.role}
+                                            </p>
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                            <button
+                                                onClick={() => approveCover(request)}
+                                                disabled={approvingCoverId === request.id}
+                                                style={{
+                                                    padding: '0.3rem 0.8rem',
+                                                    background: 'rgba(2,65,107,0.12)',
+                                                    color: 'var(--accent)',
+                                                    border: '1px solid rgba(2,65,107,0.35)',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 600,
+                                                    fontFamily: 'DM Sans, sans-serif',
+                                                    cursor: approvingCoverId === request.id ? 'not-allowed' : 'pointer',
+                                                }}
+                                            >
+                                                {approvingCoverId === request.id ? 'Assigning…' : '✓ Assign'}
+                                            </button>
+
+                                            <button
+                                                onClick={() => denyCover(request.id)}
+                                                disabled={approvingCoverId === request.id}
+                                                style={{
+                                                    padding: '0.3rem 0.8rem',
+                                                    background: 'rgba(239,68,68,0.08)',
+                                                    color: '#ef4444',
+                                                    border: '1px solid rgba(239,68,68,0.25)',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 600,
+                                                    fontFamily: 'DM Sans, sans-serif',
+                                                    cursor: approvingCoverId === request.id ? 'not-allowed' : 'pointer',
+                                                }}
+                                            >
+                                                ✕ Deny
+                                            </button>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </div>
+
               {approvedCallouts.length > 0 && (
                 <div style={card}>
                   <button onClick={() => setOpenShiftsOpen(o => !o)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', padding: 0, marginBottom: openShiftsOpen ? '1.25rem' : 0 }}>
