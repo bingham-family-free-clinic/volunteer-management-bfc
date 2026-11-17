@@ -8,7 +8,9 @@
 -- 2. Adds an RPC that lets a volunteer write only the file path for their own
 --    onboarding row (clearing that item's approval tick so an admin can review
 --    the new file), plus an admin RPC that writes only one item's path without
---    clobbering other columns.
+--    clobbering other columns. The volunteer RPC allows the write even when
+--    the item isn't required for their position or is already approved — the
+--    approval tick is cleared instead so the new files get re-reviewed.
 -- 3. Adds SELECT access so volunteers can read their own application row and
 --    checklist state.
 -- 4. Adds storage policies for the five volunteer-upload buckets, scoped to
@@ -34,7 +36,6 @@ as $$
 declare
   v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
   v_app   record;
-  v_required text[];
 begin
   if v_email = '' then
     raise exception 'Not authenticated';
@@ -54,7 +55,7 @@ begin
     raise exception 'Unknown document type';
   end if;
 
-  select id, stage, onboard_affiliation, onboard_default_role
+  select id, stage
     into v_app
     from public.volunteer_applications
    where id = p_applicant_id
@@ -68,20 +69,10 @@ begin
     raise exception 'Document uploads are only available during onboarding';
   end if;
 
-  if v_app.onboard_affiliation = 'missionary' then
-    v_required := array['id_check'];
-  elsif v_app.onboard_default_role in ('Information Systems', 'Communications') then
-    v_required := array['background_check', 'id_check'];
-  else
-    v_required := array['background_check', 'id_check', 'immunization', 'tb_test'];
-  end if;
-
-  if v_app.onboard_affiliation is not null
-     and v_app.onboard_default_role is not null
-     and p_item_key <> 'licenses_certifications'
-     and not (p_item_key = any (v_required)) then
-    raise exception 'This document is not required for your position';
-  end if;
+  -- Deliberately no "required for your position" or "already approved" checks:
+  -- a volunteer may add/remove files on any item they can see. Writing this
+  -- item's URL clears its approval tick (below), so an admin always reviews
+  -- the current files.
 
   insert into public.onboarding_checklists (
     applicant_id,
@@ -97,30 +88,6 @@ begin
   )
   values (p_applicant_id, false, false, false, false, false, false, false, false, '{}')
   on conflict (applicant_id) do nothing;
-
-  -- Only block when the admin approved an actual file. A checked box with
-  -- no file is allowed to be filled in by the volunteer below.
-  if exists (
-    select 1
-      from public.onboarding_checklists c
-     where c.applicant_id = p_applicant_id
-       and case p_item_key
-             when 'background_check'        then c.background_check
-             when 'id_check'                then c.id_check
-             when 'immunization'            then c.immunization
-             when 'tb_test'                 then c.tb_test
-             when 'licenses_certifications' then c.licenses_certifications
-           end
-       and case p_item_key
-             when 'background_check'        then c.background_check_url
-             when 'id_check'                then c.id_check_url
-             when 'immunization'            then c.immunization_url
-             when 'tb_test'                 then c.tb_test_url
-             when 'licenses_certifications' then c.licenses_url
-           end is not null
-  ) then
-    raise exception 'This document has already been approved';
-  end if;
 
   update public.onboarding_checklists
      set background_check = case when p_item_key = 'background_check' then false else background_check end,

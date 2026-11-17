@@ -59,6 +59,107 @@ const S = {
   },
 }
 
+// ── Onboarding checklist document storage ────────────────────────────────────
+// Each checklist item stores ONE path (item.urlKey) pointing at a .zip that
+// acts as that item's "folder" of files — the same scheme the admin pipeline
+// uses. Who uploaded each file is stamped in the zip entry's comment
+// ('admin' | 'volunteer'); entries with no stamp (older uploads) fall back to
+// the item's volunteer_uploads flag. A stored file that isn't a zip is
+// treated as a single file.
+const FILE_MIME_TYPES = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }
+
+function mimeForFileName(name) {
+  const ext = String(name).split('.').pop().toLowerCase()
+  return FILE_MIME_TYPES[ext] || 'application/octet-stream'
+}
+
+// "scan.pdf" -> "scan (2).pdf" when a file with that name is already on the item.
+function uniqueFileName(name, taken) {
+  if (!taken.has(name)) return name
+  const dot  = name.lastIndexOf('.')
+  const base = dot > 0 ? name.slice(0, dot) : name
+  const ext  = dot > 0 ? name.slice(dot) : ''
+  let n = 2
+  while (taken.has(`${base} (${n})${ext}`)) n++
+  return `${base} (${n})${ext}`
+}
+
+// supabase-js can report a failed storage download as the literal string "{}"
+// (it JSON-stringifies the Response it never read). Pull the real status/body
+// out of the wrapped response so the UI can say why it failed.
+async function describeStorageError(e, fallback = 'unknown error') {
+  const res = e && e.originalError
+  if (res && typeof res.status === 'number') {
+    let body = ''
+    try { body = String(await res.text()).trim() } catch {}
+    const status = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`
+    return body ? `${status} — ${body.slice(0, 200)}` : status
+  }
+  return (e && e.message) || fallback
+}
+
+// The bytes stored at `path`. download() only works when the session can
+// SELECT the object, so when that's denied fall back to a signed URL plus a
+// fetch.
+async function fetchStoredBlob(supabase, bucket, path) {
+  const { data, error } = await supabase.storage.from(bucket).download(path)
+  if (data) return data
+
+  const { data: signed, error: signError } = await supabase.storage.from(bucket).createSignedUrl(path, 300)
+  if (signed?.signedUrl) {
+    const res = await fetch(signed.signedUrl)
+    if (res.ok) return res.blob()
+    throw new Error(`Could not fetch the file (HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''})`)
+  }
+  throw new Error(await describeStorageError(error || signError))
+}
+
+// Lists the files stored at `path`: [{ name, source, data? }]. `data` (a Blob)
+// is only filled in when withData is true — needed when the zip is rebuilt.
+async function readStoredFiles(supabase, bucket, path, volunteerFlagged, withData = false) {
+  const blob = await fetchStoredBlob(supabase, bucket, path)
+  const fallback = volunteerFlagged ? 'volunteer' : 'admin'
+
+  if (!/\.zip$/i.test(path)) {
+    return [{ name: path.split('/').pop() || 'file', source: fallback, data: withData ? blob : undefined }]
+  }
+
+  const zip   = await JSZip.loadAsync(blob)
+  const files = []
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue
+    files.push({
+      name:   entry.name,
+      source: entry.comment === 'admin' || entry.comment === 'volunteer' ? entry.comment : fallback,
+      data:   withData ? await entry.async('blob') : undefined,
+    })
+  }
+  return files
+}
+
+// Pulls one file out of the stored document (for opening it in a tab).
+async function extractStoredFile(supabase, bucket, path, fileName) {
+  const blob = await fetchStoredBlob(supabase, bucket, path)
+  if (!/\.zip$/i.test(path)) return blob
+  const zip   = await JSZip.loadAsync(blob)
+  const entry = zip.file(fileName)
+  if (!entry) throw new Error('File not found in archive')
+  return entry.async('blob')
+}
+
+// Zips `files` ([{ name, data, source }]) and uploads them to a new path.
+async function writeChecklistZip(supabase, bucket, applicantId, itemKey, files) {
+  const zip = new JSZip()
+  for (const f of files) zip.file(f.name, f.data, { comment: f.source })
+  const zipBlob = await zip.generateAsync({ type: 'blob' })
+  const path    = `${applicantId}/${itemKey}-${Date.now()}.zip`
+  const { error } = await supabase.storage
+    .from(bucket)
+    .upload(path, zipBlob, { contentType: 'application/zip', upsert: true })
+  if (error) throw error
+  return path
+}
+
 // ── Credential helpers (pure, no state) ─────────────────────────────────────
 function credentialStatus(dateStr) {
   if (!dateStr) return 'missing'
@@ -586,6 +687,8 @@ function VolunteerPageInner() {
   const [onboardingApp, setOnboardingApp] = useState(null)
   const [onboardingChecklist, setOnboardingChecklist] = useState(null)
   const [onboardingUploadingKey, setOnboardingUploadingKey] = useState(null)
+  const [onboardingFiles, setOnboardingFiles] = useState({})                  // { [itemKey]: { path, files: [{ name, source }], loading?, error? } }
+  const [onboardingRemovingFile, setOnboardingRemovingFile] = useState(null) // { itemKey, name } | null
   const onboardingFileRefs = useRef({})
 
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
@@ -1158,6 +1261,91 @@ function VolunteerPageInner() {
     setClockLoading(false)
   }
 
+  // Lists the files inside each onboarding document so each row can show one
+  // line per file (same as the admin pipeline). Cached per item and re-read
+  // only when the stored path changes (every upload/remove writes a new path).
+  const onboardingPathsKey = VOLUNTEER_UPLOAD_DOCS.map(i => onboardingChecklist?.[i.urlKey] || '').join('|')
+  useEffect(() => {
+    if (!onboardingApp?.id) return
+    for (const item of VOLUNTEER_UPLOAD_DOCS) {
+      const path   = onboardingChecklist?.[item.urlKey] || null
+      const cached = onboardingFiles[item.key]
+      if (!path) {
+        if (cached) setOnboardingFiles(prev => { const next = { ...prev }; delete next[item.key]; return next })
+        continue
+      }
+      if (cached?.path === path) continue
+
+      const flagged = (onboardingChecklist?.volunteer_uploads || []).includes(item.key)
+      setOnboardingFiles(prev => ({ ...prev, [item.key]: { path, files: [], loading: true } }))
+      readStoredFiles(supabase, item.bucket, path, flagged, false)
+        .then(files => setOnboardingFiles(prev =>
+          prev[item.key]?.path === path
+            ? { ...prev, [item.key]: { path, files: files.map(({ name, source }) => ({ name, source })) } }
+            : prev))
+        .catch(async e => {
+          console.error(`Could not read ${item.label} files:`, e)
+          const detail = await describeStorageError(e)
+          setOnboardingFiles(prev =>
+            prev[item.key]?.path === path
+              ? { ...prev, [item.key]: { path, files: [], error: detail } }
+              : prev)
+        })
+    }
+  }, [onboardingApp?.id, onboardingPathsKey])
+
+  // Re-reads the item's current path/flag right before changing it, so a file
+  // an admin uploaded while this page was open isn't lost.
+  async function getFreshOnboardingState(item) {
+    const { data, error } = await supabase.from('onboarding_checklists')
+      .select(`${item.urlKey}, volunteer_uploads`)
+      .eq('applicant_id', onboardingApp.id)
+      .maybeSingle()
+    if (error) throw error
+    return {
+      path:    data?.[item.urlKey] ?? null,
+      flagged: (data?.volunteer_uploads || []).includes(item.key),
+    }
+  }
+
+  // Writes the item's full file list as a new zip, points the checklist at it
+  // through the volunteer RPC (which also clears that item's approval), then
+  // drops the zip it replaces. An empty list stores an empty zip — the RPC
+  // can't clear a path outright, and an empty "folder" reads as no files.
+  async function commitOnboardingFiles(item, oldPath, files) {
+    const newPath = await writeChecklistZip(supabase, item.bucket, onboardingApp.id, item.key, files)
+
+    const { error } = await supabase.rpc('volunteer_set_checklist_file', {
+      p_applicant_id: onboardingApp.id,
+      p_item_key: item.key,
+      p_url: newPath,
+    })
+    if (error) {
+      await supabase.storage.from(item.bucket).remove([newPath])   // don't leave the new zip orphaned
+      throw error
+    }
+
+    // The old zip is superseded; delete it so replaced/removed files don't
+    // pile up. Best-effort — a permissions failure only warns.
+    if (oldPath && oldPath !== newPath) {
+      const { error: delErr } = await supabase.storage.from(item.bucket).remove([oldPath])
+      if (delErr) console.warn(`Could not delete old ${item.label} file:`, delErr)
+    }
+
+    setOnboardingChecklist(prev => ({
+      ...(prev || {}),
+      [item.key]: false,
+      [item.urlKey]: newPath,
+      volunteer_uploads: Array.from(new Set([...(prev?.volunteer_uploads || []), item.key])),
+    }))
+    setOnboardingFiles(prev => ({
+      ...prev,
+      [item.key]: { path: newPath, files: files.map(({ name, source }) => ({ name, source })) },
+    }))
+  }
+
+  // Adds the picked files to whatever is already on the item — the same merge
+  // behaviour as the admin pipeline's "+ Attach File".
   async function handleOnboardingDocUpload(item, filesArr) {
     if (!onboardingApp?.id || !filesArr.length) return
 
@@ -1169,34 +1357,98 @@ function VolunteerPageInner() {
 
     setOnboardingUploadingKey(item.key)
     try {
-      const zip = new JSZip()
-      for (const file of filesArr) zip.file(file.name, file)
-      const zipBlob = await zip.generateAsync({ type: 'blob' })
+      const { path: oldPath, flagged } = await getFreshOnboardingState(item)
+      const existing = oldPath ? await readStoredFiles(supabase, item.bucket, oldPath, flagged, true) : []
 
-      const path = `${onboardingApp.id}/${item.key}-${Date.now()}.zip`
-      const { error: uploadErr } = await supabase.storage
-        .from(item.bucket)
-        .upload(path, zipBlob, { contentType: 'application/zip', upsert: true })
-      if (uploadErr) throw uploadErr
-
-      const { error: rpcErr } = await supabase.rpc('volunteer_set_checklist_file', {
-        p_applicant_id: onboardingApp.id,
-        p_item_key: item.key,
-        p_url: path,
+      const taken = new Set(existing.map(f => f.name))
+      const added = filesArr.map(file => {
+        const name = uniqueFileName(file.name, taken)
+        taken.add(name)
+        return { name, data: file, source: 'volunteer' }
       })
-      if (rpcErr) throw rpcErr
 
-      setOnboardingChecklist(prev => ({
-        ...(prev || {}),
-        [item.key]: false,
-        [item.urlKey]: path,
-        volunteer_uploads: Array.from(new Set([...(prev?.volunteer_uploads || []), item.key])),
-      }))
-      showToast(`${item.label} uploaded`, 'success')
+      await commitOnboardingFiles(item, oldPath, [...existing, ...added])
+      showToast(added.length === 1 ? `${item.label}: ${added[0].name} uploaded` : `${item.label}: ${added.length} files uploaded`, 'success')
     } catch (e) {
-      showToast(e.message || 'Upload failed', 'error')
+      showToast(await describeStorageError(e, 'Upload failed'), 'error')
     } finally {
       setOnboardingUploadingKey(null)
+    }
+  }
+
+  // Removes one file from the item (rebuilds the zip without it).
+  async function handleRemoveOnboardingFile(item, fileName) {
+    const ok = await confirmAction({
+      label: 'Remove this file?',
+      confirmText: 'Yes',
+      cancelText: 'No',
+      danger: true,
+    })
+    if (!ok) return
+
+    setOnboardingRemovingFile({ itemKey: item.key, name: fileName })
+    try {
+      const { path: oldPath, flagged } = await getFreshOnboardingState(item)
+      const existing  = oldPath ? await readStoredFiles(supabase, item.bucket, oldPath, flagged, true) : []
+      const remaining = existing.filter(f => f.name !== fileName)
+
+      if (remaining.length === existing.length) {
+        // Already gone (e.g. an admin changed it) — resync the list.
+        showToast('That file is no longer on record', 'error')
+        if (oldPath) {
+          const fresh = await readStoredFiles(supabase, item.bucket, oldPath, flagged, false)
+          setOnboardingFiles(prev => ({ ...prev, [item.key]: { path: oldPath, files: fresh.map(({ name, source }) => ({ name, source })) } }))
+        }
+        return
+      }
+
+      await commitOnboardingFiles(item, oldPath, remaining)
+      showToast(`${fileName} removed`, 'success')
+    } catch (e) {
+      showToast(await describeStorageError(e, 'Remove failed'), 'error')
+    } finally {
+      setOnboardingRemovingFile(null)
+    }
+  }
+
+  // The row points at an object that can't be read (deleted/offloaded), so
+  // there's nothing to list or merge into. Replace it with an empty document
+  // so the item isn't stuck and a new file can be attached.
+  async function handleClearBrokenOnboardingFile(item) {
+    setOnboardingRemovingFile({ itemKey: item.key, name: null })
+    try {
+      const { path: oldPath } = await getFreshOnboardingState(item)
+      await commitOnboardingFiles(item, oldPath, [])
+      showToast(`${item.label} cleared — you can upload a new file`, 'success')
+    } catch (e) {
+      showToast(await describeStorageError(e, 'Could not clear the file'), 'error')
+    } finally {
+      setOnboardingRemovingFile(null)
+    }
+  }
+
+  // Opens a single file from an item's document in a new tab.
+  async function openOnboardingFile(item, fileName) {
+    const path = onboardingFiles[item.key]?.path || onboardingChecklist?.[item.urlKey]
+    if (!path) return
+
+    // Open the tab now, inside the click, so the popup isn't blocked while the
+    // file is being fetched.
+    const tab = window.open('', '_blank')
+    try {
+      const blob = await extractStoredFile(supabase, item.bucket, path, fileName)
+      const url  = URL.createObjectURL(new Blob([blob], { type: mimeForFileName(fileName) }))
+      if (tab) {
+        tab.location.href = url
+      } else {
+        const link = document.createElement('a')
+        link.href = url; link.download = fileName
+        document.body.appendChild(link); link.click(); document.body.removeChild(link)
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 300000)
+    } catch (e) {
+      tab?.close()
+      showToast(`Could not open file: ${await describeStorageError(e)}`, 'error')
     }
   }
 
@@ -1676,24 +1928,33 @@ function VolunteerPageInner() {
                     // An admin checking a document overrides the position-based
                     // "not needed" state �?" they want that file.
                     const notNeeded      = !approved && isDocNotNeeded(item.key, onboardingAffiliation, onboardingRole)
-                    const hasFile        = !!onboardingChecklist?.[item.urlKey]
+                    const storedPath     = onboardingChecklist?.[item.urlKey] || null
+                    const fileEntry      = onboardingFiles[item.key]
+                    const files          = fileEntry?.files || []
                     const uploading      = onboardingUploadingKey === item.key
-                    // An approval only locks the card once a file actually
-                    // exists. Admin can tick the box first; uploading then
-                    // clears that tick so they can review the new file.
+                    const removing       = onboardingRemovingFile?.itemKey === item.key
+                    const rowBusy        = uploading || removing
+                    // A stored path with no readable files is an empty
+                    // document (removing the last file stores an empty zip) —
+                    // treat it as "no file yet".
+                    const hasFile        = !!storedPath && (!fileEntry || files.length > 0 || fileEntry.loading || !!fileEntry.error)
+                    // The "admin approved" badge — status only. The volunteer
+                    // can still add/remove files; doing so clears the approval
+                    // so an admin re-reviews (enforced server-side by the RPC).
                     const locked         = approved && hasFile
                     const approvedNoFile = approved && !hasFile
-                    const disabled       = locked || notNeeded || uploading
+                    // Only an in-flight upload/remove blocks the controls —
+                    // "not needed" and already-approved items stay usable.
+                    const disabled       = rowBusy
+                    // "Not needed" items keep their grayed-out look but remain
+                    // interactive: the volunteer may still upload documents.
+                    const dimmed         = notNeeded || rowBusy
+                    // The TB expiration date keeps its stricter rules.
+                    const dateDisabled   = locked || notNeeded || rowBusy
                     const blueCard       = hasFile || approved
-                    const storedFileName = hasFile
-                      ? (onboardingChecklist?.[item.urlKey] || '').split('/').pop()
-                      : null
-                    const displayFileName = storedFileName
-                      ? storedFileName.replace(/-\d+(\.\w+)$/, '$1')
-                      : null
                     const buttonLabel    = uploading
                       ? 'Uploading...'
-                      : locked ? 'Approved' : hasFile ? 'Change File' : 'Attach File'
+                      : hasFile ? 'Change File' : 'Attach File'
                     const tbDateValue    = tbExpDraft && tbExpDraft !== 'N/A' && tbExpDraft !== 'expired'
                       ? tbExpDraft
                       : ''
@@ -1738,7 +1999,7 @@ function VolunteerPageInner() {
                           )}
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.55rem', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.55rem' }}>
                           <input
                             ref={el => { onboardingFileRefs.current[item.key] = el }}
                             type="file"
@@ -1746,19 +2007,59 @@ function VolunteerPageInner() {
                             accept=".pdf,.jpg,.jpeg,.png,.webp,image/*"
                             style={{ display: 'none' }}
                             onChange={e => {
-                              const files = Array.from(e.target.files || [])
-                              if (files.length) handleOnboardingDocUpload(item, files)
+                              const picked = Array.from(e.target.files || [])
+                              if (picked.length) handleOnboardingDocUpload(item, picked)
                               e.target.value = ''
                             }}
                           />
-                          {displayFileName && (
-                            <span
-                              title={storedFileName}
-                              style={{ fontSize: '0.72rem', fontWeight: 600, color: '#0369a1', maxWidth: '190px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                            >
-                              {displayFileName}
-                            </span>
+
+                          {fileEntry?.loading && (
+                            <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontStyle: 'italic' }}>Loading files…</span>
                           )}
+                          {fileEntry?.error && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Couldn't read the uploaded files: {fileEntry.error}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleClearBrokenOnboardingFile(item)}
+                                disabled={rowBusy}
+                                title="Clear the reference so you can upload a new file"
+                                style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}
+                              >
+                                {removing ? 'Clearing...' : 'Remove'}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* One row per file: the file name in blue + Remove.
+                              The admin pipeline's "volunteer upload" badge is
+                              intentionally not shown here. */}
+                          {files.map(f => {
+                            const fileRemoving = removing && onboardingRemovingFile?.name === f.name
+                            return (
+                              <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => openOnboardingFile(item, f.name)}
+                                  title="Open file"
+                                  style={{ background: 'none', border: 'none', padding: 0, color: '#0369a1', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                >
+                                  {f.name}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveOnboardingFile(item, f.name)}
+                                  disabled={disabled}
+                                  style={{ flexShrink: 0, padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: dimmed ? 0.5 : 1 }}
+                                >
+                                  {fileRemoving ? 'Removing...' : 'Remove'}
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
                           <button
                             onClick={() => onboardingFileRefs.current[item.key]?.click()}
                             disabled={disabled}
@@ -1772,7 +2073,7 @@ function VolunteerPageInner() {
                               background: 'var(--surface)',
                               color: 'var(--muted)',
                               border: '1px solid var(--border)',
-                              opacity: locked || notNeeded || uploading ? 0.6 : 1,
+                              opacity: dimmed ? 0.6 : 1,
                             }}
                           >
                             {buttonLabel}
@@ -1791,7 +2092,7 @@ function VolunteerPageInner() {
                                   onChange={e => setTbExpDraft(e.target.value)}
                                   onBlur={e => handleSaveTbExp(e.target.value)}
                                   onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                  disabled={disabled}
+                                  disabled={dateDisabled}
                                   title="Expiration Date"
                                   style={{
                                     width: '140px',
@@ -1804,8 +2105,8 @@ function VolunteerPageInner() {
                                     border: '1px solid var(--border)',
                                     outline: 'none',
                                     boxSizing: 'border-box',
-                                    cursor: disabled ? 'not-allowed' : 'text',
-                                    opacity: disabled ? 0.6 : 1,
+                                    cursor: dateDisabled ? 'not-allowed' : 'text',
+                                    opacity: dateDisabled ? 0.6 : 1,
                                   }}
                                 />
                               )}
