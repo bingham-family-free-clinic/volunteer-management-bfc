@@ -1057,7 +1057,7 @@ export default function AdminPage() {
 
   async function loadCoverRequests() {
     // Fetch pending cover requests first, then reviewed ones to fill remaining slots
-    const cols = 'id,callout_id,volunteer_id,status,requested_at,reviewed_at,profiles(full_name)'
+    const cols = 'id,callout_id,volunteer_id,status,requested_at,shift_date,shift_time,role,reviewed_at,profiles(full_name)'
     const COVER_LIMIT = 100
     const [{ data: pendingData }, { data: reviewedData }] = await Promise.all([
       supabase.from('shift_cover_requests').select(cols)
@@ -2912,12 +2912,26 @@ export default function AdminPage() {
         {tab === 'callouts' && (() => {
           const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
           const pendingCallouts  = callouts.filter(c => (!c.status || c.status === 'pending') && c.callout_date >= todayStr)
+            const pendingClinicRequests = coverRequests
+                .filter(request =>
+                    request.callout_id === null &&
+                    request.status === 'pending' &&
+                    request.shift_date &&
+                    request.shift_date >= todayStr
+                )
+                .sort((a, b) =>
+                    a.shift_date.localeCompare(b.shift_date) ||
+                    SHIFTS.indexOf(a.shift_time) - SHIFTS.indexOf(b.shift_time) ||
+                    (a.role || '').localeCompare(b.role || '')
+                )
+
           const approvedCallouts = [...callouts.filter(c => c.status === 'approved' && !c.covered_by && c.callout_date >= todayStr)]
             .sort((a, b) => {
               const aPending = coverRequests.filter(r => r.callout_id === a.id && r.status === 'pending').length
               const bPending = coverRequests.filter(r => r.callout_id === b.id && r.status === 'pending').length
               return bPending - aPending
             })
+
           const sortedPendingCallouts = [...pendingCallouts].sort((a, b) => {
             const aHasCover = coverRequests.some(r => r.callout_id === a.id && r.status === 'pending') ? 0 : 1
             const bHasCover = coverRequests.some(r => r.callout_id === b.id && r.status === 'pending') ? 0 : 1
@@ -2974,6 +2988,86 @@ export default function AdminPage() {
                       </div>
                 )}
               </div>
+                <div style={card}>
+                    <h2 style={{
+                        fontWeight: 600,
+                        marginBottom: '1.25rem',
+                    }}>
+                        Clinic Opening Requests
+                    </h2>
+
+                    {pendingClinicRequests.length === 0 ? (
+                        <p style={{
+                            color: 'var(--muted)',
+                            fontSize: '0.9rem',
+                        }}>
+                            No pending Clinic Opening requests.
+                        </p>
+                    ) : (
+                        <div style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.75rem',
+                        }}>
+                            {pendingClinicRequests.map(request => {
+                                const volunteerName =
+                                    request.profiles?.full_name ||
+                                    volunteers.find(v => v.id === request.volunteer_id)?.full_name ||
+                                    'Unknown volunteer'
+
+                                return (
+                                    <div
+                                        key={request.id}
+                                        style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            gap: '0.75rem',
+                                            flexWrap: 'wrap',
+                                            padding: '0.75rem 1rem',
+                                            background: 'rgba(2,65,107,0.05)',
+                                            border: '1px solid rgba(2,65,107,0.35)',
+                                            borderRadius: '8px',
+                                        }}
+                                    >
+                                        <div>
+                                            <p style={{
+                                                fontWeight: 600,
+                                                fontSize: '0.9rem',
+                                            }}>
+                                                {volunteerName}
+                                            </p>
+
+                                            <p style={{
+                                                color: 'var(--muted)',
+                                                fontSize: '0.8rem',
+                                                marginTop: '0.2rem',
+                                            }}>
+                                                {request.shift_date}
+                                                {' · '}
+                                                {request.shift_time}
+                                                {' · '}
+                                                {request.role}
+                                            </p>
+                                        </div>
+
+                                        <span style={{
+                                            color: 'var(--accent)',
+                                            background: 'rgba(2,65,107,0.1)',
+                                            border: '1px solid rgba(2,65,107,0.3)',
+                                            borderRadius: '100px',
+                                            padding: '0.2rem 0.6rem',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 600,
+                                        }}> Pending
+                                        </span>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </div>
+
               {approvedCallouts.length > 0 && (
                 <div style={card}>
                   <button onClick={() => setOpenShiftsOpen(o => !o)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', padding: 0, marginBottom: openShiftsOpen ? '1.25rem' : 0 }}>
