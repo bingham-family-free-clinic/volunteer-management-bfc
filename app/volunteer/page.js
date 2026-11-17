@@ -970,11 +970,25 @@ function VolunteerPageInner() {
         .neq('status', 'denied')
         .gte('callout_date', today)
         .order('callout_date', { ascending: true }),
-      supabase
-        .from('shift_cover_requests')
-        .select('id, callout_id, status, callout:callouts!shift_cover_requests_callout_id_fkey(callout_date, day_of_week, shift_time, role, volunteer_id)')
-        .eq('volunteer_id', userId)
-        .eq('status', 'approved'),
+        supabase
+            .from('shift_cover_requests')
+            .select(`
+                    id,
+                    callout_id,
+                    status,
+                    shift_date,
+                    shift_time,
+                    role,
+                    callout:callouts!shift_cover_requests_callout_id_fkey(
+                      callout_date,
+                      day_of_week,
+                      shift_time,
+                      role,
+                      volunteer_id
+                    )
+                  `)
+            .eq('volunteer_id', userId)
+            .eq('status', 'approved'),
     ])
     
     setSchedule(sched || [])
@@ -989,14 +1003,30 @@ function VolunteerPageInner() {
         .in('id', volunteerIds)
       ;(profiles || []).forEach(p => { volunteerNames[p.id] = p.full_name })
     }
-    
-    const coversWithNames = (myCoverReqs || []).map(r => ({
-      ...r,
-      callout: r.callout ? {
-        ...r.callout,
-        volunteer: { full_name: volunteerNames[r.callout.volunteer_id] || null }
-      } : null
-    }))
+
+      const coversWithNames = (myCoverReqs || []).map(request => {
+          const shift = request.callout === null
+              ? {
+                  ...request.callout,
+                  source: 'callout',
+                  volunteer: {
+                      full_name:
+                          volunteerNames[request.callout.volunteer_id] || null,
+                  },
+              }
+              : {
+                  source: 'clinic_opening',
+                  callout_date: request.shift_date,
+                  shift_time: request.shift_time,
+                  role: request.role,
+                  volunteer: null,
+              }
+
+          return {
+              ...request,
+              callout: shift,
+          }
+      })
     
     setApprovedCovers(
       coversWithNames.filter(r => r.callout?.callout_date >= today)
