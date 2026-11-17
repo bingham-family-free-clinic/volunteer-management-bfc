@@ -46,13 +46,13 @@ const PROVIDER_GROUP_CORE_KEYS = ['providers', 'hours', 'create']
 const ADMIN_ACCESS_DEFAULT_ROLES = [
   'Lab Director', 'Director', 'Information Systems', 'Provider',
   'Administrative Assistant', 'Executive Assistant',
-  'OSSM', 'Office Manager', 'Human Resources', 'Credentialing',
+  'OSSM', 'Human Resources', 'Credentialing',
 ]
 
 // These are the roles that the Director has to assign. Standard admin don't get to touch this.
 const ADMIN_ROLES = [
   'Director', 'Executive Assistant', 'Administrative Assistant',
-  'Office Manager', 'Human Resources', 'Credentialing'
+  'Human Resources', 'Credentialing'
 ]
 
 // If a volunteer is scheduled to these roles, their default role will be updated to match. (not including admins)
@@ -785,16 +785,15 @@ export default function AdminPage() {
 
   const isCredentialing = profile?.default_role === 'Credentialing'
   const isHR = profile?.default_role === 'Human Resources'
-  const isOfficeManager = profile?.default_role === 'Office Manager'
   const isOSSM = profile?.default_role === 'OSSM'
   const isLabDirector = profile?.default_role === 'Lab Director'
   const isDirector = profile?.default_role === 'Director'
   const isAdminAssistant = profile?.default_role === 'Administrative Assistant'
   const isProvider = profile?.default_role === 'Provider'
 
-  // Language Coverage tab is scoped to exactly these three roles, regardless
+  // Language Coverage tab is scoped to exactly these roles, regardless
   // of which tabItems branch they fall into below.
-  const canSeeLanguageCoverage = isOfficeManager || isDirector || isAdminAssistant
+  const canSeeLanguageCoverage = isDirector || isAdminAssistant
 
   // Newsletter email list is scoped to exactly these two roles.
   const canSeeNewsletter = isDirector || isAdminAssistant
@@ -831,12 +830,6 @@ export default function AdminPage() {
     ? [
         ['providers', 'Providers'], ['volunteers', 'Volunteers'],
         ['create', 'Add Volunteer'], ['shifts', 'Shifts'],  ['hours', 'Hours'],
-      ]
-    : isOfficeManager
-    ? [
-        ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['waitlist', 'Waitlist'], ['volunteers', 'Volunteers'],
-        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['training', 'Weekly Training'],
       ]
     : isOSSM
     ? [
@@ -1360,6 +1353,9 @@ export default function AdminPage() {
         .from('profiles')
         .select('id,full_name,email,role,default_role,affiliation')
         .eq('id', user.id).single()
+      // Office Managers no longer use the admin page — they get a view-only
+      // layout on the Clinical Supervisor page instead.
+      if (p?.default_role === 'Office Manager') { window.location.href = '/clinical-supervisor'; return }
       if (p?.role !== 'admin') { window.location.href = '/volunteer'; return }
       if (!hasAdminAccess(p)) {
         setProfile(p)
