@@ -31,6 +31,20 @@ function weekKeyFromDateStr(dateStr) {
   return toWeekKey(getMonday(new Date(y, m - 1, d)))
 }
 
+const RANGE_PRESETS = [
+  { value: 'all', label: 'All time' },
+  { value: '4w', label: 'Last 4 weeks', days: 28 },
+  { value: '8w', label: 'Last 8 weeks', days: 56 },
+  { value: '12w', label: 'Last 12 weeks', days: 84 },
+  { value: '6m', label: 'Last 6 months', days: 182 },
+  { value: '1y', label: 'Last 12 months', days: 365 },
+  { value: 'custom', label: 'Custom range…' },
+]
+
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 function dayIndexFromDateStr(dateStr) {
@@ -65,11 +79,14 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [profiles, setProfiles] = useState([])
-  const [attendanceRows, setAttendanceRows] = useState([])
+  const [allAttendanceRows, setAttendanceRows] = useState([])
   const [ackRows, setAckRows] = useState([])
   const [trainingWeeks, setTrainingWeeks] = useState([])
 
   const [view, setView] = useState('overview') // overview | byWeek
+  const [rangePreset, setRangePreset] = useState('all') // all | 4w | 8w | 12w | 6m | 1y | custom
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
   const [search, setSearch] = useState('')
   const [showInactive, setShowInactive] = useState(false)
   const [incompleteOnly, setIncompleteOnly] = useState(false)
@@ -116,6 +133,41 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
   }
 
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Time-range filter. Applied in whole training weeks (Mon–Sun) so a week is
+  // never split in half — a week is in range if its Monday falls within the
+  // range's first/last week. 'all' = no filtering.
+  const { rangeStartWeek, rangeEndWeek } = useMemo(() => {
+    if (rangePreset === 'all') return { rangeStartWeek: null, rangeEndWeek: null }
+    if (rangePreset === 'custom') {
+      return {
+        rangeStartWeek: customStart ? weekKeyFromDateStr(customStart) : null,
+        rangeEndWeek: customEnd ? weekKeyFromDateStr(customEnd) : null,
+      }
+    }
+    const preset = RANGE_PRESETS.find(r => r.value === rangePreset)
+    const start = new Date()
+    start.setDate(start.getDate() - (preset?.days || 0))
+    return { rangeStartWeek: weekKeyFromDateStr(localDateStr(start)), rangeEndWeek: null }
+  }, [rangePreset, customStart, customEnd])
+
+  const attendanceRows = useMemo(() => {
+    if (!rangeStartWeek && !rangeEndWeek) return allAttendanceRows
+    return allAttendanceRows.filter(r => {
+      const wk = weekKeyFromDateStr(r.shift_date)
+      if (!wk) return false
+      if (rangeStartWeek && wk < rangeStartWeek) return false
+      if (rangeEndWeek && wk > rangeEndWeek) return false
+      return true
+    })
+  }, [allAttendanceRows, rangeStartWeek, rangeEndWeek])
+
+  const rangeLabel = useMemo(() => {
+    if (!rangeStartWeek && !rangeEndWeek) return `all time (since ${TRACKING_START_DATE})`
+    const from = rangeStartWeek ? `week of ${rangeStartWeek}` : 'the beginning'
+    const to = rangeEndWeek ? `week of ${rangeEndWeek}` : 'now'
+    return `${from} → ${to}`
+  }, [rangeStartWeek, rangeEndWeek])
 
   const trainingWeekSet = useMemo(() => new Set(trainingWeeks), [trainingWeeks])
 
@@ -284,10 +336,15 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
   }, [attendanceRows, profiles, ackSetByUser, shiftWeek, showInactive, search, shiftSort])
 
   useEffect(() => {
-    if (!selectedWeek && allRequiredWeeks.length > 0) {
+    if (allRequiredWeeks.length === 0) return
+    if (!selectedWeek || !allRequiredWeeks.includes(selectedWeek)) {
       setSelectedWeek(allRequiredWeeks[allRequiredWeeks.length - 1])
     }
   }, [allRequiredWeeks, selectedWeek])
+
+  useEffect(() => {
+    if (shiftWeek && !allRequiredWeeks.includes(shiftWeek)) setShiftWeek('')
+  }, [allRequiredWeeks, shiftWeek])
 
   function toggleExpand(id) {
     setExpanded(prev => ({ ...prev, [id]: !prev[id] }))
@@ -319,6 +376,32 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div style={{ ...card, padding: '1rem 1.1rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: '200px' }}>
+            <label style={labelStyle}>Time range</label>
+            <select value={rangePreset} onChange={e => setRangePreset(e.target.value)} style={inputStyle}>
+              {RANGE_PRESETS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          </div>
+          {rangePreset === 'custom' && (
+            <>
+              <div style={{ minWidth: '160px' }}>
+                <label style={labelStyle}>From</label>
+                <input type="date" value={customStart} min={TRACKING_START_DATE} onChange={e => setCustomStart(e.target.value)} style={inputStyle} />
+              </div>
+              <div style={{ minWidth: '160px' }}>
+                <label style={labelStyle}>To</label>
+                <input type="date" value={customEnd} min={customStart || TRACKING_START_DATE} onChange={e => setCustomEnd(e.target.value)} style={inputStyle} />
+              </div>
+            </>
+          )}
+          <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--muted)', flex: 1, minWidth: '200px' }}>
+            Analyzing: <strong style={{ color: 'var(--text)' }}>{rangeLabel}</strong>. Ranges include whole Mon–Sun weeks.
+          </p>
+        </div>
+      </div>
+
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
           <div>
@@ -381,7 +464,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
               <div>
                 <label style={labelStyle}>Weeks included</label>
                 <select value={shiftWeek} onChange={e => setShiftWeek(e.target.value)} style={inputStyle}>
-                  <option value="">All tracked weeks</option>
+                  <option value="">All weeks in range</option>
                   {[...allRequiredWeeks].sort((a,b)=>b.localeCompare(a)).map(wk => (
                     <option key={wk} value={wk}>{wk} (Mon {formatWeekRangeShort(wk)})</option>
                   ))}
@@ -427,7 +510,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
           <div style={{ padding: '0.9rem 1.1rem', borderBottom: '1px solid var(--border)' }}>
             <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>Completion by Shift</h3>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--muted)' }}>
-              {shiftWeek ? `Week of ${shiftWeek} (Mon ${formatWeekRangeShort(shiftWeek)}).` : `All tracked weeks since ${TRACKING_START_DATE}.`}
+              {shiftWeek ? `Week of ${shiftWeek} (Mon ${formatWeekRangeShort(shiftWeek)}).` : `All weeks in range (${rangeLabel}).`}
               {' '}Each volunteer counts once per week they worked the shift, and is complete if they acknowledged that week&apos;s training. A volunteer who works more than one shift appears under each.
             </p>
           </div>
@@ -493,7 +576,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
         <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '0.9rem 1.1rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>Volunteers</h3>
-            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{filteredSorted.length} shown · default: all tracked time (since {TRACKING_START_DATE}), active only</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{filteredSorted.length} shown · {rangeLabel}{showInactive ? '' : ', active only'}</span>
           </div>
           {filteredSorted.length === 0 ? (
             <div style={{ padding: '1.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>No volunteers match the current filters (or no required attendance weeks found in the tracked range).</div>
@@ -502,7 +585,6 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
               {filteredSorted.map((v, i) => {
                 const isOpen = !!expanded[v.id]
                 const isInactive = (v.status || 'active') === 'inactive'
-                const complete = v.required > 0 && v.completed === v.required
                 const rateColor = v.rate == null ? 'var(--muted)' : '#02416b'
                 return (
                   <div key={v.id} style={{ borderBottom: i < filteredSorted.length - 1 ? '1px solid var(--border)' : 'none' }}>
@@ -515,7 +597,6 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 600 }}>{v.name}</span>
                             {isInactive && <span style={badge('rgba(156,163,175,0.15)', '#9ca3af', 'rgba(156,163,175,0.4)')}>inactive</span>}
-                            {complete && <span style={badge('rgba(2,65,107,0.12)', '#02416b', 'rgba(2,65,107,0.35)')}>complete</span>}
                           </div>
                           <p style={{ margin: '0.15rem 0 0', fontSize: '0.78rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {[v.default_role, v.email].filter(Boolean).join(' · ') || '—'}
