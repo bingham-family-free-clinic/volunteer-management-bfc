@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { getMonday, toWeekKey, formatWeekRangeShort } from '../lib/trainingUtils'
+import { SHIFTS } from '../lib/constants'
 
 const TRACKING_START_DATE = '2026-06-29'
 const TRACKING_START_WEEK = toWeekKey(getMonday(new Date(2026, 5, 29))) // 2026-06-29 (Mon)
@@ -27,6 +28,15 @@ function weekKeyFromDateStr(dateStr) {
   const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number)
   if (!y || !m || !d) return null
   return toWeekKey(getMonday(new Date(y, m - 1, d)))
+}
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+function dayIndexFromDateStr(dateStr) {
+  if (!dateStr) return null
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return null
+  return new Date(y, m - 1, d).getDay()
 }
 
 function pct(completed, required) {
@@ -65,6 +75,9 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
   const [sortBy, setSortBy] = useState('rate-asc') // rate-asc, rate-desc, name, required, completed
   const [expanded, setExpanded] = useState({})
   const [selectedWeek, setSelectedWeek] = useState('')
+  const [shiftWeek, setShiftWeek] = useState('') // '' = all tracked weeks
+  const [shiftSort, setShiftSort] = useState('schedule') // schedule | rate-asc | rate-desc
+  const [expandedShifts, setExpandedShifts] = useState({})
 
   async function load() {
     setLoading(true)
@@ -73,7 +86,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
       const [profRes, attendance, acks, trainings] = await Promise.all([
         supabase.from('profiles').select('id, full_name, email, default_role, role, affiliation, status'),
         fetchAllRows(supabase, 'attendance_records', (q) =>
-          q.select('volunteer_id, shift_date, excuse_reason')
+          q.select('volunteer_id, shift_date, shift_time, excuse_reason')
             .is('excuse_reason', null)
             .gte('shift_date', TRACKING_START_DATE)
             .order('shift_date', { ascending: true })
@@ -203,6 +216,69 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
     return { week: wk, completed, notCompleted }
   }, [selectedWeek, allRequiredWeeks, volunteerStats, showInactive, search])
 
+  // Completion blocked by shift (day + shift time). A volunteer counts once per
+  // week they worked that shift; they're "completed" if they acknowledged that
+  // week's training. Someone who works two different shifts shows up in both.
+  const shiftData = useMemo(() => {
+    const profileMap = new Map(profiles.map(p => [p.id, p]))
+    const slots = new Map()
+    for (const row of attendanceRows) {
+      if (!row.volunteer_id) continue
+      const wk = weekKeyFromDateStr(row.shift_date)
+      if (!wk) continue
+      if (shiftWeek && wk !== shiftWeek) continue
+      const dayIdx = dayIndexFromDateStr(row.shift_date)
+      const time = row.shift_time || 'Unknown'
+      const prof = profileMap.get(row.volunteer_id) || null
+      if (!showInactive && (prof?.status || 'active') !== 'active') continue
+      if (search.trim()) {
+        const q = search.toLowerCase()
+        if (!(prof?.full_name || '').toLowerCase().includes(q) && !(prof?.email || '').toLowerCase().includes(q)) continue
+      }
+      const key = `${dayIdx}|${time}`
+      if (!slots.has(key)) slots.set(key, { key, dayIdx, time, label: `${DAY_NAMES[dayIdx] ?? 'Unknown day'} ${time}`, vols: new Map() })
+      const slot = slots.get(key)
+      if (!slot.vols.has(row.volunteer_id)) slot.vols.set(row.volunteer_id, new Set())
+      slot.vols.get(row.volunteer_id).add(wk)
+    }
+    const out = []
+    for (const slot of slots.values()) {
+      const volunteers = []
+      let required = 0
+      let completed = 0
+      for (const [id, weekSet] of slot.vols.entries()) {
+        const prof = profileMap.get(id) || null
+        const ackSet = ackSetByUser.get(id) || new Set()
+        const weeks = Array.from(weekSet).sort()
+        const done = weeks.filter(w => ackSet.has(w))
+        const missing = weeks.filter(w => !ackSet.has(w))
+        required += weeks.length
+        completed += done.length
+        volunteers.push({
+          id,
+          name: prof?.full_name || '(Unknown volunteer)',
+          email: prof?.email || '',
+          default_role: prof?.default_role || '',
+          status: prof?.status || 'active',
+          required: weeks.length,
+          completed: done.length,
+          missing,
+          rate: pct(done.length, weeks.length),
+        })
+      }
+      // Least complete first, then by name
+      volunteers.sort((a, b) => (a.rate ?? -1) - (b.rate ?? -1) || (a.name || '').localeCompare(b.name || ''))
+      out.push({ ...slot, volunteers, required, completed, rate: pct(completed, required) })
+    }
+    const shiftOrder = (t) => { const i = SHIFTS.indexOf(t); return i === -1 ? 99 : i }
+    out.sort((a, b) => {
+      if (shiftSort === 'rate-asc') return (a.rate ?? -1) - (b.rate ?? -1) || a.dayIdx - b.dayIdx
+      if (shiftSort === 'rate-desc') return (b.rate ?? -1) - (a.rate ?? -1) || a.dayIdx - b.dayIdx
+      return (a.dayIdx - b.dayIdx) || (shiftOrder(a.time) - shiftOrder(b.time))
+    })
+    return out
+  }, [attendanceRows, profiles, ackSetByUser, shiftWeek, showInactive, search, shiftSort])
+
   useEffect(() => {
     if (!selectedWeek && allRequiredWeeks.length > 0) {
       setSelectedWeek(allRequiredWeeks[allRequiredWeeks.length - 1])
@@ -211,6 +287,10 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
 
   function toggleExpand(id) {
     setExpanded(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  function toggleShift(key) {
+    setExpandedShifts(prev => ({ ...prev, [key]: !prev[key] }))
   }
 
   if (loading) {
@@ -255,6 +335,7 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <button onClick={() => setView('overview')} style={pillBtn(view === 'overview')}>Overview</button>
         <button onClick={() => setView('byWeek')} style={pillBtn(view === 'byWeek')}>By Week</button>
+        <button onClick={() => setView('byShift')} style={pillBtn(view === 'byShift')}>By Shift</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
@@ -291,6 +372,31 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
                 </label>
               </div>
             </>
+          ) : view === 'byShift' ? (
+            <>
+              <div>
+                <label style={labelStyle}>Weeks included</label>
+                <select value={shiftWeek} onChange={e => setShiftWeek(e.target.value)} style={inputStyle}>
+                  <option value="">All tracked weeks</option>
+                  {[...allRequiredWeeks].sort((a,b)=>b.localeCompare(a)).map(wk => (
+                    <option key={wk} value={wk}>{wk} (Mon {formatWeekRangeShort(wk)})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Sort shifts</label>
+                <select value={shiftSort} onChange={e => setShiftSort(e.target.value)} style={inputStyle}>
+                  <option value="schedule">Schedule order (Mon → Fri)</option>
+                  <option value="rate-asc">Completion % (low → high)</option>
+                  <option value="rate-desc">Completion % (high → low)</option>
+                </select>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--text)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} /> Include inactive
+                </label>
+              </div>
+            </>
           ) : (
             <>
               <div>
@@ -312,7 +418,74 @@ export default function WeeklyTrainingCompletion({ supabase, profile }) {
         </div>
       </div>
 
-      {view === 'overview' ? (
+      {view === 'byShift' ? (
+        <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '0.9rem 1.1rem', borderBottom: '1px solid var(--border)' }}>
+            <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>Completion by Shift</h3>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--muted)' }}>
+              {shiftWeek ? `Week of ${shiftWeek} (Mon ${formatWeekRangeShort(shiftWeek)}).` : `All tracked weeks since ${TRACKING_START_DATE}.`}
+              {' '}Each volunteer counts once per week they worked the shift, and is complete if they acknowledged that week&apos;s training. A volunteer who works more than one shift appears under each.
+            </p>
+          </div>
+          {shiftData.length === 0 ? (
+            <div style={{ padding: '1.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>No shifts match the current filters (or no attendance found in the tracked range).</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {shiftData.map((slot, i) => {
+                const isOpen = !!expandedShifts[slot.key]
+                const incomplete = slot.volunteers.filter(v => v.completed < v.required).length
+                return (
+                  <div key={slot.key} style={{ borderBottom: i < shiftData.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <button
+                      onClick={() => toggleShift(slot.key)}
+                      style={{ width: '100%', textAlign: 'left', padding: '0.85rem 1.1rem', background: isOpen ? 'rgba(2,65,107,0.04)' : 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', color: 'var(--text)' }}
+                    >
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 1.2fr) repeat(3, minmax(80px, auto)) minmax(140px, 1.4fr) auto', gap: '0.75rem', alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontWeight: 600 }}>{slot.label}</span>
+                          <p style={{ margin: '0.15rem 0 0', fontSize: '0.78rem', color: 'var(--muted)' }}>
+                            {slot.volunteers.length} volunteer{slot.volunteers.length === 1 ? '' : 's'}{incomplete ? ` · ${incomplete} incomplete` : ''}
+                          </p>
+                        </div>
+                        <div><p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Required</p><p style={{ margin: 0, fontFamily: 'DM Mono, monospace', fontWeight: 600 }}>{slot.required}</p></div>
+                        <div><p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Completed</p><p style={{ margin: 0, fontFamily: 'DM Mono, monospace', fontWeight: 600 }}>{slot.completed}</p></div>
+                        <div><p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Rate</p><p style={{ margin: 0, fontFamily: 'DM Mono, monospace', fontWeight: 700, color: slot.rate == null ? 'var(--muted)' : '#02416b' }}>{slot.rate == null ? '—' : `${slot.rate}%`}</p></div>
+                        <div style={{ height: '8px', borderRadius: '100px', background: 'rgba(2,65,107,0.1)', overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(100, slot.rate || 0)}%`, height: '100%', background: '#02416b' }} />
+                        </div>
+                        <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>{isOpen ? '▾' : '›'} details</div>
+                      </div>
+                    </button>
+                    {isOpen && (
+                      <div style={{ padding: '0 1.1rem 1rem', background: 'rgba(2,65,107,0.02)', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        {slot.volunteers.map(v => {
+                          const complete = v.completed === v.required
+                          return (
+                            <div key={v.id} style={{ padding: '0.5rem 0.65rem', borderRadius: '8px', border: `1px solid ${complete ? 'var(--border)' : 'rgba(2,65,107,0.25)'}`, background: complete ? 'var(--bg)' : 'rgba(2,65,107,0.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                              <div style={{ minWidth: 0 }}>
+                                <p style={{ margin: 0, fontWeight: 500, fontSize: '0.88rem' }}>
+                                  {v.name}{v.status === 'inactive' && <span style={{ marginLeft: '0.5rem', ...badge('rgba(156,163,175,0.15)', '#9ca3af', 'rgba(156,163,175,0.4)') }}>inactive</span>}
+                                </p>
+                                <p style={{ margin: '0.1rem 0 0', fontSize: '0.75rem', color: 'var(--muted)' }}>{v.default_role || v.email || '—'}</p>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <p style={{ margin: 0, fontFamily: 'DM Mono, monospace', fontWeight: 600, fontSize: '0.85rem' }}>{v.completed} / {v.required} wks · {v.rate}%</p>
+                                {v.missing.length > 0 && (
+                                  <p style={{ margin: '0.1rem 0 0', fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>missing: {v.missing.join(', ')}</p>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      ) : view === 'overview' ? (
         <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '0.9rem 1.1rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>Volunteers</h3>
