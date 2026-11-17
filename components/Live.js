@@ -78,7 +78,13 @@ export function computeExpectedNotClockedIn({ schedule, callouts, activeShifts, 
       const vol   = volunteers.find(v => v.id === id)
       const entry = scheduled.find(s => s.volunteer_id === id)
       if (!vol) return null
-      return { ...vol, role: entry?.role || '—', notes: entry?.notes || null }
+      return {
+        ...vol,
+        role: entry?.role || '—',
+        notes: entry?.notes || null,
+        is_training: !!entry?.being_trained_by,
+        trainer_id: entry?.being_trained_by
+      }
     })
     .filter(Boolean)
 
@@ -132,6 +138,13 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
                   onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(239,68,68,0.2)'}
                 >
                   <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>{v.full_name}</span>
+                  {(() => {
+                    if(!v.is_training) return;
+                    const trainer_name = volunteers.find(vol => vol.id == v.trainer_id).full_name;
+                    return (<span style={{ fontSize: '0.78rem', color: 'var(--accent)', marginLeft: '0.5rem' }}>
+                            ({trainer_name?(<>Training by {volunteers.find(vol => vol.id == v.trainer_id).full_name}</>):(<>Training</>)})
+                            </span>)
+                  })()}
                   {v.notes && <span style={{ fontSize: '0.78rem', color: '#60a5fa', fontStyle: 'italic' }}>({v.notes})</span>}
                   <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{v.role}</span>
                 </div>
@@ -162,9 +175,17 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 6px var(--accent)' }} />
-                  <span style={{ fontWeight: 500 }}>{s.profiles?.full_name}</span>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 6px var(--accent)' }} />
+                <span style={{ fontWeight: 500 }}>{s.profiles?.full_name}</span>
                 </div>
+                {(() => {
+                  const scheduleEntry = schedule.find(schedShift => (schedShift.volunteer_id == s.volunteer_id && schedShift.role == s.role && !!schedShift.being_trained_by))
+                  if(!scheduleEntry) return (<></>);
+                  const trainer_name = volunteers.find(vol => vol.id == scheduleEntry.being_trained_by).full_name;
+                  return (<span style={{ fontSize: '0.78rem', color: 'var(--accent)', marginLeft: '0.5rem' }}>
+                          ({trainer_name?(<>Training by {trainer_name}</>):(<>Training</>)})
+                          </span>)
+                })()}
                 <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Since {formatMountain(s.clock_in)}</span>
               </div>
             ))}
@@ -183,7 +204,7 @@ export default function Live({ schedule, callouts, activeShifts, volunteers, onO
               <span style={{ padding: '0.15rem 0.55rem', background: 'rgba(96,165,250,0.12)', color: '#60a5fa', borderRadius: '100px', fontSize: '0.8rem', fontWeight: 600, border: '1px solid rgba(96,165,250,0.3)' }}>
                 {todaysCallouts.length}
               </span>
-            </h2>
+            </h2 >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {todaysCallouts.map(c => {
                 const isCovered = c.status === 'approved' && c.covered_by

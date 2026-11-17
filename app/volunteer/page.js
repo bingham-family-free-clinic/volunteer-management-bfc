@@ -14,7 +14,8 @@ import BiannualSurvey, { isSurveyWeek } from '../../components/BiannualSurvey'
 import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
 import { useConfirm } from '../../lib/ConfirmDialog'
-
+import VolunteerTrainingView from '../../components/VolunteerTrainingView.jsx'
+import Trainees from '../../components/Trainees'
 
 export const dynamic = 'force-dynamic'
 
@@ -566,6 +567,34 @@ class DebugErrorBoundary extends Component {
   }
 }
 
+async function getVolunteerFromId(id){
+  const {data, error} = await supabase
+        .from('profiles')
+        .select()
+        .eq('id',id)
+  if(data.length && !error)
+    return data[0];
+  return null;
+}
+
+function getDayAndWeekDetails(date = new Date()) {
+  // 1. Get Day of the Week
+  const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayName = daysOfWeek[date.getDay()]; // Returns name (e.g., "Wednesday")
+
+  // 2. Calculate Week of the Month
+  const currentDayOfMonth = date.getDate();
+  const weekOfMonth = Math.ceil(currentDayOfMonth / 7);
+
+  return {
+    dayName: dayName,
+    dayIndex: date.getDay(),       // 0 = Sunday, 1 = Monday, etc.
+    weekOfMonth: weekOfMonth,     // 1st, 2nd, 3rd, 4th, or 5th week
+    dayOfMonth: currentDayOfMonth  // Calendar date (1-31)
+  };
+}
+
+
 // ── Main component ────────────────────────────────────────────────────────────
 function VolunteerPageInner() {
   // ── Core auth/profile state (loaded immediately) ─────────────────────────
@@ -574,11 +603,17 @@ function VolunteerPageInner() {
    const [loading, setLoading] = useState(true)
    const [tab, setTab]         = useState('clock')
    const [messageId, setMessageId] = useState(null)
+   const [profileRoles, setProfileRoles] = useState([])
 
   // ── Clock tab state ───────────────────────────────────────────────────────
   const [activeShift, setActiveShift]   = useState(null)
   const [clockLoading, setClockLoading] = useState(false)
   const [lunchAssignment, setLunchAssignment] = useState(null)
+
+  // States for managing trainees
+  const [trainingSchedule, setTrainingSchedule] = useState([])
+  const [todayTraining, setTodayTraining] = useState([])
+  const [trainingMaterialAvailable, setTrainingMaterialAvailable] = useState(false)
 
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
   const [schedule, setSchedule] = useState([])
@@ -657,7 +692,35 @@ function VolunteerPageInner() {
   const [trainingAcknowledged, setTrainingAcknowledged] = useState(false)
 
   // ── Confirmation modal hook ─────────────────────────────────────────────
-  const confirmAction = useConfirm()
+    const confirmAction = useConfirm()
+
+  // Check If the person is training anyone
+  useEffect(() => {
+    // Only pull when the user switches to a tab that needs it
+    if (tab !== 'schedule' && tab !== 'clock' && tab !== 'trainees') return;
+    if (!profile || !profile.id) return;
+    (async () => {
+      const {data, error} = await supabase
+            .from('schedule')
+            .select('id,volunteer_id,day_of_week,shift_time,role,week_pattern,being_trained_by')
+            .eq('being_trained_by', profile.id)
+      if(error){
+        showToast('error fetching trainee schedule: ' + error.message, 'error')
+        return;
+      }
+      const dateinfo = getDayAndWeekDetails();
+      for(const trainAssignment of data){
+        const volTrainee = await getVolunteerFromId(trainAssignment.volunteer_id);
+        if(!volTrainee) continue
+        trainAssignment.trainee = volTrainee;
+      }
+      const trainingInfo = data.filter(row => (row.day_of_week == dateinfo.dayName.toLowerCase() && (row.week_pattern == 'every'
+                                                                                                     || (row.week_pattern == 'even' && dateinfo.weekOfMonth % 2 == 0)
+                                                                                                     || (row.week_pattern == 'odd' && dateInfo.weekOfMonth % 2 == 1))))
+      setTrainingSchedule(data)
+      setTodayTraining(trainingInfo.filter(r => r.trainee))
+    })()
+  }, [user, profile, tab])
 
   // Check Supabase for this week's training and whether this volunteer has
   // already acknowledged it, so the banner/badge stay correct on refresh.
@@ -685,6 +748,22 @@ function VolunteerPageInner() {
     return () => { cancelled = true }
   }, [user, trainingWeekStart])
 
+  // Fetching the roles of the user
+  useEffect(() => {
+    if(!profile || !profile.id) return;
+    (async () => {
+      const {data, error} = await supabase
+            .from('person_role_qualifications')
+            .select('')
+            .eq('person_id', profile.id);
+      if(error){
+        showToast('error fetching volunteer roles: ' + error.message, 'error')
+        return
+      }
+      setProfileRoles(data)
+      setTrainingMaterialAvailable(data.some(row => row.qualification == 'Trainer' || row.qualification == 'Trainee'));
+    })()
+  },[profile])
 
   // Note: the survey is now fully anonymous — no user_id is ever recorded,
   // so there is no way (and no need) to check the backend for a prior
@@ -1299,6 +1378,8 @@ function VolunteerPageInner() {
     ['account', 'Account'],
     ...(trainingAvailable ? [['training', 'Training']] : []),
     ...(surveyOpen ? [['feedback', 'Feedback']] : []),
+    ...(trainingMaterialAvailable? [['volunteerTrainingView', 'Intake Trainings']] : []),
+    ...(trainingSchedule.length > 0? [['trainees', 'Trainees']] : [])
   ]
 
   function tabBadge(key) {
@@ -1443,6 +1524,16 @@ function VolunteerPageInner() {
           />
         )}
 
+    { tab === 'volunteerTrainingView' && (
+        <VolunteerTrainingView
+      profileRoles={profileRoles}
+      />
+    )}
+
+    { tab === 'trainees' && (
+        <Trainees trainingSchedule={trainingSchedule}/>
+    )}
+
         {/* Weekly training banner — shown every week until acknowledged */}
         {trainingAvailable && !trainingAcknowledged && (
           <div
@@ -1520,7 +1611,11 @@ function VolunteerPageInner() {
                 {clockLoading ? 'Processing...' : 'Clock In'}
               </button>
             )}
-
+          {(todayTraining.length != 0) && (<div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(19, 90, 115, 0.35)', borderRadius: '8px', display: 'flex', justifyContent: 'center', alignItems: 'center', display: 'flex', flexDirection: 'column'}}>
+                                           {todayTraining.map(row => (
+                                               <p key={row.id} style={{ fontSize: '0.75rem', color: 'var(--muted)', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>You are assigned to train {row.trainee.full_name} in {row.role} today.</p>
+                                           ))}
+           </div>)}
             {lunchAssignment && (
               <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(19, 90, 115, 0.35)', borderRadius: '8px' }}>
                 <p style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Your Lunch Slot</p>
@@ -1593,7 +1688,72 @@ function VolunteerPageInner() {
                   })}
                 </div>
               )}
-            </div>
+          {/* The list of trainings this volunteer is giving*/}
+          {trainingSchedule.length > 0 && (<>
+              <h2 style={{ fontWeight: 600, marginBottom: '1.25rem', marginTop: '1.25rem' }}>Scheduled Trainings</h2>
+              {trainingSchedule.length === 0 ? (
+                  <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>You have no scheduled shifts yet.</p>
+              ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {DAYS.map(day => {
+                    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+                    const wom = (() => {
+                      const d = new Date(today + 'T12:00:00'); let count = 0; const target = d.getDay()
+                      const check = new Date(d.getFullYear(), d.getMonth(), 1)
+                      while (check <= d) { if (check.getDay() === target) count++; check.setDate(check.getDate() + 1) }
+                      return count
+                    })()
+                    const dayEntries = trainingSchedule.filter(s => {
+                      if (s.day_of_week !== day.toLowerCase()) return false
+                      if (s.start_date && s.start_date > today) return false
+                      if (s.end_date   && s.end_date   < today) return false
+                      if (s.week_pattern === 'odd'  && wom % 2 !== 1) return false
+                      if (s.week_pattern === 'even' && wom % 2 !== 0) return false
+                      return true
+                    })
+                    if (dayEntries.length === 0) return null
+                    return (
+                        <div key={day} style={{ padding: '0.75rem 1rem', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                        <p style={{ fontWeight: 600, textTransform: 'capitalize', marginBottom: '0.6rem' }}>{day}</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        {SHIFTS.map(shift => {
+                          const shiftEntries = dayEntries.filter(s => s.shift_time === shift)
+                          if (shiftEntries.length === 0) return null
+                          return shiftEntries.map(entry => (
+                              <div key={entry.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                              <div>
+                              { entry.trainee && (
+                                <span style={{ marginRight: '0.4rem', fontSize: '0.95rem', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>
+                                  {entry.trainee.full_name} in <span style={{ fontSize: '0.95rem' }}>{entry.role}</span>
+                                </span>
+                              )}
+                              {entry.week_pattern && entry.week_pattern !== 'every' && (
+                                  <span style={{ marginLeft: '0.4rem', fontSize: '0.72rem', background: 'rgba(96,165,250,0.12)', color: '#60a5fa', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>
+                                  {entry.week_pattern === 'odd' ? '1st & 3rd week' : '2nd & 4th week'}
+                                </span>
+                              )}
+                            {entry.notes && (
+                                <span style={{ marginLeft: '0.4rem', fontSize: '0.72rem', background: 'rgba(96,165,250,0.12)', color: '#60a5fa', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>
+                                {entry.notes}
+                              </span>
+                            )}
+                            </div>
+                              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.8rem', color: 'var(--muted)', background: 'var(--surface)', padding: '0.2rem 0.6rem', borderRadius: '6px', whiteSpace: 'nowrap' }}>
+                              {shift}
+                            </span>
+                              </div>
+                          ))
+                        })}
+                      </div>
+                        </div>
+                    )
+                  })}
+                </div>
+              )}
+          </>)}
+          </div>
+
+
 
             {MyCallouts.length > 0 && (
               <div style={S.card}>

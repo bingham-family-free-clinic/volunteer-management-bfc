@@ -16,7 +16,8 @@ import AdminTasks from '../../components/AdminTasks'
 import WeeklyTraining from '../../components/WeeklyTraining'
 import LanguageCoverage from '../../components/LanguageCoverage'
 import { MessageTab } from '../../components/MessageTab'
-import VolunteerTraining from '../../components/VolunteerTraining.jsx'
+import VolunteerPositions from '../../components/VolunteerPositions.jsx'
+import RoleTrainings from '../../components/RoleTrainings.jsx'
 
 export const dynamic = 'force-dynamic'
 
@@ -647,6 +648,7 @@ export default function AdminPage() {
   const [scheduleShift, setScheduleShift]           = useState('10-2')
   const [addingRole, setAddingRole]                 = useState(null)
   const [addVolId, setAddVolId]                     = useState('')
+  const [addTrainerVolId, setTrainerVolId]          = useState('')
   const [addingEntry, setAddingEntry]               = useState(false)
   const [addStartDate, setAddStartDate]             = useState('')
   const [addEndDate, setAddEndDate]                 = useState('')
@@ -656,6 +658,9 @@ export default function AdminPage() {
   const [showWaitlist, setShowWaitlist]             = useState(false)
   const [scheduleDate, setScheduleDate]             = useState('')
   const [dateCoverShifts, setDateCoverShifts]       = useState([])
+
+  const [loadVolRoleQualificationsErr, setLoadVolRoleQualificationsErr] = useState(null)
+  const [volunteerRoleQualifications, setVolunteerRoleQualifications] = useState({})
 
   // ── Volunteer tab state ─────────────────────────────────────────────────────
   const [selectedVolunteer, setSelectedVolunteer]       = useState(null)
@@ -822,7 +827,7 @@ export default function AdminPage() {
   const tabItems = isLabDirector
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
-        ['volunteerTraining', 'Volunteer Training'],
+        ['volunteerPositions', 'Volunteer Positions'], ['volunteerRoleTraining', 'Role Trainings'],
       ]
     : isCredentialing
     ? [
@@ -839,17 +844,17 @@ export default function AdminPage() {
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['volunteerTraining', 'Volunteer Trianing'],
+        ['volunteerPositions', 'Volunteer Trianing'], ['volunteerRoleTraining', 'Role Trainings'],
       ]
     : isHR
     ? [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'],
         ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['data', 'Data'], ['callouts', 'Call-Outs'],
-        ['volunteerTaining', 'Volunteer Training'],
+        ['volunteerTaining', 'Volunteer Positions'], ['volunteerRoleTraining', 'Role Trainings'],
       ]
     : [
         ['dashboard', 'Live'], ['schedule', 'Scheduling'], ['volunteers', 'Volunteers'], ['providers', 'Providers'],
-        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'], ['volunteerTraining', 'Volunteer Training'],
+        ['pipeline', 'Pipeline'], ['shifts', 'Shifts'], ['callouts', 'Call-Outs'], ['volunteerPositions', 'Volunteer Positions'], ['volunteerRoleTraining', 'Role Trainings'],
         ['hours', 'Hours'], ['audit', 'Recent Activity'], ['create', 'Add Volunteer'], ['data', 'Data'], ['training', 'Weekly Training'], ...(isTaskAdmin ? [['tasks', 'Tasks']] : []),
       ]
 
@@ -1005,7 +1010,7 @@ export default function AdminPage() {
   async function loadActiveShifts() {
     const { data } = await supabase
       .from('shifts')
-      .select('id,volunteer_id,clock_in,profiles(id,full_name)')
+      .select('id,volunteer_id,clock_in,role,profiles(id,full_name)')
       .is('clock_out', null)
     setActiveShifts(data || [])
   }
@@ -1041,9 +1046,28 @@ export default function AdminPage() {
   async function loadSchedule() {
     const { data } = await supabase
       .from('schedule')
-      .select('id,volunteer_id,day_of_week,shift_time,role,start_date,end_date,week_pattern,notes,profiles(id,full_name)')
+      .select('id,being_trained_by,volunteer_id,day_of_week,shift_time,role,start_date,end_date,week_pattern,notes,profiles(id,full_name)')
       .order('role')
     setSchedule(data || [])
+  }
+
+  async function loadVolunteerRoleQualifications(){
+    setLoadVolRoleQualificationsErr(null)
+    const {data, error} = await supabase
+          .from('person_role_qualifications')
+          .select('person_id,role,qualification,id')
+
+    if(error){
+      setLoadVolRoleQualificationsErr(error.message)
+    } else {
+      const qualifications = {}
+      for(const row of data){
+        const perId = row.person_id
+        if(!qualifications[perId]) qualifications[perId] = {}
+        if(!qualifications[perId][row.role]) qualifications[perId][row.role] = row.qualification
+      }
+      setVolunteerRoleQualifications(qualifications)
+    }
   }
 
   async function loadCoverRequests() {
@@ -1359,7 +1383,7 @@ export default function AdminPage() {
       }
        setProfile(p)
        if (p?.default_role === 'Credentialing') setTab('providers')
-       await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadCoverRequests()])
+      await Promise.all([loadVolunteers(), loadActiveShifts(), loadCallouts(), loadSchedule(), loadVolunteerRoleQualifications(), loadCoverRequests()])
        fetchMessages(user.id)
        // Guest orgs load best-effort (tables may not exist until migrations run).
       loadGuestOrgs()
@@ -1417,6 +1441,12 @@ export default function AdminPage() {
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])
+
+    // -- Qualification refresh
+    useEffect(() => {
+        if(tab !== '')
+        loadVolunteerRoleQualifications()
+    },[tab]);
   // -- Live Refresh ------------------------------------------------------------
 
     useEffect(() => {
@@ -1433,6 +1463,7 @@ export default function AdminPage() {
                     loadActiveShifts(),
                     loadCallouts(),
                     loadSchedule(),
+                    loadVolunteerRoleQualifications(),
                 ])
 
                 setLastLiveRefresh(new Date())
@@ -1784,6 +1815,7 @@ export default function AdminPage() {
       .from('schedule')
       .insert({
         volunteer_id: addVolId,
+        being_trained_by: addTrainerVolId || null,
         day_of_week: scheduleDay,
         shift_time: scheduleShift,
         role: addingRole,
@@ -1793,7 +1825,7 @@ export default function AdminPage() {
         notes: addNotes || null,
       })
       .select(
-        'id, volunteer_id, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, profiles(id, full_name)'
+        'id, volunteer_id, being_trained_by, day_of_week, shift_time, role, start_date, end_date, week_pattern, notes, profiles(id, full_name)'
       )
       .single();
 
@@ -1881,6 +1913,7 @@ export default function AdminPage() {
 
     setAddingRole(null);
     setAddVolId('');
+    setTrainerVolId('');
     setAddStartDate('');
     setAddEndDate('');
     setAddWeekPattern('every');
@@ -2321,10 +2354,12 @@ export default function AdminPage() {
                               <div key={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.6rem 0.3rem 0.75rem', borderRadius: '100px', fontSize: '0.85rem', background: approvedCallout ? 'rgba(96,165,250,0.08)' : 'rgba(2,65,107,0.08)', border: `1px solid ${approvedCallout ? 'rgba(96,165,250,0.4)' : 'rgba(2,65,107,0.35)'}`, color: approvedCallout ? 'var(--warn)' : 'var(--text)' }}>
                                   {approvedCallout && <span style={{ fontSize: '0.7rem' }}>out</span>}
-                                  <span style={{ textDecoration: approvedCallout ? 'line-through' : 'none', opacity: approvedCallout ? 0.6 : 1 }}>{entry.profiles?.full_name}</span>
-                                  {entry.notes && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.notes})</span>}
+                                <span style={{ textDecoration: approvedCallout ? 'line-through' : 'none', opacity: approvedCallout ? 0.6 : 1 }}>{entry.profiles?.full_name}</span>
+                                {entry.being_trained_by && <><span>Trained by</span>{volunteers.find(v => v.id == entry.being_trained_by)?.full_name}</>}
+                              {entry.notes && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.notes})</span>}
                                   {(entry.start_date || entry.end_date) && <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic' }}>({entry.start_date ?? '...'} → {entry.end_date ?? '...'})</span>}
-                                  {entry.week_pattern && entry.week_pattern !== 'every' && <span style={{ ...biweeklyBadge, fontSize: '0.65rem', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>{entry.week_pattern === 'odd' ? '1st&3rd' : '2nd&4th'}</span>}
+                              {entry.week_pattern && entry.week_pattern !== 'every' && <span style={{ ...biweeklyBadge, fontSize: '0.65rem', borderRadius: '4px', padding: '0.1rem 0.35rem' }}>{entry.week_pattern === 'odd' ? '1st&3rd' : '2nd&4th'}</span>}
+                                 {}
                                   <button onClick={() => handleRemoveEntry(entry.id)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.75rem', padding: '0 2px' }}>✕</button>
                                 </div>
                                 {coverName && <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.6rem 0.25rem 0.75rem', borderRadius: '100px', fontSize: '0.82rem', background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.35)', color: '#60a5fa', marginLeft: '0.5rem' }}><span style={{ fontSize: '0.7rem' }}>cover</span><span>{coverName}</span></div>}
@@ -2336,6 +2371,19 @@ export default function AdminPage() {
                       {isOpen && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                           <select value={addVolId} onChange={e => setAddVolId(e.target.value)} style={inputStyle}><option value="">— Select volunteer —</option>{userList.map(v => <option key={v.id} value={v.id}>{v.full_name}</option>)}</select>
+                          {(() => {
+                            const role_trainers = userList.filter((user) => {
+                              const usrobj = volunteerRoleQualifications[user.id]
+                              return user.id != addVolId && usrobj && usrobj[role] == 'Trainer'
+                            })
+                              const is_trainee = (volunteerRoleQualifications[addVolId]) && volunteerRoleQualifications[addVolId][role] == 'Trainee'
+                            return is_trainee && (<>
+                                {/*addVolId && (<span>{profiles.find(p => p.id == addVolId).full_name ?? 'This volunteer'} is in training for {role}</span>)*/}
+                                <select value={addTrainerVolId} onChange={e => setTrainerVolId(e.target.value)} style={inputStyle}>
+                                                  <option value="">— Select trainer —</option>
+                                                  {role_trainers.map(t => (<option key={t.id} value={t.id}>{t.full_name}</option>))}
+                                                  </select></>)
+                          })()}
                           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                             {[{ value: 'every', label: 'Every week' }, { value: 'odd', label: '1st & 3rd' }, { value: 'even', label: '2nd & 4th' }].map(opt => (<button key={opt.value} type="button" onClick={() => setAddWeekPattern(opt.value)} style={{ ...pillBtn(addWeekPattern === opt.value, false), fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}>{opt.label}</button>))}
                           </div>
@@ -2357,8 +2405,12 @@ export default function AdminPage() {
           </div>
         )}
 
-      {tab === 'volunteerTraining' && (
-              <VolunteerTraining supabase={supabase} onSelectVolunteer={(v) => openVolunteer(v)} showEmptyPositions={true}/>
+      { tab === 'volunteerRoleTraining' && (
+              <RoleTrainings supabase={supabase} profile={profile} />
+      )}
+
+      {tab === 'volunteerPositions' && (
+              <VolunteerPositions supabase={supabase} onSelectVolunteer={(v) => openVolunteer(v)} showEmptyPositions={true}/>
       )}
 
         {/* ── VOLUNTEERS LIST ────────────────────────────────────────────────── */}

@@ -30,7 +30,7 @@ function badgeStyle(color) {
     fontWeight: 500,
     background: color + '22',
     color,
-    border: `1px solid ${color}55`,
+    border: `1px solid ${color}`,
   }
 }
 
@@ -49,7 +49,7 @@ function pillBtn(active) {
 }
 
 function positionName(position) {
-  if (typeof position === 'string') return position
+  if (typeof position === 'string') return position;
   return position?.name ?? position?.label ?? position?.title ?? position?.default_role ?? ''
 }
 
@@ -114,15 +114,16 @@ function groupByTrainingStatus(volunteers, position, roleOverrides) {
 // ── One volunteer row, expandable into role management ───────────────────────
 function VolunteerRow({
   volunteer,
-  // Changed format: '' -> {role: '', status ''}
   roles,
   allRoles,
+  hours,
   expanded,
   onToggle,
   onSelectVolunteer,
   onAddRole,
   onRemoveRole,
   isPending,
+  groupRole,
   error,
 }) {
   const [selectedRole, setSelectedRole] = useState('')
@@ -146,7 +147,7 @@ function VolunteerRow({
 
   const trainerRoles = roles.filter(roleInfo => roleInfo.status == 'Trainer')
   const trainedRoles = roles.filter(roleInfo => roleInfo.status == 'Trained')
-  const trainingRoles = roles.filter(roleInfo => roleInfo.status == 'Training')
+  const trainingRoles = roles.filter(roleInfo => roleInfo.status == 'Trainee')
 
   return (
     <div
@@ -211,6 +212,20 @@ function VolunteerRow({
               {AFFILIATION_LABELS[volunteer.affiliation] ?? volunteer.affiliation}
             </span>
           )}
+        <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+              padding: '0.25rem 0.55rem',
+              borderRadius: '6px',
+              border: `1px solid ${expanded ? 'var(--accent)' : 'var(--border)'}`,
+              background: !!(trainedRoles.find(r => r.role === groupRole)) && hours > 50 ? 'rgb(200,255,200)' : expanded ? 'rgba(2,65,107,0.08)' : 'var(--bg)',
+              color: expanded ? 'var(--accent)' : 'var(--muted)',
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+             }}>{(~~(hours*10))/10} hours</div>
           <button
             type="button"
             onClick={selectable ? () => onSelectVolunteer(volunteer) : undefined}
@@ -445,6 +460,7 @@ function PositionSection({
   onToggle,
   onSelectVolunteer,
   allRoles,
+  volunteerHours,
   roleOverrides,
   expandedVolunteerKeys,
   onToggleVolunteer,
@@ -571,12 +587,14 @@ function PositionSection({
                           volunteer={volunteer}
                           roles={volunteerRoleList(volunteer, roleOverrides)}
                           allRoles={allRoles}
+                          hours={volunteerHours && volunteerHours.find(r => r.volunteer_id == volunteer.id && r.role == name)?.total_hours}
                           expanded={expandedVolunteerKeys.has(rowKey)}
                           onToggle={() => onToggleVolunteer(rowKey)}
                           onSelectVolunteer={onSelectVolunteer}
                           onAddRole={onAddRole}
                           onRemoveRole={onRemoveRole}
                           isPending={pendingRole?.volunteerId === volunteer.id}
+                          groupRole={name}
                           error={roleErrors[volunteer.id]}
                         />
                       )
@@ -597,7 +615,7 @@ function PositionSection({
 // one expandable section per position. Each volunteer row expands into a small
 // role editor; persistence is delegated to the optional onAddRole/onRemoveRole
 // callbacks supplied by the parent.
-export default function VolunteerTraining({
+export default function VolunteerPositions({
 //  volunteers = [],
   positions = ROLES,
   onSelectVolunteer,
@@ -607,18 +625,20 @@ export default function VolunteerTraining({
   onNewAddRole,
   onNewRemoveRole,
   title = 'Volunteer Training',
-  subtitle = 'Volunteers grouped by the positions they are trained in.',
+  subtitle = 'Volunteers grouped by the positions they are trained in. Green hour lables indicate a volunteer is eligible to become a trainer.',
   loading = false,
   showEmptyPositions = false,
 }) {
   const [filterSearch, setFilterSearch] = useState('')
   const [filterAffiliation, setFilterAffiliation] = useState('all')
+  const [onlyHighHourTrained, setOnlyHighHourTrained] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
   const [showEmpty, setShowEmpty] = useState(showEmptyPositions)
   const [filtersOpen, setFiltersOpen] = useState(true)
   const [expanded, setExpanded] = useState(() => new Set())
 
   const [volunteers, setVolunteers] = useState([])
+  const [volunteerHours, setVolunteerHours]= useState([])
   const [roleOverrides, setRoleOverrides] = useState({})
   const [expandedVolunteerKeys, setExpandedVolunteerKeys] = useState(() => new Set())
   const [pendingRole, setPendingRole] = useState(null)
@@ -643,7 +663,30 @@ export default function VolunteerTraining({
       savedOverrides[row.person_id].push({role: row.role, status: row.qualification})
     }
     setRoleOverrides(savedOverrides)
+    console.log(savedOverrides)
+
+    const {data :hourdata, error :hourerror} = await supabase
+          .rpc('get_volunteer_hours_by_role', {});
+    if(hourerror){
+      setLoadError(hourerror.message)
+    } else {
+      setLoadError(null)
+    }
+    setVolunteerHours(hourdata);
   }
+
+  // Roles with more than 50 logged hours, keyed by volunteer id. Hours are
+  // tracked per volunteer and role, so the filter below checks each role
+  // separately (a volunteer may qualify for one role but not another).
+  const highHourRoles = useMemo(() => {
+    const byVolunteer = new Map()
+    for (const record of volunteerHours || []) {
+      if (!(Number(record.total_hours) > 50)) continue
+      if (!byVolunteer.has(record.volunteer_id)) byVolunteer.set(record.volunteer_id, new Set())
+      byVolunteer.get(record.volunteer_id).add(record.role)
+    }
+    return byVolunteer
+  }, [volunteerHours])
 
   async function pullVolunteersFromSupabase(){
     const {data, error} = await supabase
@@ -694,12 +737,18 @@ export default function VolunteerTraining({
       const roles = volunteerRoleList(v, roleOverrides)
 
       if (roles.length === 0) {
+        if (onlyHighHourTrained) return
         if (!groups.has('Unassigned')) groups.set('Unassigned', [])
         groups.get('Unassigned').push(v)
         return
       }
 
       roles.forEach(roleInfo => {
+        if (onlyHighHourTrained) {
+          const isTrained = roleInfo.status === 'Trained'
+          const hasHighHours = highHourRoles.get(v.id)?.has(roleInfo.role)
+          if (!isTrained || !hasHighHours) return
+        }
         if (!groups.has(roleInfo.role)) groups.set(roleInfo.role, [])
         groups.get(roleInfo.role).push(v)
       })
@@ -710,7 +759,7 @@ export default function VolunteerTraining({
       groups.delete(groups.find(info => info.role == 'Unassigned'))
     }*/
 
-    const showEmptyNow = showEmpty && !query
+    const showEmptyNow = showEmpty && !query && !onlyHighHourTrained
 
     return Array.from(groups.entries())
       .map(([name, list]) => ({
@@ -718,7 +767,7 @@ export default function VolunteerTraining({
         volunteers: [...list].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '')),
       }))
       .filter(group => showEmptyNow || group.volunteers.length > 0)
-  }, [volunteers, positions, filterSearch, filterAffiliation, showInactive, showEmpty, roleOverrides])
+  }, [volunteers, positions, filterSearch, filterAffiliation, showInactive, showEmpty, roleOverrides, onlyHighHourTrained, highHourRoles])
 
   // Delete and replace for now when a role updates
   async function onRemoveRole(volunteer,roleInfo,newRoles){
@@ -919,6 +968,14 @@ export default function VolunteerTraining({
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
+              <button
+                onClick={() => setOnlyHighHourTrained(on => !on)}
+                aria-pressed={onlyHighHourTrained}
+                title="Only show volunteers with more than 50 hours and a Trained qualification in that role"
+                style={pillBtn(onlyHighHourTrained)}
+              >
+                {onlyHighHourTrained ? 'Show All Volunteers' : 'Over 50 Hrs & Trained'}
+              </button>
               <button onClick={() => setShowInactive(s => !s)} style={pillBtn(showInactive)}>
                 {showInactive ? 'Hide Inactive' : 'Show Inactive'}
               </button>
@@ -962,6 +1019,7 @@ export default function VolunteerTraining({
               onToggle={() => togglePosition(group.name)}
               onSelectVolunteer={onSelectVolunteer}
               allRoles={allRoles}
+              volunteerHours={volunteerHours}
               roleOverrides={roleOverrides}
               expandedVolunteerKeys={expandedVolunteerKeys}
               onToggleVolunteer={toggleVolunteer}
