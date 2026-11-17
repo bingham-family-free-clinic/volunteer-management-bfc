@@ -3,6 +3,7 @@ import JSZip from 'jszip'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, getRoleCapacity } from '../lib/constants'
 import { formatSlotFull, formatSlotDayLabel, formatSlotTime, TIMEZONE_LABEL } from '../lib/interview-schedule'
+import { useConfirm } from '../lib/ConfirmDialog'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1557,6 +1558,9 @@ function AffiliationExtras({ onboardForm, setOnboardForm, labelStyle, inputStyle
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
+  // ── Confirmation modal hook (lib/ConfirmDialog) ─────────────────────────
+  const confirmAction = useConfirm()
+
   // Pipeline state
   const [applicants,      setApplicants]      = useState([])
   const [completed,       setCompleted]       = useState([])
@@ -2348,7 +2352,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // Removes one file from the item (permanently deletes it from storage).
   async function handleRemoveFile(applicantId, item, fileName) {
-    if (!window.confirm(`Remove "${fileName}" from ${item.label}? This can't be undone.`)) return
+    const ok = await confirmAction({
+      label: 'Remove this file?',
+      confirmText: 'Yes',
+      cancelText: 'No',
+      danger: true,
+    })
+    if (!ok) return
 
     setRemovingFile({ itemKey: item.key, name: fileName })
 
@@ -2379,14 +2389,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // left alone: "Object not found" is also what a permissions failure looks
   // like, so deleting here could destroy a file this session merely can't see.
   async function handleClearBrokenFile(applicantId, item) {
-    const detail = checklistFiles[item.key]?.error || ''
-    const missing = /not_found|NoSuchKey|Object not found/i.test(detail)
-    const confirmed = window.confirm(
-      missing
-        ? `The stored file for "${item.label}" is missing from Storage.\n\nRemove it from the checklist? Only the reference is cleared — nothing is deleted from Storage.`
-        : `Couldn't read the stored file for "${item.label}" (${detail}).\n\nRemove it from the checklist anyway? The file itself is not deleted, but the checklist will no longer point to it.`
-    )
-    if (!confirmed) return
+    const ok = await confirmAction({
+      label: 'Missing file. Delete the reference?',
+      confirmText: 'Yes',
+      cancelText: 'No',
+      danger: false,
+    })
+    if (!ok) return
 
     setRemovingFile({ itemKey: item.key, name: null })
     try {
