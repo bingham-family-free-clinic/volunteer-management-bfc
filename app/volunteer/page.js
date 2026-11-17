@@ -1350,7 +1350,7 @@ function VolunteerPageInner() {
   // the admin page and the OSSM page, so this builds a list rather than
   // picking a single destination.
   const switchViewItems = [
-    ...(profile?.role === 'admin'
+    ...(profile?.role === 'admin' && profile?.default_role !== 'Office Manager'
       ? [{ key: 'admin', label: 'Switch View', onClick: () => { window.location.href = '/admin' } }]
       : profile?.default_role === 'Clinical Supervisor' || profile?.default_role === 'Office Manager'
       ? [{ key: 'clinical-supervisor', label: 'Switch View', onClick: () => { window.location.href = '/clinical-supervisor' } }]
