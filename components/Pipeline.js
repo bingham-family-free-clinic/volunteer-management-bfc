@@ -132,10 +132,15 @@ const CHECKLIST_ITEMS = [
 
 const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
 
+// The parking pass and confidentiality agreement are filled out as PDF forms
+// (in their own modals) rather than uploaded as files.
+const FORM_CHECKLIST_ITEMS = FILE_CHECKLIST_ITEMS.filter(i => i.key === 'parking_pass' || i.key === 'confidentiality_agreement')
+const FORM_ITEM_KEYS       = new Set(FORM_CHECKLIST_ITEMS.map(i => i.key))
+
 // Items on the onboarding checklist that take uploaded documents (step 3). The
 // confidentiality agreement and parking pass are generated as PDFs by their own
 // modals, so they aren't listed here.
-const ZIP_UPLOAD_ITEMS = FILE_CHECKLIST_ITEMS.filter(i => i.key !== 'parking_pass' && i.key !== 'confidentiality_agreement')
+const ZIP_UPLOAD_ITEMS = FILE_CHECKLIST_ITEMS.filter(i => !FORM_ITEM_KEYS.has(i.key))
 
 // ── Onboarding checklist document storage ────────────────────────────────────
 // Each checklist item still stores ONE path in onboarding_checklists
@@ -1744,12 +1749,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
         if (isRecent) {
           const existing = recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }
-          const next     = { ...existing, parking_pass: true, parking_pass_url: filename }
+          const next     = { ...existing, parking_pass: true, parking_pass_url: filename,
+                             volunteer_uploads: (existing.volunteer_uploads || []).filter(k => k !== 'parking_pass') }
           setRecentChecklist(prev => ({ ...prev, [applicantId]: next }))
           await supabase.from('onboarding_checklists')
             .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
         } else {
-          const next = { ...checklist, parking_pass: true, parking_pass_url: filename }
+          const next = { ...checklist, parking_pass: true, parking_pass_url: filename,
+                         volunteer_uploads: (checklist.volunteer_uploads || []).filter(k => k !== 'parking_pass') }
           setChecklist(next)
           await supabase.from('onboarding_checklists')
             .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
@@ -1805,12 +1812,14 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
         if (isRecent) {
           const existing = recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }
-          const next     = { ...existing, confidentiality_agreement: true, confidentiality_url: filename }
+          const next     = { ...existing, confidentiality_agreement: true, confidentiality_url: filename,
+                             volunteer_uploads: (existing.volunteer_uploads || []).filter(k => k !== 'confidentiality_agreement') }
           setRecentChecklist(prev => ({ ...prev, [applicantId]: next }))
           await supabase.from('onboarding_checklists')
             .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
         } else {
-          const next = { ...checklist, confidentiality_agreement: true, confidentiality_url: filename }
+          const next = { ...checklist, confidentiality_agreement: true, confidentiality_url: filename,
+                         volunteer_uploads: (checklist.volunteer_uploads || []).filter(k => k !== 'confidentiality_agreement') }
           setChecklist(next)
           await supabase.from('onboarding_checklists')
             .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
@@ -3111,6 +3120,49 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     )
   }
 
+  // Parking pass / confidentiality agreement: the document is a PDF form that
+  // gets filled out in its own modal. The row works like FileRow, except
+  // "+ Attach File" becomes "Fill Out Form" and the per-file "Remove" becomes
+  // "Edit". Once a form has been filled out there is no button row — the
+  // "Edit" button on the saved file is the way back into the form.
+  function FormRow({ item, applicantId, applicantName }) {
+    const path        = checklist[item.urlKey] || null
+    const fileName    = path ? path.split('/').pop() : null
+    const isVolunteer = (checklist.volunteer_uploads || []).includes(item.key)
+
+    const openForm = () => {
+      if (item.key === 'confidentiality_agreement') openConfidentialityModal(applicantId, applicantName)
+      else openParkingPassModal(applicantId, applicantName)
+    }
+
+    const btnStyle = { padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.4rem' }}>
+        {fileName ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button type="button" onClick={() => openChecklistFile(item, fileName)} title="Open file"
+              style={{ background: 'none', border: 'none', padding: 0, color: C.blue, textDecoration: 'underline', cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {fileName}
+            </button>
+            <button type="button" onClick={openForm} style={{ ...btnStyle, flexShrink: 0 }}>
+              Edit
+            </button>
+            {isVolunteer && (
+              <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44`, whiteSpace: 'nowrap', flexShrink: 0 }}>volunteer upload</span>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button type="button" onClick={openForm} style={{ ...btnStyle, fontWeight: 600 }}>
+              Fill Out Form
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // ─── Validity ─────────────────────────────────────────────────────────────
 
   function step1Valid() {
@@ -3966,9 +4018,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                  {CHECKLIST_ITEMS
-                    .filter(item => item.key !== 'parking_pass' && item.key !== 'confidentiality_agreement')
-                    .map(item => {
+                  {CHECKLIST_ITEMS.map(item => {
                       const checked = checklist[item.key]
                       const isRequired = requiredChecks.includes(item.key)
                       return (
@@ -3986,7 +4036,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                             </div>
                             {checked && <span style={{ fontSize: '0.72rem', color: C.blue, fontWeight: 600, flexShrink: 0 }}>Complete</span>}
                           </div>
-                          {item.bucket && <FileRow item={item} applicantId={applicant.id} />}
+                          {item.bucket && (FORM_ITEM_KEYS.has(item.key)
+                            ? <FormRow item={item} applicantId={applicant.id} applicantName={applicant.full_name} />
+                            : <FileRow item={item} applicantId={applicant.id} />)}
                         </div>
                       )
                     })

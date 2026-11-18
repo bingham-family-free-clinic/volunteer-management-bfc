@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } f
 import JSZip from 'jszip'
 import { supabase } from '../../lib/supabase'
 import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE } from '../../lib/constants'
-import { VOLUNTEER_UPLOAD_DOCS, getRequiredDocKeys, hasSavedOnboardingPrefs, isDocNotNeeded } from '../../lib/onboardingDocs'
+import { VOLUNTEER_UPLOAD_DOCS, VOLUNTEER_FORM_DOCS, VOLUNTEER_ONBOARDING_DOCS, getRequiredDocKeys, hasSavedOnboardingPrefs, isDocNotNeeded } from '../../lib/onboardingDocs'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import { MessageCard } from '../../components/MessageCard'
@@ -691,6 +691,13 @@ function VolunteerPageInner() {
   const [onboardingRemovingFile, setOnboardingRemovingFile] = useState(null) // { itemKey, name } | null
   const onboardingFileRefs = useRef({})
 
+  // ── Onboarding form documents (parking pass / confidentiality agreement) ──
+  // These aren't uploads: the volunteer fills out a form and the PDF it
+  // generates is saved to their checklist automatically.
+  const [onboardingFormModal,  setOnboardingFormModal]  = useState(null)   // { itemKey } | null
+  const [onboardingFormSaving, setOnboardingFormSaving] = useState(false)
+  const onboardingFormIframeRef = useRef(null)
+
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
   const [schedule, setSchedule] = useState([])
   const [MyCallouts, setMyCallouts] = useState([])
@@ -1293,6 +1300,78 @@ function VolunteerPageInner() {
         })
     }
   }, [onboardingApp?.id, onboardingPathsKey])
+
+  // ── Onboarding form documents (parking pass / confidentiality agreement) ──
+  // The form page posts the PDF it generated back to us; we save it to the
+  // item's bucket and point the checklist at it, exactly like an uploaded file
+  // (the RPC clears the item's approval so an admin reviews it).
+  useEffect(() => {
+    async function onMessage(e) {
+      if (!e.data || !onboardingFormModal || !onboardingApp?.id) return
+
+      const type = e.data.type
+      if (type !== 'parking_pass_pdf' && type !== 'confidentiality_agreement_pdf') return
+
+      const item = VOLUNTEER_FORM_DOCS.find(d => `${d.form}_pdf` === type)
+      if (!item) return
+
+      setOnboardingFormSaving(true)
+      try {
+        const byteChars = atob(e.data.base64)
+        const byteNums  = new Array(byteChars.length)
+        for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i)
+        const blob     = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' })
+        const path     = `${onboardingApp.id}/${item.key}-${Date.now()}.pdf`
+
+        const { error: upErr } = await supabase.storage
+          .from(item.bucket).upload(path, blob, { contentType: 'application/pdf', upsert: true })
+        if (upErr) throw upErr
+
+        const { error: rpcErr } = await supabase.rpc('volunteer_set_checklist_file', {
+          p_applicant_id: onboardingApp.id,
+          p_item_key: item.key,
+          p_url: path,
+        })
+        if (rpcErr) {
+          await supabase.storage.from(item.bucket).remove([path])   // don't leave the new PDF orphaned
+          throw rpcErr
+        }
+
+        // The PDF this one replaces is superseded — delete it so they don't
+        // pile up. Best-effort — a permissions failure only warns.
+        const oldPath = onboardingChecklist?.[item.urlKey]
+        if (oldPath && oldPath !== path) {
+          const { error: delErr } = await supabase.storage.from(item.bucket).remove([oldPath])
+          if (delErr) console.warn(`Could not delete old ${item.label} file:`, delErr)
+        }
+
+        setOnboardingChecklist(prev => ({
+          ...(prev || {}),
+          [item.key]: false,       // the RPC cleared the approval — an admin reviews it
+          [item.urlKey]: path,
+          volunteer_uploads: Array.from(new Set([...(prev?.volunteer_uploads || []), item.key])),
+        }))
+
+        onboardingFormIframeRef.current?.contentWindow?.postMessage({ type: `${item.form}_saved` }, '*')
+        showToast(`${item.label} saved`, 'success')
+        setOnboardingFormModal(null)
+      } catch (err) {
+        showToast(err.message || 'Upload failed', 'error')
+        onboardingFormIframeRef.current?.contentWindow?.postMessage(
+          { type: `${item.form}_error`, message: err.message }, '*'
+        )
+      }
+      setOnboardingFormSaving(false)
+    }
+
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [onboardingFormModal, onboardingApp, onboardingChecklist])
+
+  function openOnboardingForm(item) {
+    setOnboardingFormModal({ itemKey: item.key })
+    setOnboardingFormSaving(false)
+  }
 
   // Re-reads the item's current path/flag right before changing it, so a file
   // an admin uploaded while this page was open isn't lost.
@@ -1921,10 +2000,14 @@ function VolunteerPageInner() {
                 </p>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                  {VOLUNTEER_UPLOAD_DOCS.map(item => {
+                  {VOLUNTEER_ONBOARDING_DOCS.map(item => {
                     const approved       = onboardingChecklist?.[item.key] === true
                     const isRequired     = onboardingRequiredKeys.includes(item.key)
-                    const isOptional     = onboardingPrefsSaved && item.key === 'licenses_certifications'
+                    // Form documents (parking pass / confidentiality agreement)
+                    // are filled out rather than attached, but sit on the same
+                    // checklist as everything else.
+                    const isForm         = !!item.form
+                    const isOptional     = onboardingPrefsSaved && (item.key === 'licenses_certifications' || isForm)
                     // An admin checking a document overrides the position-based
                     // "not needed" state �?" they want that file.
                     const notNeeded      = !approved && isDocNotNeeded(item.key, onboardingAffiliation, onboardingRole)
@@ -1938,6 +2021,9 @@ function VolunteerPageInner() {
                     // document (removing the last file stores an empty zip) —
                     // treat it as "no file yet".
                     const hasFile        = !!storedPath && (!fileEntry || files.length > 0 || fileEntry.loading || !!fileEntry.error)
+                    // A form document is a single PDF, so its name comes straight
+                    // off the stored path.
+                    const formFileName   = isForm && storedPath ? storedPath.split('/').pop() : null
                     // The "admin approved" badge — status only. The volunteer
                     // can still add/remove files; doing so clears the approval
                     // so an admin re-reviews (enforced server-side by the RPC).
@@ -1999,6 +2085,54 @@ function VolunteerPageInner() {
                           )}
                         </div>
 
+                        {isForm ? (
+                          /* Form documents: no file to attach — the volunteer
+                             fills out the form and the PDF it generates is
+                             saved for them. Once a form is filled out there is
+                             no button row; "Edit" reopens the form. */
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.55rem' }}>
+                            {formFileName ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => openOnboardingFile(item, formFileName)}
+                                  title="Open file"
+                                  style={{ background: 'none', border: 'none', padding: 0, color: '#0369a1', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                >
+                                  {formFileName}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openOnboardingForm(item)}
+                                  style={{ flexShrink: 0, padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => openOnboardingForm(item)}
+                                  style={{
+                                    padding: '0.35rem 0.75rem',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    fontFamily: 'DM Sans, sans-serif',
+                                    cursor: 'pointer',
+                                    background: 'var(--surface)',
+                                    color: 'var(--muted)',
+                                    border: '1px solid var(--border)',
+                                  }}
+                                >
+                                  Fill Out Form
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.55rem' }}>
                           <input
                             ref={el => { onboardingFileRefs.current[item.key] = el }}
@@ -2113,6 +2247,8 @@ function VolunteerPageInner() {
                             </>
                           )}
                         </div>
+                          </>
+                        )}
                       </div>
                     )
                   })}
@@ -2608,6 +2744,46 @@ function VolunteerPageInner() {
         {isMobile && (
           <BottomNav activeTab={tab} onSelectTab={handleTabChange} unreadCount={unreadCount} />
         )}
+
+        {/* Onboarding form document (parking pass / confidentiality agreement) */}
+        {onboardingFormModal && (() => {
+          const formItem = VOLUNTEER_FORM_DOCS.find(d => d.key === onboardingFormModal.itemKey)
+          if (!formItem) return null
+          const today  = new Date().toISOString().slice(0, 10)
+          const params = new URLSearchParams({ name: profile?.full_name || '', date: today })
+          const src    = `/${formItem.formPage}?${params.toString()}`
+
+          return (
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 1300, background: 'rgba(2,30,55,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}
+              onClick={e => { if (e.target === e.currentTarget && !onboardingFormSaving) setOnboardingFormModal(null) }}
+            >
+              <div style={{ background: 'var(--surface)', borderRadius: '14px', border: '1px solid var(--border)', boxShadow: '0 8px 48px rgba(2,65,107,0.22)', width: '100%', maxWidth: formItem.formWidth || 760, maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1.25rem', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#02416b', fontFamily: 'DM Sans, sans-serif', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    {formItem.label}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {onboardingFormSaving && <span style={{ fontSize: '0.78rem', color: '#0369a1', fontStyle: 'italic', fontFamily: 'DM Sans, sans-serif' }}>Saving PDF…</span>}
+                    <button
+                      onClick={() => setOnboardingFormModal(null)}
+                      disabled={onboardingFormSaving}
+                      style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: onboardingFormSaving ? 'not-allowed' : 'pointer', fontSize: '1.2rem', lineHeight: 1, padding: '0.1rem 0.3rem' }}
+                      title="Close"
+                    >×</button>
+                  </div>
+                </div>
+                <iframe
+                  ref={onboardingFormIframeRef}
+                  src={src}
+                  title={formItem.label}
+                  style={{ flex: 1, border: 'none', minHeight: 600, background: '#f9fafb' }}
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                />
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Toast */}
         {toast && (

@@ -1,6 +1,7 @@
 -- Volunteer-facing onboarding document uploads
 --
--- Safe to re-run: each policy is only created when it is missing.
+-- Safe to re-run: the RPCs are replaced wholesale and each policy is dropped
+-- and recreated with the same (or a wider) definition.
 --
 -- 1. Adds onboarding_checklists.volunteer_uploads so the admin pipeline can
 --    flag files that were uploaded by the volunteer. Existing rows get an
@@ -11,10 +12,13 @@
 --    clobbering other columns. The volunteer RPC allows the write even when
 --    the item isn't required for their position or is already approved — the
 --    approval tick is cleared instead so the new files get re-reviewed.
+--    The five uploaded documents are covered, plus the two documents the
+--    volunteer fills out as a form (parking pass, confidentiality agreement),
+--    whose PDF is saved for them instead of being attached.
 -- 3. Adds SELECT access so volunteers can read their own application row and
 --    checklist state.
--- 4. Adds storage policies for the five volunteer-upload buckets, scoped to
---    the applicant's own folder (<application id>/...).
+-- 4. Adds storage policies for the seven volunteer-facing onboarding buckets,
+--    scoped to the applicant's own folder (<application id>/...).
 
 -- ─── 1. Uploader tracking ────────────────────────────────────────────────────
 alter table public.onboarding_checklists
@@ -22,6 +26,15 @@ alter table public.onboarding_checklists
 
 comment on column public.onboarding_checklists.volunteer_uploads is
   'Checklist item keys whose current file was uploaded by the volunteer. Empty/missing key = admin upload.';
+
+-- The two form documents (parking pass, confidentiality agreement) store their
+-- PDF path here. The columns are only added when missing, so this is a no-op on
+-- a table that already has them.
+alter table public.onboarding_checklists
+  add column if not exists confidentiality_url text;
+
+alter table public.onboarding_checklists
+  add column if not exists parking_pass_url text;
 
 -- ─── 2. Volunteer write RPC ──────────────────────────────────────────────────
 create or replace function public.volunteer_set_checklist_file(
@@ -50,7 +63,8 @@ begin
   end if;
 
   if p_item_key not in (
-    'background_check', 'id_check', 'immunization', 'tb_test', 'licenses_certifications'
+    'background_check', 'id_check', 'immunization', 'tb_test', 'licenses_certifications',
+    'confidentiality_agreement', 'parking_pass'
   ) then
     raise exception 'Unknown document type';
   end if;
@@ -95,11 +109,15 @@ begin
          immunization     = case when p_item_key = 'immunization' then false else immunization end,
          tb_test          = case when p_item_key = 'tb_test' then false else tb_test end,
          licenses_certifications = case when p_item_key = 'licenses_certifications' then false else licenses_certifications end,
+         confidentiality_agreement = case when p_item_key = 'confidentiality_agreement' then false else confidentiality_agreement end,
+         parking_pass     = case when p_item_key = 'parking_pass' then false else parking_pass end,
          background_check_url = case when p_item_key = 'background_check' then p_url else background_check_url end,
          id_check_url         = case when p_item_key = 'id_check' then p_url else id_check_url end,
          immunization_url     = case when p_item_key = 'immunization' then p_url else immunization_url end,
          tb_test_url          = case when p_item_key = 'tb_test' then p_url else tb_test_url end,
          licenses_url         = case when p_item_key = 'licenses_certifications' then p_url else licenses_url end,
+         confidentiality_url  = case when p_item_key = 'confidentiality_agreement' then p_url else confidentiality_url end,
+         parking_pass_url     = case when p_item_key = 'parking_pass' then p_url else parking_pass_url end,
          volunteer_uploads    = array(
            select distinct k
              from unnest(coalesce(volunteer_uploads, '{}'::text[]) || array[p_item_key]) as t(k)
@@ -235,115 +253,99 @@ $$;
 
 -- ─── 4. Volunteer storage access ─────────────────────────────────────────────
 -- Files are written to <application id>/<item key>-<timestamp>.zip by
--- app/volunteer/page.js, matching the admin pipeline's path scheme.
+-- app/volunteer/page.js, matching the admin pipeline's path scheme. The two
+-- form documents (parking pass, confidentiality agreement) are written the
+-- same way, with .pdf instead of .zip.
+--
+-- Safe to re-run: each policy is dropped and recreated with the same name and
+-- the full bucket list, so an already-applied run picks up the two form
+-- buckets.
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-     where schemaname = 'storage'
-       and tablename = 'objects'
-       and policyname = 'Volunteers can read own onboarding documents'
-  ) then
-    create policy "Volunteers can read own onboarding documents"
-      on storage.objects
-      for select
-      to authenticated
-      using (
-        bucket_id = any (array[
-          'onboarding-background-checks',
-          'onboarding-ids',
-          'onboarding-immunizations',
-          'onboarding-tb-tests',
-          'onboarding-licenses'
-        ])
-        and exists (
-          select 1
-            from public.volunteer_applications va
-           where va.id::text = (storage.foldername(name))[1]
-             and lower(va.email) = lower(auth.jwt() ->> 'email')
-        )
-      );
-  end if;
-end
-$$;
+drop policy if exists "Volunteers can read own onboarding documents" on storage.objects;
+create policy "Volunteers can read own onboarding documents"
+  on storage.objects
+  for select
+  to authenticated
+  using (
+    bucket_id = any (array[
+      'onboarding-background-checks',
+      'onboarding-ids',
+      'onboarding-immunizations',
+      'onboarding-tb-tests',
+      'onboarding-licenses',
+      'onboarding-confidentiality',
+      'onboarding-parking-passes'
+    ])
+    and exists (
+      select 1
+        from public.volunteer_applications va
+       where va.id::text = (storage.foldername(name))[1]
+         and lower(va.email) = lower(auth.jwt() ->> 'email')
+    )
+  );
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-     where schemaname = 'storage'
-       and tablename = 'objects'
-       and policyname = 'Volunteers can upload own onboarding documents'
-  ) then
-    create policy "Volunteers can upload own onboarding documents"
-      on storage.objects
-      for insert
-      to authenticated
-      with check (
-        bucket_id = any (array[
-          'onboarding-background-checks',
-          'onboarding-ids',
-          'onboarding-immunizations',
-          'onboarding-tb-tests',
-          'onboarding-licenses'
-        ])
-        and exists (
-          select 1
-            from public.volunteer_applications va
-           where va.id::text = (storage.foldername(name))[1]
-             and lower(va.email) = lower(auth.jwt() ->> 'email')
-        )
-      );
-  end if;
-end
-$$;
+drop policy if exists "Volunteers can upload own onboarding documents" on storage.objects;
+create policy "Volunteers can upload own onboarding documents"
+  on storage.objects
+  for insert
+  to authenticated
+  with check (
+    bucket_id = any (array[
+      'onboarding-background-checks',
+      'onboarding-ids',
+      'onboarding-immunizations',
+      'onboarding-tb-tests',
+      'onboarding-licenses',
+      'onboarding-confidentiality',
+      'onboarding-parking-passes'
+    ])
+    and exists (
+      select 1
+        from public.volunteer_applications va
+       where va.id::text = (storage.foldername(name))[1]
+         and lower(va.email) = lower(auth.jwt() ->> 'email')
+    )
+  );
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-     where schemaname = 'storage'
-       and tablename = 'objects'
-       and policyname = 'Volunteers can update own onboarding documents'
-  ) then
-    create policy "Volunteers can update own onboarding documents"
-      on storage.objects
-      for update
-      to authenticated
-      using (
-        bucket_id = any (array[
-          'onboarding-background-checks',
-          'onboarding-ids',
-          'onboarding-immunizations',
-          'onboarding-tb-tests',
-          'onboarding-licenses'
-        ])
-        and exists (
-          select 1
-            from public.volunteer_applications va
-           where va.id::text = (storage.foldername(name))[1]
-             and lower(va.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-      with check (
-        bucket_id = any (array[
-          'onboarding-background-checks',
-          'onboarding-ids',
-          'onboarding-immunizations',
-          'onboarding-tb-tests',
-          'onboarding-licenses'
-        ])
-        and exists (
-          select 1
-            from public.volunteer_applications va
-           where va.id::text = (storage.foldername(name))[1]
-             and lower(va.email) = lower(auth.jwt() ->> 'email')
-        )
-      );
-  end if;
-end
-$$;
+drop policy if exists "Volunteers can update own onboarding documents" on storage.objects;
+create policy "Volunteers can update own onboarding documents"
+  on storage.objects
+  for update
+  to authenticated
+  using (
+    bucket_id = any (array[
+      'onboarding-background-checks',
+      'onboarding-ids',
+      'onboarding-immunizations',
+      'onboarding-tb-tests',
+      'onboarding-licenses',
+      'onboarding-confidentiality',
+      'onboarding-parking-passes'
+    ])
+    and exists (
+      select 1
+        from public.volunteer_applications va
+       where va.id::text = (storage.foldername(name))[1]
+         and lower(va.email) = lower(auth.jwt() ->> 'email')
+    )
+  )
+  with check (
+    bucket_id = any (array[
+      'onboarding-background-checks',
+      'onboarding-ids',
+      'onboarding-immunizations',
+      'onboarding-tb-tests',
+      'onboarding-licenses',
+      'onboarding-confidentiality',
+      'onboarding-parking-passes'
+    ])
+    and exists (
+      select 1
+        from public.volunteer_applications va
+       where va.id::text = (storage.foldername(name))[1]
+         and lower(va.email) = lower(auth.jwt() ->> 'email')
+    )
+  );
 
 -- ─── 5. Retire the "training" pipeline stage ─────────────────────────────────
 -- The Training stage was removed from the admin pipeline. Anyone still sitting
@@ -468,6 +470,56 @@ begin
           'onboarding-immunizations',
           'onboarding-tb-tests',
           'onboarding-licenses'
+        ])
+        and exists (
+          select 1
+            from public.profiles p
+           where p.id = auth.uid()
+             and p.role = 'admin'
+        )
+      );
+  end if;
+end
+$$;
+
+-- ─── 8. Admin access to the onboarding form document buckets ────────────────
+-- The parking pass and confidentiality agreement live in their own buckets
+-- (the volunteer or an admin fills out the form and the PDF is saved there).
+-- The pipeline uploads those PDFs and opens them from the onboarding
+-- checklist, which needs the same read/write access as the five upload
+-- buckets.
+--
+-- Safe to re-run: the policy is only created when it is missing, and it is
+-- additive — it never replaces an existing policy.
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'storage'
+       and tablename = 'objects'
+       and policyname = 'Admins can manage onboarding form documents'
+  ) then
+    create policy "Admins can manage onboarding form documents"
+      on storage.objects
+      for all
+      to authenticated
+      using (
+        bucket_id = any (array[
+          'onboarding-confidentiality',
+          'onboarding-parking-passes'
+        ])
+        and exists (
+          select 1
+            from public.profiles p
+           where p.id = auth.uid()
+             and p.role = 'admin'
+        )
+      )
+      with check (
+        bucket_id = any (array[
+          'onboarding-confidentiality',
+          'onboarding-parking-passes'
         ])
         and exists (
           select 1
