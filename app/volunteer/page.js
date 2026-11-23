@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } from 'react'
 import JSZip from 'jszip'
 import { supabase } from '../../lib/supabase'
-import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE } from '../../lib/constants'
+import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE, SCHOOLS, MAJORS, AFFILIATION_OPTIONS } from '../../lib/constants'
 import { ONBOARDING_DOCS, ONBOARDING_UPLOAD_DOCS, ONBOARDING_FORM_DOCS, getRequiredDocKeys, hasSavedOnboardingPrefs, isDocNotNeeded, isDocOptional } from '../../lib/onboardingDocs'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
@@ -57,6 +57,80 @@ const S = {
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
   },
+}
+
+const EMPTY_ONBOARDING_AFFILIATION_FORM = {
+  affiliation: '',
+  sma_name: '',
+  sma_contact: '',
+  school: '',
+  major: '',
+  intern_school: '',
+  intern_department: '',
+  advisor_name: '',
+  advisor_contact: '',
+  credentials: '',
+  license_exp: '',
+  bls_exp: '',
+  dea_exp: '',
+  ftca_exp: '',
+  tb_exp: '',
+}
+
+// Builds the volunteer's controlled affiliation form from the application row.
+// The saved affiliation details win, with the profile's TB date used as the
+// same fallback the admin pipeline uses.
+function buildOnboardingAffiliationForm(app, profile) {
+  let saved = app?.onboard_affil_data
+  if (typeof saved === 'string') {
+    try { saved = JSON.parse(saved) } catch { saved = {} }
+  }
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) saved = {}
+
+  const form = {}
+  for (const key of Object.keys(EMPTY_ONBOARDING_AFFILIATION_FORM)) {
+    const value = saved[key]
+    form[key] = value == null ? '' : String(value)
+  }
+
+  return {
+    ...form,
+    affiliation: app?.onboard_affiliation || form.affiliation,
+    school: form.school || app?.school || '',
+    major: form.major || app?.program || '',
+    tb_exp: profile?.tb_exp || form.tb_exp || '',
+  }
+}
+
+// Same shape the pipeline saves to onboard_affil_data. Default position is
+// deliberately excluded — it remains an admin-only setting.
+function buildOnboardingAffiliationData(form) {
+  return {
+    sma_name: form.sma_name || '',
+    sma_contact: form.sma_contact || '',
+    school: form.school || '',
+    major: form.major || '',
+    intern_school: form.intern_school || '',
+    intern_department: form.intern_department || '',
+    advisor_name: form.advisor_name || '',
+    advisor_contact: form.advisor_contact || '',
+    credentials: form.credentials || '',
+    license_exp: form.license_exp || '',
+    bls_exp: form.bls_exp || '',
+    dea_exp: form.dea_exp || '',
+    ftca_exp: form.ftca_exp || '',
+    tb_exp: form.tb_exp || '',
+  }
+}
+
+// Mirrors the pipeline's Step 1 validation.
+function isOnboardingAffiliationValid(form) {
+  if (!form.affiliation) return false
+  if (form.affiliation === 'student') return !!form.school
+  if (form.affiliation === 'intern') {
+    return !!(form.intern_school && form.intern_department && form.advisor_name && form.advisor_contact)
+  }
+  return true
 }
 
 // ── Onboarding checklist document storage ────────────────────────────────────
@@ -215,6 +289,118 @@ function CredentialInput({ fieldKey, label, value, onChange, allowNA = false }) 
       </div>
     </div>
   )
+}
+
+// Extra affiliation fields from the pipeline's onboarding Step 1: missionary
+// assignment, academic info, internship details, or provider credentials.
+function AffiliationExtras({ form, setForm }) {
+  const update = (key, value) => setForm(prev => ({ ...prev, [key]: value }))
+  const sectionStyle = {
+    padding: '1rem',
+    background: 'var(--bg)',
+    borderRadius: '10px',
+    border: '1px solid var(--border)',
+  }
+
+  if (form.affiliation === 'missionary') {
+    return (
+      <div style={sectionStyle}>
+        <p style={{ ...S.label, marginBottom: '0.75rem' }}>Mission Service Assignment</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+          <div>
+            <label style={S.label}>SMA Name</label>
+            <input value={form.sma_name} onChange={e => update('sma_name', e.target.value)} placeholder="Full name" style={S.input} />
+          </div>
+          <div>
+            <label style={S.label}>SMA Contact</label>
+            <input value={form.sma_contact} onChange={e => update('sma_contact', e.target.value)} placeholder="Phone or email" style={S.input} />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (form.affiliation === 'student') {
+    return (
+      <div style={sectionStyle}>
+        <p style={{ ...S.label, marginBottom: '0.75rem' }}>Academic Information</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+          <div>
+            <label style={S.label}>School <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <select value={form.school} onChange={e => update('school', e.target.value)} style={S.input}>
+              <option value="">— Select school —</option>
+              {SCHOOLS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={S.label}>Major <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <select value={form.major} onChange={e => update('major', e.target.value)} style={S.input}>
+              <option value="">— Select major —</option>
+              {MAJORS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (form.affiliation === 'intern') {
+    return (
+      <div style={sectionStyle}>
+        <p style={{ ...S.label, marginBottom: '0.75rem' }}>Internship Details</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+          <div>
+            <label style={S.label}>School <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <input value={form.intern_school} onChange={e => update('intern_school', e.target.value)} style={S.input} />
+          </div>
+          <div>
+            <label style={S.label}>Department <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <input value={form.intern_department} onChange={e => update('intern_department', e.target.value)} style={S.input} />
+          </div>
+          <div>
+            <label style={S.label}>Advisor Name <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <input value={form.advisor_name} onChange={e => update('advisor_name', e.target.value)} style={S.input} />
+          </div>
+          <div>
+            <label style={S.label}>Advisor Contact <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <input value={form.advisor_contact} onChange={e => update('advisor_contact', e.target.value)} style={S.input} />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (form.affiliation === 'provider') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <div style={sectionStyle}>
+          <p style={{ ...S.label, marginBottom: '0.75rem' }}>
+            Credentials / Licensure <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+          </p>
+          <input value={form.credentials} onChange={e => update('credentials', e.target.value)} placeholder="e.g. MD, NP, RN, PA" style={S.input} />
+        </div>
+        <div style={sectionStyle}>
+          <p style={{ ...S.label, marginBottom: '0.85rem' }}>
+            Credential Expiration Dates <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.75rem' }}>
+            {PROVIDER_CRED_FIELDS.map(field => (
+              <CredentialInput
+                key={field.key}
+                fieldKey={field.key}
+                label={field.label}
+                value={form[field.key] || ''}
+                onChange={value => update(field.key, value)}
+                allowNA={!!field.allowNA}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return null
 }
 
 function ProviderCredCard({ vol }) {
@@ -691,6 +877,10 @@ function VolunteerPageInner() {
   const [onboardingRemovingFile, setOnboardingRemovingFile] = useState(null) // { itemKey, name } | null
   const onboardingFileRefs = useRef({})
 
+  // ── Onboarding affiliation form (volunteer-facing Step 1) ─────────────────
+  const [onboardingAffilForm, setOnboardingAffilForm] = useState(EMPTY_ONBOARDING_AFFILIATION_FORM)
+  const [onboardingAffilSaving, setOnboardingAffilSaving] = useState(false)
+
   // ── Onboarding form documents (parking pass / confidentiality agreement) ──
   // These aren't uploads: the volunteer fills out a form and the PDF it
   // generates is saved to their checklist automatically.
@@ -975,12 +1165,12 @@ function VolunteerPageInner() {
     return () => { supabase.removeChannel(channel) }
   }, [user])
 
-  async function loadOnboardingDocs(user) {
+  async function loadOnboardingDocs(user, profileData = null) {
     if (!user?.email) return
 
     const { data: app } = await supabase
       .from('volunteer_applications')
-      .select('id, stage, onboard_affiliation, onboard_default_role')
+      .select('id, stage, onboard_affiliation, onboard_default_role, onboard_affil_data, school, program')
       .ilike('email', user.email)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -989,10 +1179,12 @@ function VolunteerPageInner() {
     if (!app || app.stage !== 'onboarding') {
       setOnboardingApp(null)
       setOnboardingChecklist(null)
+      setOnboardingAffilForm(EMPTY_ONBOARDING_AFFILIATION_FORM)
       return
     }
 
     setOnboardingApp(app)
+    setOnboardingAffilForm(buildOnboardingAffiliationForm(app, profileData))
 
     const { data: rows } = await supabase
       .from('onboarding_checklists')
@@ -1001,6 +1193,40 @@ function VolunteerPageInner() {
       .maybeSingle()
 
     setOnboardingChecklist(rows || null)
+  }
+
+  // Saves only the volunteer-facing affiliation step. The default position is
+  // intentionally not part of this form or RPC — it remains admin-only.
+  async function saveOnboardingAffiliation() {
+    if (!onboardingApp?.id || onboardingAffilSaving) return
+
+    const form = onboardingAffilForm
+    if (!isOnboardingAffiliationValid(form)) {
+      showToast('Complete the required affiliation fields first.', 'error')
+      return
+    }
+
+    setOnboardingAffilSaving(true)
+    const affilData = buildOnboardingAffiliationData(form)
+    const { error } = await supabase.rpc('volunteer_save_onboarding_affiliation', {
+      p_applicant_id: onboardingApp.id,
+      p_affiliation: form.affiliation,
+      p_affil_data: affilData,
+    })
+
+    if (error) {
+      showToast(error.message || 'Could not save your affiliation.', 'error')
+    } else {
+      const savedApp = {
+        ...onboardingApp,
+        onboard_affiliation: form.affiliation,
+        onboard_affil_data: affilData,
+      }
+      setOnboardingApp(savedApp)
+      setOnboardingAffilForm(buildOnboardingAffiliationForm(savedApp, profile))
+      showToast('Affiliation saved!', 'success')
+    }
+    setOnboardingAffilSaving(false)
   }
 
   async function initCriticalPath() {
@@ -1046,7 +1272,7 @@ function VolunteerPageInner() {
 
      setLoading(false)
 
-    loadOnboardingDocs(user)
+    loadOnboardingDocs(user, profileData)
 
     // Seed the unread message count badge immediately on load
     const { data: allMsgs } = await supabase
@@ -1982,6 +2208,82 @@ function VolunteerPageInner() {
                 <p style={{ fontWeight: 600, color: '#02416b', fontSize: '0.95rem' }}>
                   {lunchAssignment.lunch_shift === 1 ? 'Shift 1 · 12:30–1:00 PM' : 'Shift 2 · 1:00–1:30 PM'}
                 </p>
+              </div>
+            )}
+
+            {/* ── Affiliation — volunteer-facing Step 1 from the pipeline ── */}
+            {onboardingApp?.stage === 'onboarding' && (
+              <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
+                  <h2 style={{ fontWeight: 600, fontSize: '1.05rem' }}>Affiliation</h2>
+                  {onboardingAffiliation && (
+                    <span style={{ padding: '0.15rem 0.55rem', borderRadius: '999px', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', background: 'rgba(2,65,107,0.08)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.25)' }}>
+                      {AFFILIATION_OPTIONS.find(opt => opt.value === onboardingAffiliation)?.label || onboardingAffiliation}
+                    </span>
+                  )}
+                </div>
+                <p style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
+                  Tell us how you are affiliated with the clinic. Your default position is assigned by an admin.
+                </p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.6rem' }}>
+                  {AFFILIATION_OPTIONS.map(opt => {
+                    const active = onboardingAffilForm.affiliation === opt.value
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setOnboardingAffilForm(prev => prev.affiliation === opt.value
+                          ? prev
+                          : { ...EMPTY_ONBOARDING_AFFILIATION_FORM, affiliation: opt.value })}
+                        disabled={onboardingAffilSaving}
+                        style={{
+                          padding: '0.75rem 1rem',
+                          borderRadius: '10px',
+                          border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                          background: active ? 'rgba(2,65,107,0.1)' : 'var(--surface)',
+                          color: active ? 'var(--accent)' : 'var(--text)',
+                          fontWeight: active ? 700 : 400,
+                          cursor: onboardingAffilSaving ? 'not-allowed' : 'pointer',
+                          fontFamily: 'DM Sans, sans-serif',
+                          fontSize: '0.88rem',
+                          transition: 'all 0.15s',
+                          opacity: onboardingAffilSaving ? 0.6 : 1,
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {onboardingAffilForm.affiliation && (
+                  <div style={{ marginTop: '0.85rem' }}>
+                    <AffiliationExtras form={onboardingAffilForm} setForm={setOnboardingAffilForm} />
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.9rem' }}>
+                  <button
+                    type="button"
+                    onClick={saveOnboardingAffiliation}
+                    disabled={onboardingAffilSaving || !isOnboardingAffiliationValid(onboardingAffilForm)}
+                    style={{
+                      padding: '0.6rem 1.1rem',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      fontWeight: 600,
+                      fontSize: '0.85rem',
+                      fontFamily: 'DM Sans, sans-serif',
+                      cursor: (onboardingAffilSaving || !isOnboardingAffiliationValid(onboardingAffilForm)) ? 'not-allowed' : 'pointer',
+                      opacity: (onboardingAffilSaving || !isOnboardingAffiliationValid(onboardingAffilForm)) ? 0.55 : 1,
+                    }}
+                  >
+                    {onboardingAffilSaving ? 'Saving...' : 'Save Affiliation'}
+                  </button>
+                </div>
               </div>
             )}
 

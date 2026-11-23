@@ -1,7 +1,7 @@
 'use client'
 import JSZip from 'jszip'
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, getRoleCapacity } from '../lib/constants'
+import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, AFFILIATION_OPTIONS, getRoleCapacity } from '../lib/constants'
 import { formatSlotFull, formatSlotDayLabel, formatSlotTime, TIMEZONE_LABEL } from '../lib/interview-schedule'
 import { useConfirm } from '../lib/ConfirmDialog'
 import {
@@ -112,14 +112,6 @@ const TEMPLATE_LABELS = {
   onboarding_missionary: 'Onboarding — Missionary',
   rejected:              'Rejection Notice',
 }
-
-const AFFILIATION_OPTIONS = [
-  { value: 'missionary', label: 'Missionary' },
-  { value: 'student',    label: 'Student'    },
-  { value: 'intern',     label: 'Intern'     },
-  { value: 'volunteer',  label: 'Volunteer'  },
-  { value: 'provider',   label: 'Provider'   },
-]
 
 const PROVIDER_CRED_FIELDS = [
   { key: 'license_exp', label: 'License'            },
@@ -2773,8 +2765,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     const applicant = selected
     if (!applicant) return
     if (!allStepsValid) {
-      const missing = !step1Valid() ? 'affiliation details' : !step2Valid ? 'default position' : `required approvals (${missingRequiredDocs.join(', ')})`
-      msg(`Missing required: ${missing}.`, 'error')
+      const missing = getMissingOnboardingRequirements()
+      msg(`Missing required: ${missing.join(', ')}.`, 'error')
       if (!step1Valid()) setOnboardStep(1)
       else if (!step2Valid) setOnboardStep(2)
       else setOnboardStep(3)
@@ -3134,14 +3126,36 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // ─── Validity ─────────────────────────────────────────────────────────────
 
-  function step1Valid() {
+  function getMissingAffiliationRequirements() {
     const a = onboardForm.affiliation
-    if (!a) return false
-    if (a === 'student') return !!(onboardForm.school)
-    if (a === 'intern')  return !!(onboardForm.intern_school && onboardForm.intern_department && onboardForm.advisor_name && onboardForm.advisor_contact)
-    return true
+    if (!a) return ['Affiliation']
+
+    const missing = []
+    if (a === 'student' && !onboardForm.school) {
+      missing.push('School')
+    }
+    if (a === 'intern') {
+      if (!onboardForm.intern_school) missing.push('Intern School')
+      if (!onboardForm.intern_department) missing.push('Intern Department')
+      if (!onboardForm.advisor_name) missing.push('Advisor Name')
+      if (!onboardForm.advisor_contact) missing.push('Advisor Contact')
+    }
+    return missing
+  }
+
+  function getMissingOnboardingRequirements() {
+    return [
+      ...getMissingAffiliationRequirements(),
+      ...(onboardForm.default_role ? [] : ['Default Position']),
+      ...missingRequiredDocs,
+    ]
+  }
+
+  function step1Valid() {
+    return getMissingAffiliationRequirements().length === 0
   }
   const step2Valid    = !!onboardForm.default_role
+  const missingOnboardingRequirements = getMissingOnboardingRequirements()
   const allStepsValid = step1Valid() && step2Valid && docsComplete
 
   function profileSummary() {
@@ -4016,10 +4030,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   }
                 </div>
 
-                {onboardForm.affiliation && missingRequiredDocs.length > 0 && (
+                {!allStepsValid && missingOnboardingRequirements.length > 0 && (
                   <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', background: C.danger + '08', border: `1px solid ${C.danger}44`, fontSize: '0.83rem', color: C.danger, fontWeight: 500, lineHeight: 1.6 }}>
                     <span style={{ fontWeight: 700 }}>Missing required:</span>{' '}
-                    <span style={{ fontWeight: 700 }}>{missingRequiredDocs.join(', ')}</span>.
+                    <span style={{ fontWeight: 700 }}>{missingOnboardingRequirements.join(', ')}</span>.
                   </div>
                 )}
 

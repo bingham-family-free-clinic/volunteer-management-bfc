@@ -531,3 +531,92 @@ begin
   end if;
 end
 $$;
+
+-- ─── 9. Volunteer onboarding affiliation save ────────────────────────────────
+-- The volunteer portal now offers the same affiliation step the admin
+-- pipeline shows during onboarding. Volunteers only have SELECT access to
+-- their own application row, so this RPC writes exactly two fields:
+-- onboard_affiliation and onboard_affil_data. It deliberately does not accept
+-- or write onboard_default_role — default position remains admin-only.
+--
+-- Validation mirrors the pipeline's Step 1: an affiliation is required,
+-- students need a school, and interns need their school/department/advisor
+-- details.
+--
+-- Safe to re-run: the function is replaced wholesale.
+
+create or replace function public.volunteer_save_onboarding_affiliation(
+  p_applicant_id uuid,
+  p_affiliation text,
+  p_affil_data jsonb default '{}'::jsonb
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  v_aff   text := lower(btrim(coalesce(p_affiliation, '')));
+  v_data  jsonb := coalesce(p_affil_data, '{}'::jsonb);
+begin
+  if v_email = '' then
+    raise exception 'Not authenticated';
+  end if;
+
+  if jsonb_typeof(v_data) is distinct from 'object' then
+    raise exception 'Invalid affiliation details';
+  end if;
+
+  if v_aff not in ('missionary', 'student', 'intern', 'volunteer', 'provider') then
+    raise exception 'Unknown affiliation';
+  end if;
+
+  -- Keep only the fields the onboarding affiliation step owns, so a client
+  -- cannot write arbitrary JSON into the application row.
+  v_data := jsonb_build_object(
+    'sma_name',         coalesce(v_data ->> 'sma_name', ''),
+    'sma_contact',      coalesce(v_data ->> 'sma_contact', ''),
+    'school',           coalesce(v_data ->> 'school', ''),
+    'major',            coalesce(v_data ->> 'major', ''),
+    'intern_school',    coalesce(v_data ->> 'intern_school', ''),
+    'intern_department', coalesce(v_data ->> 'intern_department', ''),
+    'advisor_name',     coalesce(v_data ->> 'advisor_name', ''),
+    'advisor_contact',  coalesce(v_data ->> 'advisor_contact', ''),
+    'credentials',      coalesce(v_data ->> 'credentials', ''),
+    'license_exp',      coalesce(v_data ->> 'license_exp', ''),
+    'bls_exp',          coalesce(v_data ->> 'bls_exp', ''),
+    'dea_exp',          coalesce(v_data ->> 'dea_exp', ''),
+    'ftca_exp',         coalesce(v_data ->> 'ftca_exp', ''),
+    'tb_exp',           coalesce(v_data ->> 'tb_exp', '')
+  );
+
+  if v_aff = 'student'
+     and nullif(btrim(coalesce(v_data ->> 'school', '')), '') is null then
+    raise exception 'School is required for students';
+  end if;
+
+  if v_aff = 'intern'
+     and (
+       nullif(btrim(coalesce(v_data ->> 'intern_school', '')), '') is null
+       or nullif(btrim(coalesce(v_data ->> 'intern_department', '')), '') is null
+       or nullif(btrim(coalesce(v_data ->> 'advisor_name', '')), '') is null
+       or nullif(btrim(coalesce(v_data ->> 'advisor_contact', '')), '') is null
+     ) then
+    raise exception 'Internship details are required for interns';
+  end if;
+
+  update public.volunteer_applications
+     set onboard_affiliation = v_aff,
+         onboard_affil_data = v_data
+   where id = p_applicant_id
+     and lower(email) = v_email
+     and stage = 'onboarding';
+
+  if not found then
+    raise exception 'Application not found or not in onboarding';
+  end if;
+end;
+$$;
+
+revoke all on function public.volunteer_save_onboarding_affiliation(uuid, text, jsonb) from public;
+grant execute on function public.volunteer_save_onboarding_affiliation(uuid, text, jsonb) to authenticated;
