@@ -16,6 +16,7 @@ import WeeklyTrainingBanner from '../../components/WeeklyTrainingBanner'
 import { currentTrainingWeekStart } from '../../lib/trainingUtils'
 import { useConfirm } from '../../lib/ConfirmDialog'
 import { isActiveThisWeek } from '../../components/Live'
+import { isClinicClosed } from '../../lib/scheduleUtils'
 
 
 export const dynamic = 'force-dynamic'
@@ -1048,6 +1049,7 @@ function VolunteerPageInner() {
           { data: myCoverReqs },
           { data: allSchedule },
           { data: approvedClinicCovers },
+          { data: closedDates },
       ] = await Promise.all([
           // Existing approved call-outs
           supabase
@@ -1075,6 +1077,12 @@ function VolunteerPageInner() {
               .select('volunteer_id, shift_date, shift_time, role')
               .is('callout_id', null)
               .eq('status', 'approved'),
+
+          // Dates the clinic is closed — no shifts can be picked up on these
+          supabase
+              .from('closed_dates')
+              .select('start_date, end_date, name')
+              .or(`end_date.gte.${today},and(end_date.is.null,start_date.gte.${today})`),
       ])
 
       const [year, month, day] = today.split('-').map(Number)
@@ -1088,8 +1096,11 @@ function VolunteerPageInner() {
           const weekday = date.getUTCDay()
           if (weekday < 1 || weekday > 5) continue
 
+          const dateStr = date.toISOString().slice(0, 10)
+          if (isClinicClosed(dateStr, closedDates)) continue // clinic closed — nothing to staff
+
           possibleOpenings.push({
-              date: date.toISOString().slice(0, 10),
+              date: dateStr,
               day: DAYS[weekday - 1].toLowerCase(),
           })
       }
@@ -1138,7 +1149,9 @@ function VolunteerPageInner() {
 
 
       const mergedOpenings = [
-          ...(openSubs || []).map(c => ({
+          ...(openSubs || [])
+              .filter(c => !isClinicClosed(c.callout_date, closedDates))
+              .map(c => ({
               ...c,
               source: 'callout',
               profiles: c.volunteer,
@@ -1354,6 +1367,17 @@ function VolunteerPageInner() {
     const shiftDate = openShift.callout_date                        // e.g. "2025-09-10"
     const shiftTime = openShift.shift_time                          // e.g. "10-2"
     const dayName   = openShift.day_of_week                         // e.g. "tuesday"
+
+    // 0. Re-check closures at submit time (the list may be stale)
+    const { data: closures } = await supabase
+        .from('closed_dates')
+        .select('start_date, end_date, name')
+        .or(`end_date.gte.${shiftDate},and(end_date.is.null,start_date.gte.${shiftDate})`)
+    if (isClinicClosed(shiftDate, closures)) {
+        showToast("The clinic is closed on that date, so this shift can't be picked up.", 'error')
+        setOpenShifts(prev => prev.filter(s => s.callout_date !== shiftDate))
+        return
+    }
 
     // 1. Check regular schedule — same day + same shift_time
     const scheduleConflict = schedule.some(
