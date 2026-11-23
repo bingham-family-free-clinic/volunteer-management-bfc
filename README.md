@@ -484,17 +484,19 @@ The Pipeline component (`components/Pipeline.js`) manages volunteer recruitment 
 
 **Onboarding checklist items**
 
-| Item | Required (non-missionary) | File upload |
+| Item | Required by default | File workflow |
 |---|---|---|
+| Parking Pass | Yes | Generated PDF workflow |
+| Confidentiality Agreement | Yes | Generated PDF workflow |
 | Background Check | Yes | Yes |
-| ID | Yes | Yes |
-| Immunization | Yes | Yes |
+| Photo ID | Yes | Yes |
+| Immunizations | Yes | Yes |
 | TB Test | Yes | Yes |
 | Licenses & Certifications | No | Yes |
-| Confidentiality Agreement | No | Generated PDF workflow |
-| Parking Pass | No | Generated PDF workflow |
 
-Non-missionary applicants need background check, ID, and immunization files before profile creation. Missionaries have relaxed mandatory doc requirements.
+Missionaries do not need Background Check, Immunizations, or TB Test. Information Systems, Communications, Credentialing, and Human Resources do not need Immunizations or TB Test. Pharmacy and Lab also require Licenses & Certifications.
+
+The checklist metadata and all role/affiliation requirements are maintained in `lib/onboardingDocs.js`.
 
 **Profile creation** — Invokes `create-volunteer` Edge Function for Auth account, inserts `profiles`, uploads avatar, adds to waitlist, marks application `completed`. Default temporary password: `BFC2025!`.
 

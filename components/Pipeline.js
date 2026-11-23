@@ -4,6 +4,14 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, getRoleCapacity } from '../lib/constants'
 import { formatSlotFull, formatSlotDayLabel, formatSlotTime, TIMEZONE_LABEL } from '../lib/interview-schedule'
 import { useConfirm } from '../lib/ConfirmDialog'
+import {
+  ONBOARDING_DOCS,
+  ONBOARDING_FILE_DOCS,
+  ONBOARDING_FORM_DOC_KEYS,
+  ONBOARDING_UPLOAD_DOCS,
+  getRequiredDocKeys,
+  isDocRequired,
+} from '../lib/onboardingDocs'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -120,28 +128,6 @@ const PROVIDER_CRED_FIELDS = [
   { key: 'tb_exp',      label: 'TB'                 },
 ]
 
-const CHECKLIST_ITEMS = [
-  { key: 'background_check',          label: 'Background Check',          bucket: 'onboarding-background-checks', urlKey: 'background_check_url'  },
-  { key: 'id_check',                  label: 'ID',                        bucket: 'onboarding-ids',               urlKey: 'id_check_url'          },
-  { key: 'immunization',              label: 'Immunization',              bucket: 'onboarding-immunizations',     urlKey: 'immunization_url'      },
-  { key: 'tb_test',                   label: 'TB Test',                   bucket: 'onboarding-tb-tests',          urlKey: 'tb_test_url'           },
-  { key: 'licenses_certifications',   label: 'Licenses & Certifications', bucket: 'onboarding-licenses',          urlKey: 'licenses_url'          },
-  { key: 'confidentiality_agreement', label: 'Confidentiality Agreement', bucket: 'onboarding-confidentiality',   urlKey: 'confidentiality_url'   },
-  { key: 'parking_pass',              label: 'Parking Pass',              bucket: 'onboarding-parking-passes',    urlKey: 'parking_pass_url'      },
-]
-
-const FILE_CHECKLIST_ITEMS = CHECKLIST_ITEMS.filter(i => i.bucket && i.urlKey)
-
-// The parking pass and confidentiality agreement are filled out as PDF forms
-// (in their own modals) rather than uploaded as files.
-const FORM_CHECKLIST_ITEMS = FILE_CHECKLIST_ITEMS.filter(i => i.key === 'parking_pass' || i.key === 'confidentiality_agreement')
-const FORM_ITEM_KEYS       = new Set(FORM_CHECKLIST_ITEMS.map(i => i.key))
-
-// Items on the onboarding checklist that take uploaded documents (step 3). The
-// confidentiality agreement and parking pass are generated as PDFs by their own
-// modals, so they aren't listed here.
-const ZIP_UPLOAD_ITEMS = FILE_CHECKLIST_ITEMS.filter(i => !FORM_ITEM_KEYS.has(i.key))
-
 // ── Onboarding checklist document storage ────────────────────────────────────
 // Each checklist item still stores ONE path in onboarding_checklists
 // (item.urlKey) pointing at a .zip, which acts as that item's "folder" of
@@ -243,18 +229,6 @@ async function writeChecklistZip(supabase, bucket, applicantId, itemKey, files) 
   if (error) throw error
   return path
 }
-const NON_PATIENT_ROLES = ['Information Systems', 'Communications']
-
-const DEFAULT_REQUIRED = ['background_check', 'id_check', 'immunization', 'tb_test']
-const NON_PATIENT_ROLES_REQUIRED = ['background_check', 'id_check']
-const MISSIONARY_REQUIRED = ['id_check']
-
-function tbTestRequired(affiliation, defaultRole) {
-  if (affiliation === 'missionary') return false
-  if (NON_PATIENT_ROLES.includes(defaultRole)) return false
-  return true
-}
-
 const TOTAL_STEPS = 3
 
 // ─── Preparedness scoring ─────────────────────────────────────────────────────
@@ -1677,10 +1651,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // Lists the files inside each onboarding checklist document so step 3 can show
   // one line per file. Cached per item and re-read only when the stored path
   // changes (every upload/remove writes a new path).
-  const checklistPathsKey = ZIP_UPLOAD_ITEMS.map(i => checklist[i.urlKey] || '').join('|')
+  const checklistPathsKey = ONBOARDING_UPLOAD_DOCS.map(i => checklist[i.urlKey] || '').join('|')
   useEffect(() => {
     if (selected?.stage !== 'onboarding') return
-    for (const item of ZIP_UPLOAD_ITEMS) {
+    for (const item of ONBOARDING_UPLOAD_DOCS) {
       const path   = checklist[item.urlKey] || null
       const cached = checklistFiles[item.key]
       if (!path) {
@@ -2610,7 +2584,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       }
 
       const unavailable = []
-      for (const item of FILE_CHECKLIST_ITEMS) {
+      for (const item of ONBOARDING_FILE_DOCS) {
         const storagePath = cl[item.urlKey]
         if (!storagePath) continue
         const { data, error } = await supabase.storage.from(item.bucket).createSignedUrl(storagePath, 300)
@@ -2774,7 +2748,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       bls_exp:     isProvider ? (form.bls_exp     || null) : null,
       dea_exp:     isProvider ? (form.dea_exp     || null) : null,
       ftca_exp:    isProvider ? (form.ftca_exp    || null) : null,
-      tb_exp:      form.tb_exp || (tbTestRequired(affil, form.default_role) ? null : 'N/A'),
+      tb_exp:      form.tb_exp || (isDocRequired('tb_test', affil, form.default_role) ? null : 'N/A'),
       admin_notes: [notesDraft || applicant.notes || null, extraInfo || null].filter(Boolean).join('\n\n') || null,
     }
   }
@@ -2950,21 +2924,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   })()
   const stageCounts        = STAGES.reduce((acc, s) => { acc[s] = applicants.filter(a => a.stage === s).length; return acc }, {})
 
-  // ─── Non-missionary, Information Systems, and Communications document validation ────────────────────────────────────
+  // ─── Onboarding document validation ──────────────────────────────────────────
 
-  function getRequiredChecks() {
-    return onboardForm.affiliation === 'missionary' && MISSIONARY_REQUIRED || NON_PATIENT_ROLES.includes(onboardForm.default_role) && NON_PATIENT_ROLES_REQUIRED || DEFAULT_REQUIRED
-  }
-
-  function getMissingRequiredDocs() {
-    const requiredChecks = getRequiredChecks()
-    return requiredChecks
-      .filter(key => !checklist[key])
-      .map(key => CHECKLIST_ITEMS.find(i => i.key === key)?.label ?? key)
-  }
-
-  const requiredChecks         = getRequiredChecks()
-  const missingRequiredDocs    = getMissingRequiredDocs()
+  const requiredChecks         = getRequiredDocKeys(onboardForm.affiliation, onboardForm.default_role)
+  const missingRequiredDocs    = requiredChecks
+    .filter(key => !checklist[key])
+    .map(key => ONBOARDING_DOCS.find(i => i.key === key)?.label ?? key)
   const completedRequiredCount = requiredChecks.length - missingRequiredDocs.length
   const docsComplete           = missingRequiredDocs.length === 0
 
@@ -3586,7 +3551,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           const cl           = recentChecklist[a.id] || {}
           const isOffloading = offloadingId === a.id
           const isExpanded   = expandedId === a.id
-          const fileCount    = FILE_CHECKLIST_ITEMS.filter(i => cl[i.urlKey]).length
+          const fileCount    = ONBOARDING_FILE_DOCS.filter(i => cl[i.urlKey]).length
 
           return (
             <div key={a.id} style={{ background: 'var(--surface)', border: `1px solid ${isExpanded ? C.blue + '55' : 'var(--border)'}`, borderRadius: '12px', overflow: 'hidden', transition: 'border-color 0.2s' }}>
@@ -3633,7 +3598,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.15rem', flexWrap: 'wrap' }}>
                       <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>{a.email}</p>
                       <span style={{ fontSize: '0.7rem', padding: '0.1rem 0.5rem', borderRadius: '100px', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}33`, fontWeight: 600 }}>Active</span>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{fileCount} / {FILE_CHECKLIST_ITEMS.length} files</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{fileCount} / {ONBOARDING_FILE_DOCS.length} files</span>
                     </div>
                   </div>
                 </div>
@@ -3685,7 +3650,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                       </div>
                     </div>
 
-                    {FILE_CHECKLIST_ITEMS.map(item => {
+                    {ONBOARDING_FILE_DOCS.map(item => {
 
                       if (item.key === 'confidentiality_agreement') {
                         const hasPdf = !!(cl[item.urlKey])
@@ -3814,7 +3779,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       { label: 'Reference 2',          value: ref2Str },
     ].filter(f => f.value)
 
-    const checklistCount    = CHECKLIST_ITEMS.filter(i => checklist[i.key]).length
+    const checklistCount    = ONBOARDING_DOCS.filter(i => checklist[i.key]).length
     const s1 = step1Valid()
     const openShiftLines = isApplied ? getOpenShiftLines(applicant, staffingOpenSlots) : []
 
@@ -4018,7 +3983,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                  {CHECKLIST_ITEMS.map(item => {
+                  {ONBOARDING_DOCS.map(item => {
                       const checked = checklist[item.key]
                       const isRequired = requiredChecks.includes(item.key)
                       return (
@@ -4036,7 +4001,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                             </div>
                             {checked && <span style={{ fontSize: '0.72rem', color: C.blue, fontWeight: 600, flexShrink: 0 }}>Complete</span>}
                           </div>
-                          {item.bucket && (FORM_ITEM_KEYS.has(item.key)
+                          {item.bucket && (ONBOARDING_FORM_DOC_KEYS.has(item.key)
                             ? <FormRow item={item} applicantId={applicant.id} applicantName={applicant.full_name} />
                             : <FileRow item={item} applicantId={applicant.id} />)}
                         </div>

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, lazy, Suspense, Component } f
 import JSZip from 'jszip'
 import { supabase } from '../../lib/supabase'
 import { DAYS, SHIFTS, ROLES, MAX_FILE_SIZE } from '../../lib/constants'
-import { VOLUNTEER_UPLOAD_DOCS, VOLUNTEER_FORM_DOCS, VOLUNTEER_ONBOARDING_DOCS, getRequiredDocKeys, hasSavedOnboardingPrefs, isDocNotNeeded } from '../../lib/onboardingDocs'
+import { ONBOARDING_DOCS, ONBOARDING_UPLOAD_DOCS, ONBOARDING_FORM_DOCS, getRequiredDocKeys, hasSavedOnboardingPrefs, isDocNotNeeded, isDocOptional } from '../../lib/onboardingDocs'
 import { formatDate, formatTime, asUTC } from '../../lib/timeUtils'
 import { getInboxMessages, parseGroupMemberIds } from '../../lib/messageUtils'
 import { MessageCard } from '../../components/MessageCard'
@@ -916,7 +916,7 @@ function VolunteerPageInner() {
     ? getRequiredDocKeys(onboardingAffiliation, onboardingRole)
     : []
   const onboardingApprovedRequired = onboardingRequiredKeys.filter(key => {
-    const doc = VOLUNTEER_UPLOAD_DOCS.find(d => d.key === key)
+    const doc = ONBOARDING_DOCS.find(d => d.key === key)
     return onboardingChecklist?.[key] === true && !!onboardingChecklist?.[doc?.urlKey]
   }).length
 
@@ -1271,10 +1271,10 @@ function VolunteerPageInner() {
   // Lists the files inside each onboarding document so each row can show one
   // line per file (same as the admin pipeline). Cached per item and re-read
   // only when the stored path changes (every upload/remove writes a new path).
-  const onboardingPathsKey = VOLUNTEER_UPLOAD_DOCS.map(i => onboardingChecklist?.[i.urlKey] || '').join('|')
+  const onboardingPathsKey = ONBOARDING_UPLOAD_DOCS.map(i => onboardingChecklist?.[i.urlKey] || '').join('|')
   useEffect(() => {
     if (!onboardingApp?.id) return
-    for (const item of VOLUNTEER_UPLOAD_DOCS) {
+    for (const item of ONBOARDING_UPLOAD_DOCS) {
       const path   = onboardingChecklist?.[item.urlKey] || null
       const cached = onboardingFiles[item.key]
       if (!path) {
@@ -1312,7 +1312,7 @@ function VolunteerPageInner() {
       const type = e.data.type
       if (type !== 'parking_pass_pdf' && type !== 'confidentiality_agreement_pdf') return
 
-      const item = VOLUNTEER_FORM_DOCS.find(d => `${d.form}_pdf` === type)
+      const item = ONBOARDING_FORM_DOCS.find(d => `${d.form}_pdf` === type)
       if (!item) return
 
       setOnboardingFormSaving(true)
@@ -2000,16 +2000,16 @@ function VolunteerPageInner() {
                 </p>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                  {VOLUNTEER_ONBOARDING_DOCS.map(item => {
+                  {ONBOARDING_DOCS.map(item => {
                     const approved       = onboardingChecklist?.[item.key] === true
                     const isRequired     = onboardingRequiredKeys.includes(item.key)
                     // Form documents (parking pass / confidentiality agreement)
                     // are filled out rather than attached, but sit on the same
                     // checklist as everything else.
                     const isForm         = !!item.form
-                    const isOptional     = onboardingPrefsSaved && (item.key === 'licenses_certifications' || isForm)
+                    const isOptional     = isDocOptional(item.key, onboardingAffiliation, onboardingRole)
                     // An admin checking a document overrides the position-based
-                    // "not needed" state �?" they want that file.
+                    // "not needed" state — they want that file.
                     const notNeeded      = !approved && isDocNotNeeded(item.key, onboardingAffiliation, onboardingRole)
                     const storedPath     = onboardingChecklist?.[item.urlKey] || null
                     const fileEntry      = onboardingFiles[item.key]
@@ -2747,7 +2747,7 @@ function VolunteerPageInner() {
 
         {/* Onboarding form document (parking pass / confidentiality agreement) */}
         {onboardingFormModal && (() => {
-          const formItem = VOLUNTEER_FORM_DOCS.find(d => d.key === onboardingFormModal.itemKey)
+          const formItem = ONBOARDING_FORM_DOCS.find(d => d.key === onboardingFormModal.itemKey)
           if (!formItem) return null
           const today  = new Date().toISOString().slice(0, 10)
           const params = new URLSearchParams({ name: profile?.full_name || '', date: today })
