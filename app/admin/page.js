@@ -1994,10 +1994,16 @@ export default function AdminPage() {
     }
     // -------------------------------
 
+    const isMission  = editForm.affiliation === 'missionary'
     const isProvider = editForm.affiliation === 'provider'
     const isIntern   = editForm.affiliation === 'intern'
-    const isMission  = editForm.affiliation === 'missionary'
     const isStudent  = editForm.affiliation === 'student'
+
+    if (isMission && !(editForm.sma_name?.trim() && editForm.sma_contact?.trim())) {
+      showMessage('SMA name and contact are required for missionary volunteers.', 'error')
+      setSaving(false)
+      return
+    }
 
     const updates = {
       full_name: editForm.full_name,
@@ -2085,6 +2091,12 @@ export default function AdminPage() {
     const isIntern   = finalAffiliation === 'intern'
     const isMission  = finalAffiliation === 'missionary'
     const isStudent  = finalAffiliation === 'student'
+
+    if (isMission && !(newSmaName?.trim() && newSmaContact?.trim())) {
+      showMessage('SMA name and contact are required for missionary volunteers.', 'error')
+      setCreating(false)
+      return
+    }
 
     const { data, error } = await supabase.auth.signUp({ email: newEmail, password: newPassword })
     if (error) { showMessage(error.message, 'error'); setCreating(false); return }
@@ -2849,7 +2861,7 @@ export default function AdminPage() {
                       </select>
                     </div>
                   )}
-                  {editForm.affiliation === 'missionary' && (<><div><label style={labelStyle}>SMA Name</label><input value={editForm.sma_name} onChange={e => setEditForm({...editForm, sma_name: e.target.value})} placeholder="SMA full name" style={inputStyle} /></div><div><label style={labelStyle}>SMA Contact</label><input value={editForm.sma_contact} onChange={e => setEditForm({...editForm, sma_contact: e.target.value})} placeholder="Phone or email" style={inputStyle} /></div></>)}
+                  {editForm.affiliation === 'missionary' && (<><div><label style={labelStyle}>SMA Name <span style={{ color: 'var(--danger)' }}>*</span></label><input value={editForm.sma_name} onChange={e => setEditForm({...editForm, sma_name: e.target.value})} placeholder="SMA full name" style={inputStyle} required /></div><div><label style={labelStyle}>SMA Contact <span style={{ color: 'var(--danger)' }}>*</span></label><input value={editForm.sma_contact} onChange={e => setEditForm({...editForm, sma_contact: e.target.value})} placeholder="Phone or email" style={inputStyle} required /></div></>)}
                   {editForm.affiliation === 'intern' && (<><div><label style={labelStyle}>Advisor Name</label><input value={editForm.advisor_name} onChange={e => setEditForm({...editForm, advisor_name: e.target.value})} placeholder="Advisor full name" style={inputStyle} /></div><div><label style={labelStyle}>Advisor Contact</label><input value={editForm.advisor_contact} onChange={e => setEditForm({...editForm, advisor_contact: e.target.value})} placeholder="Phone or email" style={inputStyle} /></div><div><label style={labelStyle}>School</label><input value={editForm.intern_school} onChange={e => setEditForm({...editForm, intern_school: e.target.value})} placeholder="University or institution" style={inputStyle} /></div><div><label style={labelStyle}>Dept / Company</label><input value={editForm.intern_department} onChange={e => setEditForm({...editForm, intern_department: e.target.value})} placeholder="Department or company name" style={inputStyle} /></div></>)}
                   {editForm.affiliation === 'student' && (<><div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>School</label><select value={editForm.school} onChange={e => setEditForm({...editForm, school: e.target.value})} style={inputStyle}><option value="">— Select school —</option>{SCHOOLS.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Major</label><select value={editForm.major || ''} onChange={e => setEditForm({...editForm, major: e.target.value})} style={inputStyle}><option value="">— Select major —</option>{MAJORS.map(m => <option key={m} value={m}>{m}</option>)}</select></div></>)}
                   {editForm.affiliation === 'provider' && (
@@ -3256,7 +3268,7 @@ export default function AdminPage() {
                   <label style={labelStyle}>End Date <span style={{ textTransform: 'none', color: 'var(--muted)', fontSize: '0.72rem' }}>(optional — auto-deactivates on this date)</span></label>
                   <input type="date" value={newEndDate} onChange={e => setNewEndDate(e.target.value)} style={inputStyle} />
                 </div>
-                {newAffiliation === 'missionary' && (<><div><label style={labelStyle}>SMA Name</label><input value={newSmaName} onChange={e => setNewSmaName(e.target.value)} placeholder="SMA full name" style={inputStyle} /></div><div><label style={labelStyle}>SMA Contact</label><input value={newSmaContact} onChange={e => setNewSmaContact(e.target.value)} placeholder="Phone or email" style={inputStyle} /></div></>)}
+                {newAffiliation === 'missionary' && (<><div><label style={labelStyle}>SMA Name <span style={{ color: 'var(--danger)' }}>*</span></label><input value={newSmaName} onChange={e => setNewSmaName(e.target.value)} placeholder="SMA full name" style={inputStyle} required /></div><div><label style={labelStyle}>SMA Contact <span style={{ color: 'var(--danger)' }}>*</span></label><input value={newSmaContact} onChange={e => setNewSmaContact(e.target.value)} placeholder="Phone or email" style={inputStyle} required /></div></>)}
                 {newAffiliation === 'student' && (<><div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>School</label><select value={newSchool} onChange={e => setNewSchool(e.target.value)} style={inputStyle}><option value="">— Select school —</option>{SCHOOLS.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Major</label><select value={newMajor} onChange={e => setNewMajor(e.target.value)} style={inputStyle}><option value="">— Select major —</option>{MAJORS.map(m => <option key={m} value={m}>{m}</option>)}</select></div></>)}
                 {newAffiliation === 'intern' && (<><div><label style={labelStyle}>Advisor Name</label><input value={newAdvisorName} onChange={e => setNewAdvisorName(e.target.value)} placeholder="Advisor full name" style={inputStyle} /></div><div><label style={labelStyle}>Advisor Contact</label><input value={newAdvisorContact} onChange={e => setNewAdvisorContact(e.target.value)} placeholder="Phone or email" style={inputStyle} /></div><div><label style={labelStyle}>School</label><input value={newInternSchool} onChange={e => setNewInternSchool(e.target.value)} placeholder="University or institution" style={inputStyle} /></div><div><label style={labelStyle}>Dept / Company</label><input value={newInternDepartment} onChange={e => setNewInternDepartment(e.target.value)} placeholder="Department or company" style={inputStyle} /></div></>)}
                 {newAffiliation === 'provider' && (

@@ -1471,10 +1471,10 @@ function AffiliationExtras({ onboardForm, setOnboardForm, labelStyle, inputStyle
   const a = onboardForm.affiliation
   if (a === 'missionary') return (
     <div style={{ padding: '1rem', background: 'var(--bg)', borderRadius: '10px', border: `1px solid ${C.blue}33` }}>
-      <p style={{ ...secLabel, marginBottom: '0.75rem' }}>Mission Service Assignment</p>
+      <p style={{ ...secLabel, marginBottom: '0.75rem' }}>SMA Contact Information</p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
-        <div><label style={labelStyle}>SMA Name</label><input value={onboardForm.sma_name} onChange={e => setOnboardForm(f => ({ ...f, sma_name: e.target.value }))} placeholder="Full name" style={inputStyle} /></div>
-        <div><label style={labelStyle}>SMA Contact</label><input value={onboardForm.sma_contact} onChange={e => setOnboardForm(f => ({ ...f, sma_contact: e.target.value }))} placeholder="Phone or email" style={inputStyle} /></div>
+        <div><label style={labelStyle}>SMA Name <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.sma_name} onChange={e => setOnboardForm(f => ({ ...f, sma_name: e.target.value }))} placeholder="Full name" style={inputStyle} required /></div>
+        <div><label style={labelStyle}>SMA Contact <span style={{ color: C.danger }}>*</span></label><input value={onboardForm.sma_contact} onChange={e => setOnboardForm(f => ({ ...f, sma_contact: e.target.value }))} placeholder="Phone or email" style={inputStyle} required /></div>
       </div>
     </div>
   )
@@ -3131,6 +3131,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     if (!a) return ['Affiliation']
 
     const missing = []
+    if (a === 'missionary') {
+      if (!onboardForm.sma_name?.trim()) missing.push('SMA Name')
+      if (!onboardForm.sma_contact?.trim()) missing.push('SMA Contact')
+    }
     if (a === 'student' && !onboardForm.school) {
       missing.push('School')
     }

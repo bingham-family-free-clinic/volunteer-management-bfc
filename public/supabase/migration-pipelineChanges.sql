@@ -540,8 +540,8 @@ $$;
 -- or write onboard_default_role — default position remains admin-only.
 --
 -- Validation mirrors the pipeline's Step 1: an affiliation is required,
--- students need a school, and interns need their school/department/advisor
--- details.
+-- missionaries need their SMA name/contact, students need a school, and
+-- interns need their school/department/advisor details.
 --
 -- Safe to re-run: the function is replaced wholesale.
 
@@ -589,6 +589,14 @@ begin
     'ftca_exp',         coalesce(v_data ->> 'ftca_exp', ''),
     'tb_exp',           coalesce(v_data ->> 'tb_exp', '')
   );
+
+  if v_aff = 'missionary'
+     and (
+       nullif(btrim(coalesce(v_data ->> 'sma_name', '')), '') is null
+       or nullif(btrim(coalesce(v_data ->> 'sma_contact', '')), '') is null
+     ) then
+    raise exception 'SMA name and contact are required for missionaries';
+  end if;
 
   if v_aff = 'student'
      and nullif(btrim(coalesce(v_data ->> 'school', '')), '') is null then

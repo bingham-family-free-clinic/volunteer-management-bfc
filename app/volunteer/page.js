@@ -126,6 +126,9 @@ function buildOnboardingAffiliationData(form) {
 // Mirrors the pipeline's Step 1 validation.
 function isOnboardingAffiliationValid(form) {
   if (!form.affiliation) return false
+  if (form.affiliation === 'missionary') {
+    return !!(form.sma_name?.trim() && form.sma_contact?.trim())
+  }
   if (form.affiliation === 'student') return !!form.school
   if (form.affiliation === 'intern') {
     return !!(form.intern_school && form.intern_department && form.advisor_name && form.advisor_contact)
@@ -305,15 +308,15 @@ function AffiliationExtras({ form, setForm }) {
   if (form.affiliation === 'missionary') {
     return (
       <div style={sectionStyle}>
-        <p style={{ ...S.label, marginBottom: '0.75rem' }}>Mission Service Assignment</p>
+        <p style={{ ...S.label, marginBottom: '0.75rem' }}>SMA Contact Information</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
           <div>
-            <label style={S.label}>SMA Name</label>
-            <input value={form.sma_name} onChange={e => update('sma_name', e.target.value)} placeholder="Full name" style={S.input} />
+            <label style={S.label}>SMA Name <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <input value={form.sma_name} onChange={e => update('sma_name', e.target.value)} placeholder="Full name" style={S.input} required />
           </div>
           <div>
-            <label style={S.label}>SMA Contact</label>
-            <input value={form.sma_contact} onChange={e => update('sma_contact', e.target.value)} placeholder="Phone or email" style={S.input} />
+            <label style={S.label}>SMA Contact <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <input value={form.sma_contact} onChange={e => update('sma_contact', e.target.value)} placeholder="Phone or email" style={S.input} required />
           </div>
         </div>
       </div>
@@ -2218,7 +2221,7 @@ function VolunteerPageInner() {
                   <h2 style={{ fontWeight: 600, fontSize: '1.05rem' }}>Affiliation</h2>
                 </div>
                 <p style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
-                  Tell us how you are affiliated with the clinic.
+                  Choose from the options below how you are affiliated with the clinic.
                 </p>
 
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
@@ -2277,7 +2280,7 @@ function VolunteerPageInner() {
                       opacity: (onboardingAffilSaving || !isOnboardingAffiliationValid(onboardingAffilForm)) ? 0.55 : 1,
                     }}
                   >
-                    {onboardingAffilSaving ? 'Saving...' : 'Save Affiliation'}
+                    {onboardingAffilSaving ? 'Saving...' : 'Save'}
                   </button>
                 </div>
               </div>
@@ -2368,14 +2371,9 @@ function VolunteerPageInner() {
                               Optional
                             </span>
                           )}
-                          {locked && (
+                          {(locked || approvedNoFile) && (
                             <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.08)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.25)' }}>
-                              admin approved
-                            </span>
-                          )}
-                          {approvedNoFile && (
-                            <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', background: 'rgba(2,65,107,0.06)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.2)' }}>
-                              Approved — file still needed
+                              Approved
                             </span>
                           )}
                           {!locked && notNeeded && (
