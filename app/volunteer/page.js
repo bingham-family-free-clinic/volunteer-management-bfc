@@ -297,7 +297,7 @@ function AffiliationExtras({ form, setForm }) {
   const update = (key, value) => setForm(prev => ({ ...prev, [key]: value }))
   const sectionStyle = {
     padding: '1rem',
-    background: 'var(--bg)',
+    background: 'var(--surface)',
     borderRadius: '10px',
     border: '1px solid var(--border)',
   }
@@ -2216,17 +2216,12 @@ function VolunteerPageInner() {
               <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
                   <h2 style={{ fontWeight: 600, fontSize: '1.05rem' }}>Affiliation</h2>
-                  {onboardingAffiliation && (
-                    <span style={{ padding: '0.15rem 0.55rem', borderRadius: '999px', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', background: 'rgba(2,65,107,0.08)', color: 'var(--accent)', border: '1px solid rgba(2,65,107,0.25)' }}>
-                      {AFFILIATION_OPTIONS.find(opt => opt.value === onboardingAffiliation)?.label || onboardingAffiliation}
-                    </span>
-                  )}
                 </div>
                 <p style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
-                  Tell us how you are affiliated with the clinic. Your default position is assigned by an admin.
+                  Tell us how you are affiliated with the clinic.
                 </p>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.6rem' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
                   {AFFILIATION_OPTIONS.map(opt => {
                     const active = onboardingAffilForm.affiliation === opt.value
                     return (
@@ -2247,6 +2242,7 @@ function VolunteerPageInner() {
                           cursor: onboardingAffilSaving ? 'not-allowed' : 'pointer',
                           fontFamily: 'DM Sans, sans-serif',
                           fontSize: '0.88rem',
+                          whiteSpace: 'nowrap',
                           transition: 'all 0.15s',
                           opacity: onboardingAffilSaving ? 0.6 : 1,
                         }}
