@@ -1989,9 +1989,11 @@ function VolunteerPageInner() {
               <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.3rem' }}>
                   <h2 style={{ fontWeight: 600, fontSize: '1.05rem' }}>Onboarding Documents</h2>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
-                    {onboardingApprovedRequired} / {onboardingRequiredKeys.length} required approved
-                  </span>
+                  {onboardingPrefsSaved && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap' }}>
+                      {onboardingApprovedRequired} / {onboardingRequiredKeys.length} required approved
+                    </span>
+                  )}
                 </div>
                 <p style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
                   {onboardingPrefsSaved

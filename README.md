@@ -496,7 +496,7 @@ The Pipeline component (`components/Pipeline.js`) manages volunteer recruitment 
 
 Missionaries do not need Background Check, Immunizations, or TB Test. Information Systems, Communications, Credentialing, and Human Resources do not need Immunizations or TB Test. Pharmacy and Lab also require Licenses & Certifications.
 
-The checklist metadata and all role/affiliation requirements are maintained in `lib/onboardingDocs.js`.
+The checklist metadata and all role/affiliation requirements are maintained in `lib/onboardingDocs.js`. Requirements remain unset until both the volunteer's affiliation and position have been selected.
 
 **Profile creation** — Invokes `create-volunteer` Edge Function for Auth account, inserts `profiles`, uploads avatar, adds to waitlist, marks application `completed`. Default temporary password: `BFC2025!`.
 

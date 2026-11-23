@@ -10,6 +10,7 @@ import {
   ONBOARDING_FORM_DOC_KEYS,
   ONBOARDING_UPLOAD_DOCS,
   getRequiredDocKeys,
+  hasSavedOnboardingPrefs,
   isDocRequired,
 } from '../lib/onboardingDocs'
 
@@ -2926,7 +2927,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   // ─── Onboarding document validation ──────────────────────────────────────────
 
-  const requiredChecks         = getRequiredDocKeys(onboardForm.affiliation, onboardForm.default_role)
+  const onboardingPrefsSaved  = hasSavedOnboardingPrefs(onboardForm.affiliation, onboardForm.default_role)
+  const requiredChecks         = onboardingPrefsSaved
+    ? getRequiredDocKeys(onboardForm.affiliation, onboardForm.default_role)
+    : []
   const missingRequiredDocs    = requiredChecks
     .filter(key => !checklist[key])
     .map(key => ONBOARDING_DOCS.find(i => i.key === key)?.label ?? key)
@@ -3977,9 +3981,11 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>Onboarding Checklist</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{completedRequiredCount} / {requiredChecks.length} Required Complete</span>
-                  </div>
+                  {onboardingPrefsSaved && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>{completedRequiredCount} / {requiredChecks.length} Required Complete</span>
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
