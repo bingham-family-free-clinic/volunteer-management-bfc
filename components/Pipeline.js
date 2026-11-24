@@ -1889,7 +1889,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // just the picked affiliation (no position/docs checks), moves the
   // applicant to onboarding, and sends the onboarding email for that
   // affiliation. Full validation happens later at the Move To Training gate.
-  async function confirmCreateAtInterview() {
+  async function confirmCreateAtInterview(silent = false) {
     if (!affiliationModal) return
     const { applicant } = affiliationModal
     const affiliation   = affiliationPick
@@ -1924,15 +1924,19 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setOnboardForm(prev => ({ ...prev, affiliation: affiliation || '' }))
     await loadChecklist(applicant.id)
 
-    // Fire the correct email template based on affiliation
-    const emailStage = affiliation === 'missionary' ? 'onboarding_missionary' : 'onboarding'
-    const emailOk = await sendStageEmail({ ...applicant, onboard_affiliation: affiliation }, emailStage, { quiet: true })
-    msg(
-      emailOk
-        ? `Profile created for ${applicant.full_name} — moved to onboarding, email sent (temp password BFC2025!)`
-        : `Profile created for ${applicant.full_name} — moved to onboarding, but the welcome email failed to send (temp password BFC2025!)`,
-      emailOk ? 'success' : 'error'
-    )
+    if (!silent) {
+      // Fire the correct email template based on affiliation
+      const emailStage = affiliation === 'missionary' ? 'onboarding_missionary' : 'onboarding'
+      const emailOk = await sendStageEmail({...applicant, onboard_affiliation: affiliation}, emailStage, {quiet: true})
+      msg(
+          emailOk
+              ? `Profile created for ${applicant.full_name} — moved to onboarding, email sent (temp password BFC2025!)`
+              : `Profile created for ${applicant.full_name} — moved to onboarding, but the welcome email failed to send (temp password BFC2025!)`,
+          emailOk ? 'success' : 'error'
+      )
+    } else {
+      msg(`Profile created for ${applicant.full_name} — moved to onboarding (No email sent)`)
+    }
     setMovingStage(false)
     setAffiliationModal(null)
   }
@@ -3011,8 +3015,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           {affiliationPick && (
             <div style={{ padding: '0.65rem 0.9rem', borderRadius: '8px', background: C.blue + '08', border: `1px solid ${C.blue}33`, fontSize: '0.8rem', color: C.blue, lineHeight: 1.5 }}>
               {affiliationPick === 'missionary'
-                ? <>Will send the <strong>Onboarding — Missionary</strong> email template.</>
-                : <>Will send the <strong>Onboarding Welcome</strong> email template.</>
+                ? <>Will send the <strong>Onboarding — Missionary</strong> email template unless "Create Profile Silently" is selected.</>
+                : <>Will send the <strong>Onboarding Welcome</strong> email template unless "Create Profile Silently" is selected.</>
               }
             </div>
           )}
@@ -3025,11 +3029,18 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
               </button>
             )}
             <button
-              onClick={confirmCreateAtInterview}
+              onClick={() => confirmCreateAtInterview(false)}
               disabled={!canConfirm || movingStage}
               style={solidBtn(C.blue, !canConfirm || movingStage)}
             >
               {movingStage ? 'Creating...' : 'Create Profile & Send Email'}
+            </button>
+            <button
+                onClick={() => confirmCreateAtInterview(true)}
+                disabled={!canConfirm || movingStage}
+                style={solidBtn(C.muted, !canConfirm || movingStage)}
+            >
+              {movingStage ? 'Creating...' : 'Create Profile Silently'}
             </button>
           </div>
         </div>
@@ -3621,6 +3632,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>Review this application and decide whether to schedule an interview or reject it.</p>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <button onClick={() => moveToStage(applicant, 'interview')} disabled={movingStage} style={outlineBtn(C.warn)}>Move to Interview</button>
+              <button onClick={() => moveToStage(applicant, 'interview', {silent: true})} disabled={movingStage} style={outlineBtn(C.muted)}>Move to Interview (Silent)</button>
               <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>Reject Application</button>
             </div>
           </div>
