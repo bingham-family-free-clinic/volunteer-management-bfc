@@ -1875,9 +1875,8 @@ function VolunteerPageInner() {
 
   async function handleSaveTbExp(value) {
     if (!user) return
-    const notNeeded = isDocNotNeeded('tb_test', onboardingAffiliation, onboardingRole)
     const cleaned = (value || '').trim()
-    const nextValue = cleaned || (notNeeded ? 'N/A' : null)
+    const nextValue = cleaned || null
     const currentValue = profile?.tb_exp || null
     if (currentValue === nextValue) return
 
@@ -1906,21 +1905,6 @@ function VolunteerPageInner() {
 
     showToast('TB expiration updated!', 'success')
   }
-
-  useEffect(() => {
-    if (!user || !profile) return
-    if (onboardingApp?.stage !== 'onboarding') return
-    if (!isDocNotNeeded('tb_test', onboardingAffiliation, onboardingRole)) return
-    if (profile.tb_exp === 'N/A') return
-    let cancelled = false
-    ;(async () => {
-      const { error } = await supabase.from('profiles').update({ tb_exp: 'N/A' }).eq('id', user.id)
-      if (cancelled || error) return
-      setProfile(prev => prev ? { ...prev, tb_exp: 'N/A' } : prev)
-      setTbExpDraft('N/A')
-    })()
-    return () => { cancelled = true }
-  }, [user, profile?.tb_exp, onboardingApp?.stage, onboardingAffiliation, onboardingRole])
 
   async function handleSaveCreds(e) {
     e.preventDefault()
@@ -2356,9 +2340,10 @@ function VolunteerPageInner() {
                     // "Not needed" items keep their grayed-out look but remain
                     // interactive: the volunteer may still upload documents.
                     const dimmed         = notNeeded || rowBusy
-                    // The TB expiration date remains editable after approval;
-                    // changing it clears that approval for admin review.
-                    const dateDisabled   = notNeeded || rowBusy
+                    // The TB expiration date remains editable after approval and
+                    // even when the TB test is not needed for the position.
+                    // Changing it clears that approval for admin review.
+                    const dateDisabled   = rowBusy
                     const blueCard       = hasFile || approved
                     const buttonLabel    = uploading
                       ? 'Uploading...'
@@ -2366,7 +2351,6 @@ function VolunteerPageInner() {
                     const tbDateValue    = tbExpDraft && tbExpDraft !== 'N/A' && tbExpDraft !== 'expired'
                       ? tbExpDraft
                       : ''
-                    const tbNotNeeded    = isDocNotNeeded('tb_test', onboardingAffiliation, onboardingRole)
 
                     return (
                       <div
@@ -2532,35 +2516,29 @@ function VolunteerPageInner() {
                           {item.key === 'tb_test' && (
                             <>
                               <span style={{ fontSize: '0.67rem', color: 'var(--muted)' }}>Expiration Date:</span>
-                              {tbNotNeeded ? (
-                                <span style={{ width: '140px', padding: '0.35rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)', boxSizing: 'border-box' }}>
-                                  N/A
-                                </span>
-                              ) : (
-                                <input
-                                  type="date"
-                                  value={tbDateValue}
-                                  onChange={e => setTbExpDraft(e.target.value)}
-                                  onBlur={e => handleSaveTbExp(e.target.value)}
-                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                  disabled={dateDisabled}
-                                  title="Expiration Date"
-                                  style={{
-                                    width: '140px',
-                                    padding: '0.35rem 0.6rem',
-                                    borderRadius: '6px',
-                                    fontSize: '0.75rem',
-                                    fontFamily: 'DM Sans, sans-serif',
-                                    background: 'var(--bg)',
-                                    color: 'var(--text)',
-                                    border: '1px solid var(--border)',
-                                    outline: 'none',
-                                    boxSizing: 'border-box',
-                                    cursor: dateDisabled ? 'not-allowed' : 'text',
-                                    opacity: dateDisabled ? 0.6 : 1,
-                                  }}
-                                />
-                              )}
+                              <input
+                                type="date"
+                                value={tbDateValue}
+                                onChange={e => setTbExpDraft(e.target.value)}
+                                onBlur={e => handleSaveTbExp(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                disabled={dateDisabled}
+                                title="Expiration Date"
+                                style={{
+                                  width: '140px',
+                                  padding: '0.35rem 0.6rem',
+                                  borderRadius: '6px',
+                                  fontSize: '0.75rem',
+                                  fontFamily: 'DM Sans, sans-serif',
+                                  background: 'var(--bg)',
+                                  color: 'var(--text)',
+                                  border: '1px solid var(--border)',
+                                  outline: 'none',
+                                  boxSizing: 'border-box',
+                                  cursor: dateDisabled ? 'not-allowed' : 'text',
+                                  opacity: dateDisabled ? 0.6 : 1,
+                                }}
+                              />
                             </>
                           )}
                         </div>

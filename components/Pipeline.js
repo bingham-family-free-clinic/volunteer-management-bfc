@@ -3963,7 +3963,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
                 {onboardForm.affiliation && <AffiliationExtras onboardForm={onboardForm} setOnboardForm={setOnboardForm} labelStyle={labelStyle} inputStyle={inputStyle} secLabel={secLabel} />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() }); setOnboardStep(2) }} disabled={!s1} style={solidBtn(C.blue, !s1)}>Save &amp; Next</button>
+                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() }); setOnboardStep(2) }} disabled={!onboardForm.affiliation} style={solidBtn(C.blue, !onboardForm.affiliation)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
