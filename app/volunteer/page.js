@@ -2359,7 +2359,7 @@ function VolunteerPageInner() {
                         style={{
                           padding: '0.85rem 1rem',
                           borderRadius: '10px',
-                          border: `1px solid ${blueCard ? '#0369a155' : notNeeded ? '#9ca3af' : 'var(--border)'}`,
+                          border: `1px solid ${blueCard ? '#0369a155' : notNeeded ? 'var(--border)' : '#9ca3af'}`,
                           background: blueCard ? '#0369a108' : 'var(--surface)',
                           transition: 'all 0.15s',
                         }}
@@ -2459,7 +2459,7 @@ function VolunteerPageInner() {
                                 onClick={() => handleClearBrokenOnboardingFile(item)}
                                 disabled={rowBusy}
                                 title="Clear the reference so you can upload a new file"
-                                style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}
+                                style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.6 : 1 }}
                               >
                                 {removing ? 'Clearing...' : 'Remove'}
                               </button>
