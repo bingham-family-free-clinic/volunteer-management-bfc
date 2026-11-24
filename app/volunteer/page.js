@@ -1878,7 +1878,9 @@ function VolunteerPageInner() {
     const notNeeded = isDocNotNeeded('tb_test', onboardingAffiliation, onboardingRole)
     const cleaned = (value || '').trim()
     const nextValue = cleaned || (notNeeded ? 'N/A' : null)
-    if ((profile?.tb_exp || null) === nextValue) return
+    const currentValue = profile?.tb_exp || null
+    if (currentValue === nextValue) return
+
     const { error } = await supabase.from('profiles').update({ tb_exp: nextValue }).eq('id', user.id)
     if (error) {
       showToast(error.message, 'error')
@@ -1886,6 +1888,22 @@ function VolunteerPageInner() {
     }
     setProfile(prev => prev ? { ...prev, tb_exp: nextValue || '' } : prev)
     setTbExpDraft(nextValue || '')
+
+    // Changing an approved TB date invalidates that approval. Clear it the
+    // same way replacing the TB file does, so an admin reviews the new date.
+    if (onboardingApp?.id && onboardingChecklist?.tb_test === true) {
+      const { error: checklistError } = await supabase
+        .from('onboarding_checklists')
+        .update({ tb_test: false, updated_at: new Date().toISOString() })
+        .eq('applicant_id', onboardingApp.id)
+
+      if (checklistError) {
+        showToast(`TB expiration updated, but approval could not be cleared: ${checklistError.message}`, 'error')
+        return
+      }
+      setOnboardingChecklist(prev => prev ? { ...prev, tb_test: false } : prev)
+    }
+
     showToast('TB expiration updated!', 'success')
   }
 
@@ -2338,8 +2356,9 @@ function VolunteerPageInner() {
                     // "Not needed" items keep their grayed-out look but remain
                     // interactive: the volunteer may still upload documents.
                     const dimmed         = notNeeded || rowBusy
-                    // The TB expiration date keeps its stricter rules.
-                    const dateDisabled   = locked || notNeeded || rowBusy
+                    // The TB expiration date remains editable after approval;
+                    // changing it clears that approval for admin review.
+                    const dateDisabled   = notNeeded || rowBusy
                     const blueCard       = hasFile || approved
                     const buttonLabel    = uploading
                       ? 'Uploading...'
