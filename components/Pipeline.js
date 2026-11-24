@@ -1574,6 +1574,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [expandedId,         setExpandedId]         = useState(null)
   const [recentPhotoUrls,    setRecentPhotoUrls]    = useState({})   // { [applicantId]: signedUrl }
   const [recentPhotoUploading, setRecentPhotoUploading] = useState(null) // applicantId currently uploading
+  const [recentFiles,        setRecentFiles]        = useState({})   // { [applicantId]: { [itemKey]: { path, files, loading?, error? } } }
+  const [recentRemovingFile, setRecentRemovingFile] = useState(null) // { applicantId, itemKey, name } | null
 
   // Onboarding form
   const EMPTY_FORM = {
@@ -1674,6 +1676,56 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         })
     }
   }, [selected?.id, selected?.stage, checklistPathsKey])
+
+  // Same one-line-per-file listing for the Recently Added panel, scoped to the
+  // card the admin has expanded. Re-reads when that applicant's stored paths
+  // change (upload, remove, or clear).
+  const recentPathsKey = useMemo(() => {
+    if (!expandedId) return ''
+    const cl = recentChecklist[expandedId] || {}
+    return ONBOARDING_UPLOAD_DOCS.map(i => cl[i.urlKey] || '').join('|')
+  }, [expandedId, recentChecklist])
+  useEffect(() => {
+    if (!expandedId) return
+    const cl = recentChecklist[expandedId] || {}
+    for (const item of ONBOARDING_UPLOAD_DOCS) {
+      const path   = cl[item.urlKey] || null
+      const cached = recentFiles[expandedId]?.[item.key]
+      if (!path) {
+        if (cached) setRecentFiles(prev => {
+          const app = { ...(prev[expandedId] || {}) }
+          delete app[item.key]
+          return { ...prev, [expandedId]: app }
+        })
+        continue
+      }
+      if (cached?.path === path) continue
+
+      const flagged = (cl.volunteer_uploads || []).includes(item.key)
+      setRecentFiles(prev => ({
+        ...prev,
+        [expandedId]: { ...(prev[expandedId] || {}), [item.key]: { path, files: [], loading: true } },
+      }))
+      readStoredFiles(supabase, item.bucket, path, flagged, false)
+        .then(files => setRecentFiles(prev => {
+          const app = prev[expandedId] || {}
+          if (app[item.key]?.path !== path) return prev
+          return {
+            ...prev,
+            [expandedId]: { ...app, [item.key]: { path, files: files.map(({ name, source }) => ({ name, source })) } },
+          }
+        }))
+        .catch(async e => {
+          console.error(`Could not read ${item.label} files:`, e)
+          const detail = await describeStorageError(e)
+          setRecentFiles(prev => {
+            const app = prev[expandedId] || {}
+            if (app[item.key]?.path !== path) return prev
+            return { ...prev, [expandedId]: { ...app, [item.key]: { path, files: [], error: detail } } }
+          })
+        })
+    }
+  }, [expandedId, recentPathsKey, recentChecklist])
 
   // Lookups for the Applied-stage "Staffing Need" badge — recomputed only
   // when the underlying clinic schedule / waitlist rows change.
@@ -1872,6 +1924,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
           immunization_url: row.immunization_url ?? null,
           tb_test_url:      row.tb_test_url      ?? null,
           parking_pass_url: row.parking_pass_url ?? null,
+          volunteer_uploads: row.volunteer_uploads ?? [],
         }
       })
       setRecentChecklist(map)
@@ -2203,36 +2256,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     setSavingChecklist(false)
   }
 
-  async function uploadChecklistFiles(applicantId, item, filesArr) {
-    if (!filesArr.length || !item.bucket || !item.urlKey) {
-      throw new Error('Invalid file upload')
-    }
-
-    const tooBig = filesArr.find(file => file.size > MAX_FILE_SIZE)
-    if (tooBig) throw new Error(`${tooBig.name} is larger than 5 MB`)
-
-    const zip = new JSZip()
-
-    for (const file of filesArr) {
-      zip.file(file.name, file)
-    }
-
-    const zipBlob = await zip.generateAsync({ type: 'blob' })
-
-    const path = `${applicantId}/${item.key}-${Date.now()}.zip`
-
-    const { error } = await supabase.storage
-        .from(item.bucket)
-        .upload(path, zipBlob, {
-          contentType: 'application/zip',
-          upsert: true
-        })
-
-    if (error) throw error
-
-    return path
-  }
-
   // ─── Onboarding checklist: multi-file documents ───────────────────────────
   // Writes only the generated form's own columns (approval + path) plus its
   // "volunteer uploaded" flag. Upserting the whole checklist from React state
@@ -2275,8 +2298,10 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   // Writes the item's full file list as a new zip, points the checklist at it,
-  // then deletes the zip it replaces. An empty list clears the item.
-  async function commitChecklistFiles(applicantId, item, oldPath, files) {
+  // then deletes the zip it replaces. An empty list clears the item. Shared by
+  // the onboarding checklist and the Recently Added panel so both write through
+  // the targeted admin RPC instead of upserting a whole stale checklist row.
+  async function writeChecklistFiles(applicantId, item, oldPath, files) {
     let newPath = null
 
     if (files.length > 0) {
@@ -2308,6 +2333,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       if (delErr) console.warn(`Could not delete old ${item.label} file:`, delErr)
     }
 
+    return newPath
+  }
+
+  // Onboarding checklist target: updates the selected applicant's local state.
+  async function commitChecklistFiles(applicantId, item, oldPath, files) {
+    const newPath = await writeChecklistFiles(applicantId, item, oldPath, files)
+
     setChecklist(prev => ({
       ...prev,
       [item.urlKey]: newPath,
@@ -2320,6 +2352,30 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       if (newPath) next[item.key] = { path: newPath, files: files.map(({ name, source }) => ({ name, source })) }
       else delete next[item.key]
       return next
+    })
+  }
+
+  // Recently Added target: same storage/RPC write, but updates the completed
+  // applicant's state instead of the selected applicant's. The volunteer-upload
+  // flag is kept in sync locally too — the RPC clears it server-side.
+  async function commitRecentChecklistFiles(applicantId, item, oldPath, files) {
+    const newPath = await writeChecklistFiles(applicantId, item, oldPath, files)
+
+    setRecentChecklist(prev => ({
+      ...prev,
+      [applicantId]: {
+        ...(prev[applicantId] || { ...EMPTY_CHECKLIST }),
+        [item.urlKey]: newPath,
+        volunteer_uploads: newPath
+          ? (prev[applicantId]?.volunteer_uploads || []).filter(k => k !== item.key)
+          : (prev[applicantId]?.volunteer_uploads || []),
+      },
+    }))
+    setRecentFiles(prev => {
+      const app = { ...(prev[applicantId] || {}) }
+      if (newPath) app[item.key] = { path: newPath, files: files.map(({ name, source }) => ({ name, source })) }
+      else delete app[item.key]
+      return { ...prev, [applicantId]: app }
     })
   }
 
@@ -2416,9 +2472,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     }
   }
 
-  // Opens a single file from an item's document in a new tab.
-  async function openChecklistFile(item, fileName) {
-    const path = checklist[item.urlKey]
+  // Opens a single file from a stored document in a new tab. The document is a
+  // zip, so the named entry is extracted first (see extractStoredFile).
+  async function openStoredFile(item, path, fileName) {
     if (!path) return
 
     // Open the tab now, inside the click, so the popup isn't blocked while the
@@ -2437,62 +2493,125 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       setTimeout(() => URL.revokeObjectURL(url), 300000)
     } catch (e) {
       tab?.close()
-      msg(`Could not open file: ${await describeStorageError(e)}`, 'error')
+      const detail = await describeStorageError(e)
+      // A missing object is a dead reference, not a permissions problem — say
+      // so, and offer to clear it (the row can then take a new upload).
+      if (/object not found|not_found|404/i.test(detail)) {
+        msg(`File is missing from Storage: ${detail}`, 'error')
+      } else {
+        msg(`Could not open file: ${detail}`, 'error')
+      }
     }
+  }
+
+  async function openChecklistFile(item, fileName) {
+    await openStoredFile(item, checklist[item.urlKey], fileName)
+  }
+
+  async function openRecentFile(applicantId, item, fileName) {
+    await openStoredFile(item, recentChecklist[applicantId]?.[item.urlKey], fileName)
   }
 
   // ─── Recently Added: per-item file upload ─────────────────────────────────
 
+  // Adds the picked files to whatever is already on the item, the same way the
+  // onboarding checklist does — through the targeted admin RPC, never a
+  // whole-row upsert (which would rewrite other items from a stale snapshot).
   async function handleRecentFileUpload(applicantId, item, filesArr) {
     if (!filesArr.length || !item.bucket || !item.urlKey) return
 
-    const uploadKey = `${applicantId}-${item.key}`
-    setRecentUploadingKey(uploadKey)
+    const tooBig = filesArr.find(file => file.size > MAX_FILE_SIZE)
+    if (tooBig) { msg(`${tooBig.name} is larger than 5 MB`, 'error'); return }
+
+    setRecentUploadingKey(`${applicantId}-${item.key}`)
 
     try {
-      const path = await uploadChecklistFiles(
-          applicantId,
-          item,
-          filesArr
-      )
+      const { path: oldPath, flagged } = await getFreshItemState(applicantId, item)
+      const existing = oldPath ? await readStoredFiles(supabase, item.bucket, oldPath, flagged, true) : []
 
-      const existing =
-          recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }
+      const taken = new Set(existing.map(f => f.name))
+      const added = filesArr.map(file => {
+        const name = uniqueFileName(file.name, taken)
+        taken.add(name)
+        return { name, data: file, source: 'admin' }
+      })
 
-      const next = {
-        ...existing,
-        [item.urlKey]: path,
-        [item.key]: true,
-      }
-
-      setRecentChecklist(prev => ({
-        ...prev,
-        [applicantId]: next
-      }))
-
-      const { error: dbErr } = await supabase
-          .from('onboarding_checklists')
-          .upsert(
-              {
-                applicant_id: applicantId,
-                ...next,
-                updated_at: new Date().toISOString()
-              },
-              {
-                onConflict: 'applicant_id'
-              }
-          )
-
-      if (dbErr) {
-        msg(dbErr.message, 'error')
-      } else {
-        msg(`${item.label} uploaded`)
-      }
-
+      await commitRecentChecklistFiles(applicantId, item, oldPath, [...existing, ...added])
+      msg(added.length === 1 ? `${item.label}: ${added[0].name} uploaded` : `${item.label}: ${added.length} files uploaded`)
     } catch (e) {
       msg(await describeStorageError(e, 'Upload failed'), 'error')
     } finally {
       setRecentUploadingKey(null)
+    }
+  }
+
+  // Removes one file from the item (rebuilds the zip without it).
+  async function handleRecentRemoveFile(applicantId, item, fileName) {
+    const ok = await confirmAction({
+      label: 'Remove this file?',
+      confirmText: 'Yes',
+      cancelText: 'No',
+      danger: true,
+    })
+    if (!ok) return
+
+    setRecentRemovingFile({ applicantId, itemKey: item.key, name: fileName })
+
+    try {
+      const { path: oldPath, flagged } = await getFreshItemState(applicantId, item)
+      const existing  = oldPath ? await readStoredFiles(supabase, item.bucket, oldPath, flagged, true) : []
+      const remaining = existing.filter(f => f.name !== fileName)
+
+      if (remaining.length === existing.length) {
+        msg('That file is no longer on record', 'error')
+        return
+      }
+
+      await commitRecentChecklistFiles(applicantId, item, oldPath, remaining)
+      msg(`${fileName} removed`)
+    } catch (e) {
+      msg(await describeStorageError(e, 'Remove failed'), 'error')
+    } finally {
+      setRecentRemovingFile(null)
+    }
+  }
+
+  // The row points at an object that is no longer in Storage. Drop just the DB
+  // reference so the item isn't stuck and a new file can be attached.
+  async function handleRecentClearBrokenFile(applicantId, item) {
+    const ok = await confirmAction({
+      label: 'Missing file. Delete the reference?',
+      confirmText: 'Yes',
+      cancelText: 'No',
+      danger: false,
+    })
+    if (!ok) return
+
+    setRecentRemovingFile({ applicantId, itemKey: item.key, name: null })
+    try {
+      const { error } = await supabase.from('onboarding_checklists')
+        .update({ [item.urlKey]: null, updated_at: new Date().toISOString() })
+        .eq('applicant_id', applicantId)
+      if (error) throw error
+
+      setRecentChecklist(prev => ({
+        ...prev,
+        [applicantId]: {
+          ...(prev[applicantId] || { ...EMPTY_CHECKLIST }),
+          [item.urlKey]: null,
+          volunteer_uploads: (prev[applicantId]?.volunteer_uploads || []).filter(k => k !== item.key),
+        },
+      }))
+      setRecentFiles(prev => {
+        const app = { ...(prev[applicantId] || {}) }
+        delete app[item.key]
+        return { ...prev, [applicantId]: app }
+      })
+      msg(`${item.label} cleared — you can upload a new file`)
+    } catch (e) {
+      msg(await describeStorageError(e, 'Could not clear the file'), 'error')
+    } finally {
+      setRecentRemovingFile(null)
     }
   }
 
@@ -2520,12 +2639,6 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       msg('Upload failed: ' + e.message, 'error')
     }
     setRecentPhotoUploading(null)
-  }
-
-  async function openFile(bucket, storagePath) {
-    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(storagePath, 120)
-    if (error) { msg('Could not open file', 'error'); return }
-    window.open(data.signedUrl, '_blank')
   }
 
   async function openResume(resumeUrl) {
@@ -3157,6 +3270,119 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
     )
   }
 
+  // ─── Recently Added rows ──────────────────────────────────────────────────
+  // The completed-volunteer panel shows the same document rows as the
+  // onboarding checklist (one line per file, remove/attach controls), but
+  // without the approval checkbox — approval only applies during onboarding.
+
+  function RecentFileRow({ item, applicantId }) {
+    const ref = useRef(null)
+    if (!item.bucket || !item.urlKey) return null
+
+    const entry   = recentFiles[applicantId]?.[item.key]
+    const files   = entry?.files || []
+    const uploadKey = `${applicantId}-${item.key}`
+    const rowBusy = recentUploadingKey === uploadKey ||
+      (recentRemovingFile?.applicantId === applicantId && recentRemovingFile?.itemKey === item.key)
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.4rem' }}>
+        <input ref={ref}
+               type="file"
+               multiple
+               accept=".pdf,.jpg,.jpeg,.png,.webp,image/*"
+               style={{ display: 'none' }}
+               onChange={e => {
+                 const picked = Array.from(e.target.files || [])
+                 if (picked.length > 0) handleRecentFileUpload(applicantId, item, picked)
+                 e.target.value = ''
+               }}
+        />
+
+        {entry?.loading && <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontStyle: 'italic' }}>Loading files…</span>}
+        {entry?.error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.72rem', color: C.danger }}>Couldn't read the uploaded files: {entry.error}</span>
+            <button type="button" onClick={() => handleRecentClearBrokenFile(applicantId, item)} disabled={rowBusy}
+              title="Clear the reference so you can upload a new file"
+              style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}>
+              {recentRemovingFile?.applicantId === applicantId && recentRemovingFile?.itemKey === item.key ? 'Clearing...' : 'Remove'}
+            </button>
+          </div>
+        )}
+
+        {files.map(f => {
+          const removing = recentRemovingFile?.applicantId === applicantId &&
+                           recentRemovingFile?.itemKey === item.key &&
+                           recentRemovingFile?.name === f.name
+          return (
+            <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button type="button" onClick={() => openRecentFile(applicantId, item, f.name)} title="Open file"
+                style={{ background: 'none', border: 'none', padding: 0, color: C.blue, textDecoration: 'underline', cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {f.name}
+              </button>
+              <button type="button" onClick={() => handleRecentRemoveFile(applicantId, item, f.name)} disabled={rowBusy}
+                style={{ flexShrink: 0, padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}>
+                {removing ? 'Removing...' : 'Remove'}
+              </button>
+              {f.source === 'volunteer' && (
+                <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44`, whiteSpace: 'nowrap', flexShrink: 0 }}>volunteer upload</span>
+              )}
+            </div>
+          )
+        })}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button type="button" onClick={() => ref.current?.click()} disabled={rowBusy}
+            style={{ padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: rowBusy ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: rowBusy ? 0.5 : 1 }}>
+            {recentUploadingKey === uploadKey ? 'Uploading...' : '+ Attach File'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Parking pass / confidentiality agreement on the Recently Added panel: the
+  // saved PDF is listed like any other file, with an "Edit" button instead of
+  // "Remove" and no attach button.
+  function RecentFormRow({ item, applicantId, applicantName }) {
+    const path        = recentChecklist[applicantId]?.[item.urlKey] || null
+    const fileName    = path ? path.split('/').pop() : null
+    const isVolunteer = (recentChecklist[applicantId]?.volunteer_uploads || []).includes(item.key)
+
+    const openForm = () => {
+      if (item.key === 'confidentiality_agreement') openConfidentialityModal(applicantId, applicantName, true)
+      else openParkingPassModal(applicantId, applicantName, true)
+    }
+
+    const btnStyle = { padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.4rem' }}>
+        {fileName ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button type="button" onClick={() => openRecentFile(applicantId, item, fileName)} title="Open file"
+              style={{ background: 'none', border: 'none', padding: 0, color: C.blue, textDecoration: 'underline', cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {fileName}
+            </button>
+            <button type="button" onClick={openForm} style={{ ...btnStyle, flexShrink: 0 }}>
+              Edit
+            </button>
+            {isVolunteer && (
+              <span style={{ padding: '0.12rem 0.45rem', borderRadius: '999px', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44`, whiteSpace: 'nowrap', flexShrink: 0 }}>volunteer upload</span>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button type="button" onClick={openForm} style={{ ...btnStyle, fontWeight: 600 }}>
+              Fill Out Form
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // ─── Validity ─────────────────────────────────────────────────────────────
 
   function getMissingAffiliationRequirements() {
@@ -3686,101 +3912,42 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
 
                     {/* Resume */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 0.9rem', borderRadius: '8px', background: a.resume_url ? C.blue + '0a' : 'var(--bg)', border: `1px solid ${a.resume_url ? C.blue + '44' : 'var(--border)'}`, gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div style={{ padding: '0.65rem 0.9rem', borderRadius: '8px', background: 'var(--bg)', border: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
-                        <div style={{ width: 18, height: 18, borderRadius: '4px', flexShrink: 0, background: a.resume_url ? C.blue : 'transparent', border: `2px solid ${a.resume_url ? C.blue : 'var(--border)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {a.resume_url && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                        </div>
-                        <span style={{ fontSize: '0.85rem', fontWeight: a.resume_url ? 600 : 400, color: a.resume_url ? 'var(--text)' : 'var(--muted)' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)' }}>
                           Resume
                           <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontWeight: 400, marginLeft: '0.35rem' }}>(submitted with application)</span>
                         </span>
-                        {a.resume_url && <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600, flexShrink: 0 }}>Uploaded</span>}
                       </div>
-                      <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
-                        {a.resume_url
-                          ? <button onClick={() => openResume(a.resume_url)} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>View ↗</button>
-                          : <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontStyle: 'italic' }}>None submitted</span>
-                        }
-                      </div>
+                      {a.resume_url ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.4rem' }}>
+                          <button type="button" onClick={() => openResume(a.resume_url)} title="Open file"
+                            style={{ background: 'none', border: 'none', padding: 0, color: C.blue, textDecoration: 'underline', cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'DM Sans, sans-serif', textAlign: 'left', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {a.resume_url.split('/').pop()}
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: '0.4rem' }}>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontStyle: 'italic' }}>None submitted</span>
+                        </div>
+                      )}
                     </div>
 
                     {ONBOARDING_FILE_DOCS.map(item => {
-
-                      if (item.key === 'confidentiality_agreement') {
-                        const hasPdf = !!(cl[item.urlKey])
-                        return (
-                          <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 0.9rem', borderRadius: '8px', background: hasPdf ? C.blue + '0a' : 'var(--bg)', border: `1px solid ${hasPdf ? C.blue + '44' : 'var(--border)'}`, gap: '0.75rem', flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
-                              <div style={{ width: 18, height: 18, borderRadius: '4px', flexShrink: 0, background: hasPdf ? C.blue : 'transparent', border: `2px solid ${hasPdf ? C.blue : 'var(--border)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {hasPdf && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                              </div>
-                              <span style={{ fontSize: '0.85rem', fontWeight: hasPdf ? 600 : 400, color: hasPdf ? 'var(--text)' : 'var(--muted)' }}>Confidentiality Agreement</span>
-                              {hasPdf && <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600, flexShrink: 0 }}>PDF saved</span>}
-                            </div>
-                            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
-                              {hasPdf && <button onClick={() => openFile('onboarding-confidentiality', cl[item.urlKey])} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>View ↗</button>}
-                              <button onClick={() => openConfidentialityModal(a.id, a.full_name, true)} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>{hasPdf ? 'Re-sign' : '+ Fill Out Agreement'}</button>
-                            </div>
-                          </div>
-                        )
-                      }
-
-                      if (item.key === 'parking_pass') {
-                        const hasPdf = !!(cl[item.urlKey])
-                        return (
-                          <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 0.9rem', borderRadius: '8px', background: hasPdf ? C.blue + '0a' : 'var(--bg)', border: `1px solid ${hasPdf ? C.blue + '44' : 'var(--border)'}`, gap: '0.75rem', flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
-                              <div style={{ width: 18, height: 18, borderRadius: '4px', flexShrink: 0, background: hasPdf ? C.blue : 'transparent', border: `2px solid ${hasPdf ? C.blue : 'var(--border)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {hasPdf && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                              </div>
-                              <span style={{ fontSize: '0.85rem', fontWeight: hasPdf ? 600 : 400, color: hasPdf ? 'var(--text)' : 'var(--muted)' }}>Parking Pass</span>
-                              {hasPdf && <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600, flexShrink: 0 }}>PDF saved</span>}
-                            </div>
-                            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
-                              {hasPdf && <button onClick={() => openFile('onboarding-parking-passes', cl[item.urlKey])} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>View ↗</button>}
-                              <button onClick={() => openParkingPassModal(a.id, a.full_name, true)} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)' }}>{hasPdf ? 'Re-issue' : '+ Fill Out Pass'}</button>
-                            </div>
-                          </div>
-                        )
-                      }
-
-                      const hasFile     = !!(cl[item.urlKey])
-                      const uploadKey   = `${a.id}-${item.key}`
-                      const isUploading = recentUploadingKey === uploadKey
-                      const ref         = useRef(null)
+                      const isForm = ONBOARDING_FORM_DOC_KEYS.has(item.key)
 
                       return (
-                        <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 0.9rem', borderRadius: '8px', background: hasFile ? C.blue + '0a' : 'var(--bg)', border: `1px solid ${hasFile ? C.blue + '44' : 'var(--border)'}`, gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <div key={item.key} style={{ padding: '0.65rem 0.9rem', borderRadius: '8px', background: 'var(--bg)', border: '1px solid var(--border)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
-                            <div style={{ width: 18, height: 18, borderRadius: '4px', flexShrink: 0, background: hasFile ? C.blue : 'transparent', border: `2px solid ${hasFile ? C.blue : 'var(--border)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {hasFile && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                            </div>
-                            <span style={{ fontSize: '0.85rem', fontWeight: hasFile ? 600 : 400, color: hasFile ? 'var(--text)' : 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {item.label}
                             </span>
-                            {hasFile && <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600, flexShrink: 0 }}>Uploaded</span>}
                           </div>
-                          <input ref={ref}
-                                 type="file"
-                                 multiple
-                                 accept=".pdf,.jpg,.jpeg,.png,.webp,image/*"
-                                 style={{ display: 'none' }}
-                                 onChange={e => {
-                                   const files = Array.from(e.target.files || []);
-
-                                   if (files.length > 0)
-                                     handleRecentFileUpload(a.id, item, files);
-                                   e.target.value = ''
-                                 }
-                                }
-                          />
-                          <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
-                            {hasFile && <button onClick={() => openFile(item.bucket, cl[item.urlKey])} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: C.blue + '14', color: C.blue, border: `1px solid ${C.blue}44` }}>View ↗</button>}
-                            <button onClick={() => ref.current?.click()} disabled={isUploading} style={{ padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 600, cursor: isUploading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', opacity: isUploading ? 0.5 : 1 }}>
-                              {isUploading ? 'Uploading...' : hasFile ? 'Replace' : '+ Upload'}
-                            </button>
-                          </div>
+                          {isForm ? (
+                            <RecentFormRow item={item} applicantId={a.id} applicantName={a.full_name} />
+                          ) : (
+                            <RecentFileRow item={item} applicantId={a.id} />
+                          )}
                         </div>
                       )
                     })}
