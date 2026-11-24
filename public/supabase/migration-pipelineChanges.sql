@@ -628,3 +628,158 @@ $$;
 
 revoke all on function public.volunteer_save_onboarding_affiliation(uuid, text, jsonb) from public;
 grant execute on function public.volunteer_save_onboarding_affiliation(uuid, text, jsonb) to authenticated;
+
+-- ─── 10. Volunteer clears one checklist approval ─────────────────────────────
+-- The volunteer portal lets a volunteer edit their TB expiration date after an
+-- admin approved the TB test. Volunteers have SELECT-only access to
+-- onboarding_checklists, so a direct UPDATE would match 0 rows and return no
+-- error — the UI would report success while the item stayed approved. This RPC
+-- clears exactly one item's approval tick (and nothing else) for the
+-- volunteer's own application.
+--
+-- Safe to re-run: the function is replaced wholesale.
+
+create or replace function public.volunteer_clear_checklist_approval(
+  p_applicant_id uuid,
+  p_item_key text
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+begin
+  if v_email = '' then
+    raise exception 'Not authenticated';
+  end if;
+
+  if p_item_key not in (
+    'background_check', 'id_check', 'immunization', 'tb_test', 'licenses_certifications',
+    'confidentiality_agreement', 'parking_pass'
+  ) then
+    raise exception 'Unknown document type';
+  end if;
+
+  if not exists (
+    select 1 from public.volunteer_applications va
+     where va.id = p_applicant_id
+       and lower(va.email) = v_email
+       and va.stage = 'onboarding'
+  ) then
+    raise exception 'Application not found or not in onboarding';
+  end if;
+
+  update public.onboarding_checklists
+     set background_check = case when p_item_key = 'background_check' then false else background_check end,
+         id_check         = case when p_item_key = 'id_check' then false else id_check end,
+         immunization     = case when p_item_key = 'immunization' then false else immunization end,
+         tb_test          = case when p_item_key = 'tb_test' then false else tb_test end,
+         licenses_certifications = case when p_item_key = 'licenses_certifications' then false else licenses_certifications end,
+         confidentiality_agreement = case when p_item_key = 'confidentiality_agreement' then false else confidentiality_agreement end,
+         parking_pass     = case when p_item_key = 'parking_pass' then false else parking_pass end,
+         updated_at = now()
+   where applicant_id = p_applicant_id;
+end;
+$$;
+
+revoke all on function public.volunteer_clear_checklist_approval(uuid, text) from public;
+grant execute on function public.volunteer_clear_checklist_approval(uuid, text) to authenticated;
+
+-- ─── 11. Volunteer clears a checklist document path ──────────────────────────
+-- Removing the last file from a document used to store an empty zip, because
+-- volunteer_set_checklist_file rejects a null path. That left the checklist
+-- pointing at a document with no files, which looked "approved" to the
+-- required-document counter and could not be removed from either UI. This RPC
+-- clears just that item's URL (and its approval tick) for the volunteer's own
+-- application.
+--
+-- Safe to re-run: the function is replaced wholesale.
+
+create or replace function public.volunteer_clear_checklist_file(
+  p_applicant_id uuid,
+  p_item_key text
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+begin
+  if v_email = '' then
+    raise exception 'Not authenticated';
+  end if;
+
+  if p_item_key not in (
+    'background_check', 'id_check', 'immunization', 'tb_test', 'licenses_certifications',
+    'confidentiality_agreement', 'parking_pass'
+  ) then
+    raise exception 'Unknown document type';
+  end if;
+
+  if not exists (
+    select 1 from public.volunteer_applications va
+     where va.id = p_applicant_id
+       and lower(va.email) = v_email
+       and va.stage = 'onboarding'
+  ) then
+    raise exception 'Application not found or not in onboarding';
+  end if;
+
+  update public.onboarding_checklists
+     set background_check_url = case when p_item_key = 'background_check' then null else background_check_url end,
+         id_check_url         = case when p_item_key = 'id_check' then null else id_check_url end,
+         immunization_url     = case when p_item_key = 'immunization' then null else immunization_url end,
+         tb_test_url          = case when p_item_key = 'tb_test' then null else tb_test_url end,
+         licenses_url         = case when p_item_key = 'licenses_certifications' then null else licenses_url end,
+         confidentiality_url  = case when p_item_key = 'confidentiality_agreement' then null else confidentiality_url end,
+         parking_pass_url     = case when p_item_key = 'parking_pass' then null else parking_pass_url end,
+         background_check = case when p_item_key = 'background_check' then false else background_check end,
+         id_check         = case when p_item_key = 'id_check' then false else id_check end,
+         immunization     = case when p_item_key = 'immunization' then false else immunization end,
+         tb_test          = case when p_item_key = 'tb_test' then false else tb_test end,
+         licenses_certifications = case when p_item_key = 'licenses_certifications' then false else licenses_certifications end,
+         confidentiality_agreement = case when p_item_key = 'confidentiality_agreement' then false else confidentiality_agreement end,
+         parking_pass     = case when p_item_key = 'parking_pass' then false else parking_pass end,
+         volunteer_uploads = array(
+           select distinct k
+             from unnest(coalesce(volunteer_uploads, '{}'::text[])) as t(k)
+            where k <> p_item_key
+         ),
+         updated_at = now()
+   where applicant_id = p_applicant_id;
+end;
+$$;
+
+revoke all on function public.volunteer_clear_checklist_file(uuid, text) from public;
+grant execute on function public.volunteer_clear_checklist_file(uuid, text) to authenticated;
+
+-- ─── 12. Volunteer deletes their own superseded onboarding files ─────────────
+-- The upload flow deletes the zip/PDF it replaces. Volunteers previously had
+-- select/insert/update but no DELETE policy, so those deletes always failed
+-- and old files piled up in Storage. Scoped to the applicant's own folder,
+-- same buckets as the read/insert/update policies.
+
+drop policy if exists "Volunteers can delete own onboarding documents" on storage.objects;
+create policy "Volunteers can delete own onboarding documents"
+  on storage.objects
+  for delete
+  to authenticated
+  using (
+    bucket_id = any (array[
+      'onboarding-background-checks',
+      'onboarding-ids',
+      'onboarding-immunizations',
+      'onboarding-tb-tests',
+      'onboarding-licenses',
+      'onboarding-confidentiality',
+      'onboarding-parking-passes'
+    ])
+    and exists (
+      select 1
+        from public.volunteer_applications va
+       where va.id::text = (storage.foldername(name))[1]
+         and lower(va.email) = lower(auth.jwt() ->> 'email')
+    )
+  );

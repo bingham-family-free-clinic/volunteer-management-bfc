@@ -1,7 +1,7 @@
 'use client'
 import JSZip from 'jszip'
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, AFFILIATION_OPTIONS, getRoleCapacity } from '../lib/constants'
+import { ROLES, SHIFTS, ROLE_SUGGESTIONS, SCHOOLS, MAJORS, AFFILIATION_OPTIONS, getRoleCapacity, MAX_FILE_SIZE } from '../lib/constants'
 import { formatSlotFull, formatSlotDayLabel, formatSlotTime, TIMEZONE_LABEL } from '../lib/interview-schedule'
 import { useConfirm } from '../lib/ConfirmDialog'
 import {
@@ -1587,6 +1587,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   const [onboardForm,  setOnboardForm]  = useState(EMPTY_FORM)
   const [onboardStep,  setOnboardStep]  = useState(1)
   const [savingStep,   setSavingStep]   = useState(false)
+  const [saveError,    setSaveError]    = useState(null)
 
   // Admin notes — free text captured during onboarding, carried over to the
   // volunteer's profile once created (visible/editable on the Volunteers tab).
@@ -1715,19 +1716,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         }
 
         if (isRecent) {
-          const existing = recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }
-          const next     = { ...existing, parking_pass: true, parking_pass_url: filename,
-                             volunteer_uploads: (existing.volunteer_uploads || []).filter(k => k !== 'parking_pass') }
+          const next = { ...(recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }), parking_pass: true, parking_pass_url: filename }
           setRecentChecklist(prev => ({ ...prev, [applicantId]: next }))
-          await supabase.from('onboarding_checklists')
-            .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
         } else {
-          const next = { ...checklist, parking_pass: true, parking_pass_url: filename,
-                         volunteer_uploads: (checklist.volunteer_uploads || []).filter(k => k !== 'parking_pass') }
-          setChecklist(next)
-          await supabase.from('onboarding_checklists')
-            .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
+          setChecklist(prev => ({ ...prev, parking_pass: true, parking_pass_url: filename }))
         }
+        await saveGeneratedForm(applicantId, { key: 'parking_pass', urlKey: 'parking_pass_url' }, filename)
 
         await audit('parking_pass_generated', 'applicant', applicantId, volunteer_name,
           `Issued ${date_issued}`)
@@ -1778,19 +1772,12 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
         }
 
         if (isRecent) {
-          const existing = recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }
-          const next     = { ...existing, confidentiality_agreement: true, confidentiality_url: filename,
-                             volunteer_uploads: (existing.volunteer_uploads || []).filter(k => k !== 'confidentiality_agreement') }
+          const next = { ...(recentChecklist[applicantId] || { ...EMPTY_CHECKLIST }), confidentiality_agreement: true, confidentiality_url: filename }
           setRecentChecklist(prev => ({ ...prev, [applicantId]: next }))
-          await supabase.from('onboarding_checklists')
-            .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
         } else {
-          const next = { ...checklist, confidentiality_agreement: true, confidentiality_url: filename,
-                         volunteer_uploads: (checklist.volunteer_uploads || []).filter(k => k !== 'confidentiality_agreement') }
-          setChecklist(next)
-          await supabase.from('onboarding_checklists')
-            .upsert({ applicant_id: applicantId, ...next, updated_at: new Date().toISOString() }, { onConflict: 'applicant_id' })
+          setChecklist(prev => ({ ...prev, confidentiality_agreement: true, confidentiality_url: filename }))
         }
+        await saveGeneratedForm(applicantId, { key: 'confidentiality_agreement', urlKey: 'confidentiality_url' }, filename)
 
         await audit('confidentiality_agreement_signed', 'applicant', applicantId, printed_name,
           `Signed by ${printed_name} on ${date_signed}`)
@@ -1947,8 +1934,15 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
   async function saveOnboardProgress(applicantId, patch) {
     setSavingStep(true)
-    await supabase.from('volunteer_applications').update(patch).eq('id', applicantId)
+    setSaveError(null)
+    const { error } = await supabase.from('volunteer_applications').update(patch).eq('id', applicantId)
     setSavingStep(false)
+    if (error) {
+      setSaveError(error.message)
+      msg(error.message, 'error')
+      return false
+    }
+    return true
   }
 
   // ─── Admin notes (application/needs/wants) ────────────────────────────────
@@ -2214,6 +2208,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
       throw new Error('Invalid file upload')
     }
 
+    const tooBig = filesArr.find(file => file.size > MAX_FILE_SIZE)
+    if (tooBig) throw new Error(`${tooBig.name} is larger than 5 MB`)
+
     const zip = new JSZip()
 
     for (const file of filesArr) {
@@ -2237,6 +2234,32 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   // ─── Onboarding checklist: multi-file documents ───────────────────────────
+  // Writes only the generated form's own columns (approval + path) plus its
+  // "volunteer uploaded" flag. Upserting the whole checklist from React state
+  // here used to revert a volunteer's newer upload or another admin's approval
+  // made after this page loaded.
+  async function saveGeneratedForm(applicantId, item, filename) {
+    const { error } = await supabase.from('onboarding_checklists')
+      .upsert({
+        applicant_id: applicantId,
+        [item.key]: true,
+        [item.urlKey]: filename,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'applicant_id' })
+    if (error) throw error
+
+    // Clear just this item's volunteer-upload flag, if set.
+    const { data: row } = await supabase.from('onboarding_checklists')
+      .select('volunteer_uploads')
+      .eq('applicant_id', applicantId)
+      .maybeSingle()
+    if ((row?.volunteer_uploads || []).includes(item.key)) {
+      await supabase.from('onboarding_checklists')
+        .update({ volunteer_uploads: row.volunteer_uploads.filter(k => k !== item.key) })
+        .eq('applicant_id', applicantId)
+    }
+  }
+
   // Re-reads the item's current path/flag from the DB right before changing it,
   // so a document the volunteer uploaded while this page was open isn't lost.
   async function getFreshItemState(applicantId, item) {
@@ -2303,6 +2326,9 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   // Adds the picked files to whatever is already on the item.
   async function handleFileUpload(applicantId, item, filesArr) {
     if (!filesArr.length || !item.bucket || !item.urlKey) return
+
+    const tooBig = filesArr.find(file => file.size > MAX_FILE_SIZE)
+    if (tooBig) { msg(`${tooBig.name} is larger than 5 MB`, 'error'); return }
 
     setUploadingKey(item.key)
 
@@ -2820,6 +2846,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
 
     setSelected(applicant)
     setOnboardStep(1)
+    setSaveError(null)
     setChecklist(EMPTY_CHECKLIST)
     setChecklistFiles({})
     setNotesDraft(a.notes || '')
@@ -3001,9 +3028,13 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
   }
 
   function SavedBadge() {
-    return savingStep
-      ? <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>saving…</span>
-      : <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600 }}>✓ saved</span>
+    if (savingStep) {
+      return <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic' }}>saving…</span>
+    }
+    if (saveError) {
+      return <span style={{ fontSize: '0.7rem', color: C.danger, fontWeight: 600 }}>not saved</span>
+    }
+    return <span style={{ fontSize: '0.7rem', color: C.light, fontWeight: 600 }}>✓ saved</span>
   }
 
   function FileRow({ item, applicantId }) {
@@ -3071,6 +3102,8 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 type="date"
                 value={onboardForm.tb_exp && onboardForm.tb_exp !== 'N/A' && onboardForm.tb_exp !== 'expired' ? onboardForm.tb_exp : ''}
                 onChange={e => setOnboardForm(f => ({ ...f, tb_exp: e.target.value }))}
+                onBlur={e => saveOnboardProgress(applicantId, { onboard_affil_data: buildAffilData() })}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
                 title="Expiration Date"
                 style={{ width: '140px', padding: '0.25rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }}
               />
@@ -3963,7 +3996,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
                 {onboardForm.affiliation && <AffiliationExtras onboardForm={onboardForm} setOnboardForm={setOnboardForm} labelStyle={labelStyle} inputStyle={inputStyle} secLabel={secLabel} />}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() }); setOnboardStep(2) }} disabled={!onboardForm.affiliation} style={solidBtn(C.blue, !onboardForm.affiliation)}>Save &amp; Next</button>
+                  <button onClick={async () => { const ok = await saveOnboardProgress(applicant.id, { onboard_affiliation: onboardForm.affiliation, onboard_affil_data: buildAffilData() }); if (ok) setOnboardStep(2) }} disabled={!onboardForm.affiliation || savingStep} style={solidBtn(C.blue, !onboardForm.affiliation || savingStep)}>Save &amp; Next</button>
                 </div>
               </div>
             )}
@@ -3989,7 +4022,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                   <button onClick={() => setOnboardStep(1)} style={ghostBtn()}>Back</button>
-                  <button onClick={async () => { await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null }); setOnboardStep(3) }} disabled={!step2Valid} style={solidBtn(C.blue, !step2Valid)}>Save &amp; Next</button>
+                  <button onClick={async () => { const ok = await saveOnboardProgress(applicant.id, { onboard_default_role: onboardForm.default_role || null }); if (ok) setOnboardStep(3) }} disabled={!step2Valid || savingStep} style={solidBtn(C.blue, !step2Valid || savingStep)}>Save &amp; Next</button>
                 </div>
               </div>
             )}

@@ -890,6 +890,7 @@ function VolunteerPageInner() {
   const [onboardingFormModal,  setOnboardingFormModal]  = useState(null)   // { itemKey } | null
   const [onboardingFormSaving, setOnboardingFormSaving] = useState(false)
   const onboardingFormIframeRef = useRef(null)
+  const onboardingFormSavingRef = useRef(false)   // guards duplicate posts before state updates
 
   // ── Schedule tab state (lazy) ─────────────────────────────────────────────
   const [schedule, setSchedule] = useState([])
@@ -1538,11 +1539,21 @@ function VolunteerPageInner() {
     async function onMessage(e) {
       if (!e.data || !onboardingFormModal || !onboardingApp?.id) return
 
+      // Only accept PDFs from our own origin and from the form iframe — the
+      // listener is on window, so without this any page/frame could inject a
+      // document into the currently open applicant's checklist.
+      if (e.origin !== window.location.origin) return
+      if (onboardingFormIframeRef.current?.contentWindow && e.source !== onboardingFormIframeRef.current.contentWindow) return
+
       const type = e.data.type
       if (type !== 'parking_pass_pdf' && type !== 'confidentiality_agreement_pdf') return
 
       const item = ONBOARDING_FORM_DOCS.find(d => `${d.form}_pdf` === type)
       if (!item) return
+
+      // A form that posts twice (double click, resubmit) must not upload twice.
+      if (onboardingFormSavingRef.current) return
+      onboardingFormSavingRef.current = true
 
       setOnboardingFormSaving(true)
       try {
@@ -1590,6 +1601,7 @@ function VolunteerPageInner() {
           { type: `${item.form}_error`, message: err.message }, '*'
         )
       }
+      onboardingFormSavingRef.current = false
       setOnboardingFormSaving(false)
     }
 
@@ -1598,6 +1610,7 @@ function VolunteerPageInner() {
   }, [onboardingFormModal, onboardingApp, onboardingChecklist])
 
   function openOnboardingForm(item) {
+    onboardingFormSavingRef.current = false
     setOnboardingFormModal({ itemKey: item.key })
     setOnboardingFormSaving(false)
   }
@@ -1616,11 +1629,43 @@ function VolunteerPageInner() {
     }
   }
 
-  // Writes the item's full file list as a new zip, points the checklist at it
-  // through the volunteer RPC (which also clears that item's approval), then
-  // drops the zip it replaces. An empty list stores an empty zip — the RPC
-  // can't clear a path outright, and an empty "folder" reads as no files.
+  // Writes the item's full file list as a new zip and points the checklist at
+  // it through the volunteer RPC (which also clears that item's approval), then
+  // drops the zip it replaces. An empty list clears the document's path with a
+  // dedicated RPC — storing an empty zip left the checklist pointing at a
+  // document with no files, which the required-document counter counted as
+  // present and neither UI could remove.
   async function commitOnboardingFiles(item, oldPath, files) {
+    if (files.length === 0) {
+      const { error } = await supabase.rpc('volunteer_clear_checklist_file', {
+        p_applicant_id: onboardingApp.id,
+        p_item_key: item.key,
+      })
+      if (error) throw error
+
+      if (oldPath) {
+        const { error: delErr } = await supabase.storage.from(item.bucket).remove([oldPath])
+        if (delErr) console.warn(`Could not delete old ${item.label} file:`, delErr)
+      }
+
+      setOnboardingChecklist(prev => {
+        if (!prev) return prev
+        const next = {
+          ...prev,
+          [item.key]: false,
+          [item.urlKey]: null,
+        }
+        next.volunteer_uploads = (prev.volunteer_uploads || []).filter(k => k !== item.key)
+        return next
+      })
+      setOnboardingFiles(prev => {
+        const next = { ...prev }
+        delete next[item.key]
+        return next
+      })
+      return
+    }
+
     const newPath = await writeChecklistZip(supabase, item.bucket, onboardingApp.id, item.key, files)
 
     const { error } = await supabase.rpc('volunteer_set_checklist_file', {
@@ -1876,8 +1921,17 @@ function VolunteerPageInner() {
   async function handleSaveTbExp(value) {
     if (!user) return
     const cleaned = (value || '').trim()
-    const nextValue = cleaned || null
     const currentValue = profile?.tb_exp || null
+
+    // 'N/A' and 'expired' are sentinels, not dates: the date input renders
+    // them as blank, so a plain focus/blur would otherwise write null over
+    // the sentinel and lose the "not required for this position" marker.
+    if (!cleaned && (currentValue === 'N/A' || currentValue === 'expired')) {
+      setTbExpDraft(currentValue)
+      return
+    }
+
+    const nextValue = cleaned || null
     if (currentValue === nextValue) return
 
     const { error } = await supabase.from('profiles').update({ tb_exp: nextValue }).eq('id', user.id)
@@ -1890,11 +1944,14 @@ function VolunteerPageInner() {
 
     // Changing an approved TB date invalidates that approval. Clear it the
     // same way replacing the TB file does, so an admin reviews the new date.
+    // This has to go through an RPC: volunteers only have SELECT access to
+    // onboarding_checklists, so a direct update would silently match 0 rows
+    // (no error) and leave the item approved on the server.
     if (onboardingApp?.id && onboardingChecklist?.tb_test === true) {
-      const { error: checklistError } = await supabase
-        .from('onboarding_checklists')
-        .update({ tb_test: false, updated_at: new Date().toISOString() })
-        .eq('applicant_id', onboardingApp.id)
+      const { error: checklistError } = await supabase.rpc('volunteer_clear_checklist_approval', {
+        p_applicant_id: onboardingApp.id,
+        p_item_key: 'tb_test',
+      })
 
       if (checklistError) {
         showToast(`TB expiration updated, but approval could not be cleared: ${checklistError.message}`, 'error')
