@@ -3621,6 +3621,7 @@ export default function Pipeline({ supabase, profile, onVolunteerCreated }) {
             <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>Review this application and decide whether to schedule an interview or reject it.</p>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <button onClick={() => moveToStage(applicant, 'interview')} disabled={movingStage} style={outlineBtn(C.warn)}>Move to Interview</button>
+              <button onClick={() => moveToStage(applicant, 'interview', {silent: true})} disabled={movingStage} style={outlineBtn(C.muted)}>Move to Interview (Silent)</button>
               <button onClick={() => openRejectModal(applicant)} disabled={movingStage} style={outlineBtn(C.danger)}>Reject Application</button>
             </div>
           </div>
