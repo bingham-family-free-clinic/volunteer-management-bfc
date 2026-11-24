@@ -2337,9 +2337,10 @@ function VolunteerPageInner() {
                     // Only an in-flight upload/remove blocks the controls —
                     // "not needed" and already-approved items stay usable.
                     const disabled       = rowBusy
-                    // "Not needed" items keep their grayed-out look but remain
-                    // interactive: the volunteer may still upload documents.
-                    const dimmed         = notNeeded || rowBusy
+                    // "Not needed" items only gray out the card's border and
+                    // title — buttons/fields keep their normal colors and stay
+                    // interactive. Only in-flight work dims the controls.
+                    const dimmed         = rowBusy
                     // The TB expiration date remains editable after approval and
                     // even when the TB test is not needed for the position.
                     // Changing it clears that approval for admin review.
@@ -2358,14 +2359,13 @@ function VolunteerPageInner() {
                         style={{
                           padding: '0.85rem 1rem',
                           borderRadius: '10px',
-                          border: `1px solid ${blueCard ? '#0369a155' : 'var(--border)'}`,
-                          background: blueCard ? '#0369a108' : notNeeded ? 'var(--bg)' : 'var(--surface)',
-                          opacity: notNeeded && !blueCard ? 0.6 : 1,
+                          border: `1px solid ${blueCard ? '#0369a155' : notNeeded ? '#9ca3af' : 'var(--border)'}`,
+                          background: blueCard ? '#0369a108' : 'var(--surface)',
                           transition: 'all 0.15s',
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.9rem', fontWeight: blueCard ? 600 : 500 }}>
+                          <span style={{ fontSize: '0.9rem', fontWeight: blueCard ? 600 : 500, color: notNeeded && !blueCard ? 'var(--muted)' : 'var(--text)' }}>
                             {item.label}
                             {isRequired && <span style={{ color: '#0369a1', fontWeight: 700 }}> *</span>}
                           </span>
